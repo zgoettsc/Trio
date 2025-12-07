@@ -727,6 +727,14 @@
 		FE41E4D629463EE20047FD55 /* NightscoutPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE41E4D529463EE20047FD55 /* NightscoutPreferences.swift */; };
 		FE66D16B291F74F8005D6F77 /* Bundle+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE66D16A291F74F8005D6F77 /* Bundle+Extensions.swift */; };
 		FEFFA7A22929FE49007B8193 /* UIDevice+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFFA7A12929FE49007B8193 /* UIDevice+Extensions.swift */; };
+		CLAUDE000112C5AABB00CLAUDE /* ClaudeInsightsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLAUDE000012C5AABB00CLAUDE /* ClaudeInsightsDataFlow.swift */; };
+		CLAUDE000212C5AABB00CLAUDE /* ClaudeInsightsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLAUDE000022C5AABB00CLAUDE /* ClaudeInsightsStateModel.swift */; };
+		CLAUDE000312C5AABB00CLAUDE /* ClaudeInsightsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLAUDE000032C5AABB00CLAUDE /* ClaudeInsightsProvider.swift */; };
+		CLAUDE000412C5AABB00CLAUDE /* ClaudeInsightsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLAUDE000042C5AABB00CLAUDE /* ClaudeInsightsRootView.swift */; };
+		CLAUDE000512C5AABB00CLAUDE /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLAUDE000052C5AABB00CLAUDE /* ChatView.swift */; };
+		CLAUDE000612C5AABB00CLAUDE /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLAUDE000062C5AABB00CLAUDE /* ReportView.swift */; };
+		CLAUDE000712C5AABB00CLAUDE /* ClaudeAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLAUDE000072C5AABB00CLAUDE /* ClaudeAPIService.swift */; };
+		CLAUDE000812C5AABB00CLAUDE /* ClaudeDataExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLAUDE000082C5AABB00CLAUDE /* ClaudeDataExporter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1554,6 +1562,14 @@
 		FE41E4D529463EE20047FD55 /* NightscoutPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NightscoutPreferences.swift; sourceTree = "<group>"; };
 		FE66D16A291F74F8005D6F77 /* Bundle+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Bundle+Extensions.swift"; sourceTree = "<group>"; };
 		FEFFA7A12929FE49007B8193 /* UIDevice+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UIDevice+Extensions.swift"; sourceTree = "<group>"; };
+		CLAUDE000012C5AABB00CLAUDE /* ClaudeInsightsDataFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeInsightsDataFlow.swift; sourceTree = "<group>"; };
+		CLAUDE000022C5AABB00CLAUDE /* ClaudeInsightsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeInsightsStateModel.swift; sourceTree = "<group>"; };
+		CLAUDE000032C5AABB00CLAUDE /* ClaudeInsightsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeInsightsProvider.swift; sourceTree = "<group>"; };
+		CLAUDE000042C5AABB00CLAUDE /* ClaudeInsightsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeInsightsRootView.swift; sourceTree = "<group>"; };
+		CLAUDE000052C5AABB00CLAUDE /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		CLAUDE000062C5AABB00CLAUDE /* ReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
+		CLAUDE000072C5AABB00CLAUDE /* ClaudeAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeAPIService.swift; sourceTree = "<group>"; };
+		CLAUDE000082C5AABB00CLAUDE /* ClaudeDataExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeDataExporter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1890,6 +1906,7 @@
 				BD7DA9A32AE06DBA00601B20 /* BolusCalculatorConfig */,
 				DD09D4792C5986BA003FEA5D /* CalendarEventSettings */,
 				CEE9A64D2BBB411C00EB5194 /* Calibrations */,
+				CLAUDE000912C5AABB00CLAUDE /* ClaudeInsights */,
 				E42231DBF0DBE2B4B92D1B15 /* CarbRatioEditor */,
 				F75CB57ED6971B46F8756083 /* CGMSettings */,
 				0610F7D6D2EC00E3BA1569F0 /* ConfigEditor */,
@@ -2039,6 +2056,7 @@
 				CEB434E128B8F9BC00B70274 /* Bluetooth */,
 				BD7DB88C2D2C49FF003D3155 /* BolusCalculator */,
 				3862CC2C2743F9DC00BF832C /* Calendar */,
+				CLAUDE000A12C5AABB00CLAUDE /* Claude */,
 				E592A37E2CEEC046009A472C /* ContactImage */,
 				F90692A8274B7A980037068D /* HealthKit */,
 				3BF85FE22E427312000D7351 /* IOB */,
@@ -2278,6 +2296,15 @@
 				3862CC2D2743F9F700BF832C /* CalendarManager.swift */,
 			);
 			path = Calendar;
+			sourceTree = "<group>";
+		};
+		CLAUDE000A12C5AABB00CLAUDE /* Claude */ = {
+			isa = PBXGroup;
+			children = (
+				CLAUDE000072C5AABB00CLAUDE /* ClaudeAPIService.swift */,
+				CLAUDE000082C5AABB00CLAUDE /* ClaudeDataExporter.swift */,
+			);
+			path = Claude;
 			sourceTree = "<group>";
 		};
 		3883582E25EEAFC000E024B2 /* Views */ = {
@@ -3154,6 +3181,27 @@
 			children = (
 				CEE9A6512BBB418300EB5194 /* CalibrationsRootView.swift */,
 				CEE9A6522BBB418300EB5194 /* CalibrationsChart.swift */,
+			);
+			path = View;
+			sourceTree = "<group>";
+		};
+		CLAUDE000912C5AABB00CLAUDE /* ClaudeInsights */ = {
+			isa = PBXGroup;
+			children = (
+				CLAUDE000012C5AABB00CLAUDE /* ClaudeInsightsDataFlow.swift */,
+				CLAUDE000022C5AABB00CLAUDE /* ClaudeInsightsStateModel.swift */,
+				CLAUDE000032C5AABB00CLAUDE /* ClaudeInsightsProvider.swift */,
+				CLAUDE000B12C5AABB00CLAUDE /* View */,
+			);
+			path = ClaudeInsights;
+			sourceTree = "<group>";
+		};
+		CLAUDE000B12C5AABB00CLAUDE /* View */ = {
+			isa = PBXGroup;
+			children = (
+				CLAUDE000042C5AABB00CLAUDE /* ClaudeInsightsRootView.swift */,
+				CLAUDE000052C5AABB00CLAUDE /* ChatView.swift */,
+				CLAUDE000062C5AABB00CLAUDE /* ReportView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -4588,6 +4636,14 @@
 				19D4E4EB29FC6A9F00351451 /* Charts.swift in Sources */,
 				BDC531162D10629000088832 /* ContactPicture.swift in Sources */,
 				FEFFA7A22929FE49007B8193 /* UIDevice+Extensions.swift in Sources */,
+				CLAUDE000112C5AABB00CLAUDE /* ClaudeInsightsDataFlow.swift in Sources */,
+				CLAUDE000212C5AABB00CLAUDE /* ClaudeInsightsStateModel.swift in Sources */,
+				CLAUDE000312C5AABB00CLAUDE /* ClaudeInsightsProvider.swift in Sources */,
+				CLAUDE000412C5AABB00CLAUDE /* ClaudeInsightsRootView.swift in Sources */,
+				CLAUDE000512C5AABB00CLAUDE /* ChatView.swift in Sources */,
+				CLAUDE000612C5AABB00CLAUDE /* ReportView.swift in Sources */,
+				CLAUDE000712C5AABB00CLAUDE /* ClaudeAPIService.swift in Sources */,
+				CLAUDE000812C5AABB00CLAUDE /* ClaudeDataExporter.swift in Sources */,
 				BD4E1A7C2D3686D900D21626 /* StartEndMarkerSetup.swift in Sources */,
 				F90692D3274B9A130037068D /* AppleHealthKitRootView.swift in Sources */,
 				BDF34F852C10C62E00D51995 /* GlucoseData.swift in Sources */,
