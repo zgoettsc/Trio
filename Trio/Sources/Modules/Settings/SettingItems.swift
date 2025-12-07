@@ -326,7 +326,20 @@ enum SettingItems {
             path: ["Services", "Nightscout", "Fetch and Remote Control"]
         ),
         SettingItem(title: "Tidepool", view: .serviceSettings, path: ["Services"]),
-        SettingItem(title: "Apple Health", view: .healthkit, path: ["Services"])
+        SettingItem(title: "Apple Health", view: .healthkit, path: ["Services"]),
+        SettingItem(
+            title: "Claude Insights",
+            view: .claudeInsights,
+            searchContents: [
+                "AI Analysis",
+                "Ask Claude",
+                "Weekly Report",
+                "Quick Analysis",
+                "Diabetes Patterns",
+                "Claude API"
+            ],
+            path: ["Services", "Claude Insights"]
+        )
     ]
 
     static var allItems: [SettingItem] {

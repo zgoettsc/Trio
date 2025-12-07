@@ -30,6 +30,22 @@ struct ServicesView: BaseView {
                 }
             )
             .listRowBackground(Color.chart)
+
+            Section(
+                header: Text("AI Analysis"),
+                content: {
+                    HStack {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(.purple)
+                        Text("Claude Insights")
+                    }
+                    .navigationLink(to: .claudeInsights, from: self)
+                },
+                footer: {
+                    Text("Get AI-powered analysis and recommendations for your diabetes data")
+                }
+            )
+            .listRowBackground(Color.chart)
         }
         .scrollContentBackground(.hidden)
         .background(appState.trioBackgroundColor(for: colorScheme))
