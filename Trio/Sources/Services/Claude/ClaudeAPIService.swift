@@ -133,15 +133,20 @@ final class ClaudeAPIService {
     }
 
     func getAPIKey() -> String? {
-        keychain.getValue(String.self, forKey: Self.apiKeyKey)
+        switch keychain.getValue(String.self, forKey: Self.apiKeyKey) {
+        case .success(let value):
+            return value
+        case .failure:
+            return nil
+        }
     }
 
     func setAPIKey(_ key: String?) {
-        keychain.setValue(key, forKey: Self.apiKeyKey)
+        _ = keychain.setValue(key, forKey: Self.apiKeyKey)
     }
 
     func clearAPIKey() {
-        keychain.setValue(nil as String?, forKey: Self.apiKeyKey)
+        _ = keychain.removeObject(forKey: Self.apiKeyKey)
     }
 
     // MARK: - API Calls

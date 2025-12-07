@@ -218,16 +218,18 @@ final class ClaudeDataExporter: Injectable {
     private func fetchCurrentSettings() async -> CurrentSettings {
         // Get settings from SettingsManager
         let settings = settingsManager.settings
+        let preferences = settingsManager.preferences
+        let pumpSettings = settingsManager.pumpSettings
 
         // These would typically come from the profile, using defaults for now
         return CurrentSettings(
             basalProfile: [], // TODO: Fetch from profile storage
             isfProfile: [],   // TODO: Fetch from profile storage
             crProfile: [],    // TODO: Fetch from profile storage
-            targetGlucose: Int(settings.low + settings.high) / 2,
-            maxIOB: Double(truncating: settings.maxIOB as NSNumber),
-            maxBolus: Double(truncating: settings.maxBolus as NSNumber),
-            dia: Double(truncating: settings.insulinActionCurve as NSNumber)
+            targetGlucose: Int(truncating: (settings.low + settings.high) / 2 as NSNumber),
+            maxIOB: Double(truncating: preferences.maxIOB as NSNumber),
+            maxBolus: Double(truncating: pumpSettings.maxBolus as NSNumber),
+            dia: Double(truncating: pumpSettings.insulinActionCurve as NSNumber)
         )
     }
 
