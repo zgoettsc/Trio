@@ -42,13 +42,9 @@ struct NutritionAnalysisView: View {
             } else if let summary = summary {
                 summarySection(summary)
 
-                if let icrSection = icrAnalysisSection(summary) {
-                    icrSection
-                }
+                icrAnalysisSection(summary)
 
-                if let bgSection = bgOutcomesSection(summary) {
-                    bgSection
-                }
+                bgOutcomesSection(summary)
 
                 matchedDaysSection
             } else {
@@ -142,46 +138,48 @@ struct NutritionAnalysisView: View {
     // MARK: - ICR Analysis Section
 
     @ViewBuilder
-    private func icrAnalysisSection(_ summary: NutritionAnalysisSummary) -> some View? {
-        if let apparent = summary.averageApparentICR, let effective = summary.averageEffectiveICR {
-            Section {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "function")
-                            .foregroundColor(.purple)
-                        Text("ICR Analysis")
-                            .font(.headline)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
+    private func icrAnalysisSection(_ summary: NutritionAnalysisSummary) -> some View {
+        Group {
+            if let apparent = summary.averageApparentICR, let effective = summary.averageEffectiveICR {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("Current ICR (tuned to estimates):")
-                            Spacer()
-                            Text("1:\(String(format: "%.1f", apparent))g")
-                                .fontWeight(.medium)
+                            Image(systemName: "function")
+                                .foregroundColor(.purple)
+                            Text("ICR Analysis")
+                                .font(.headline)
                         }
-                        HStack {
-                            Text("True ICR (against actual carbs):")
-                            Spacer()
-                            Text("1:\(String(format: "%.1f", effective))g")
-                                .fontWeight(.medium)
-                                .foregroundColor(.blue)
-                        }
-                    }
-                    .font(.subheadline)
 
-                    if let adj = summary.suggestedICRAdjustment {
-                        Text("If switching to actual carbs for dosing, ICR would need to increase by ~\(String(format: "%.1f", adj))x")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Current ICR (tuned to estimates):")
+                                Spacer()
+                                Text("1:\(String(format: "%.1f", apparent))g")
+                                    .fontWeight(.medium)
+                            }
+                            HStack {
+                                Text("True ICR (against actual carbs):")
+                                Spacer()
+                                Text("1:\(String(format: "%.1f", effective))g")
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .font(.subheadline)
+
+                        if let adj = summary.suggestedICRAdjustment {
+                            Text("If switching to actual carbs for dosing, ICR would need to increase by ~\(String(format: "%.1f", adj))x")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                                .padding(.top, 2)
+                        }
                     }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Insulin to Carb Ratio")
+                } footer: {
+                    Text("Your current ICR works because it compensates for systematic under-counting. The 'true' ICR is what you'd need if using Cronometer carbs directly.")
                 }
-                .padding(.vertical, 4)
-            } header: {
-                Text("Insulin to Carb Ratio")
-            } footer: {
-                Text("Your current ICR works because it compensates for systematic under-counting. The 'true' ICR is what you'd need if using Cronometer carbs directly.")
             }
         }
     }
@@ -189,52 +187,54 @@ struct NutritionAnalysisView: View {
     // MARK: - BG Outcomes Section
 
     @ViewBuilder
-    private func bgOutcomesSection(_ summary: NutritionAnalysisSummary) -> some View? {
-        if let avgBG = summary.averageDailyBG {
-            Section {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "waveform.path.ecg")
-                            .foregroundColor(.red)
-                        Text("Daily BG Summary")
-                            .font(.headline)
-                    }
-
-                    HStack(spacing: 24) {
-                        VStack {
-                            Text("Avg Daily BG")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("\(avgBG)")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(avgBG > 180 ? .red : avgBG > 140 ? .orange : .green)
-                            Text("mg/dL")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+    private func bgOutcomesSection(_ summary: NutritionAnalysisSummary) -> some View {
+        Group {
+            if let avgBG = summary.averageDailyBG {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "waveform.path.ecg")
+                                .foregroundColor(.red)
+                            Text("Daily BG Summary")
+                                .font(.headline)
                         }
 
-                        if let avgMax = summary.averageDailyMaxBG {
+                        HStack(spacing: 24) {
                             VStack {
-                                Text("Avg Daily Max")
+                                Text("Avg Daily BG")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text("\(avgMax)")
+                                Text("\(avgBG)")
                                     .font(.title2)
                                     .fontWeight(.bold)
-                                    .foregroundColor(avgMax > 250 ? .red : avgMax > 180 ? .orange : .green)
+                                    .foregroundColor(avgBG > 180 ? .red : avgBG > 140 ? .orange : .green)
                                 Text("mg/dL")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
+
+                            if let avgMax = summary.averageDailyMaxBG {
+                                VStack {
+                                    Text("Avg Daily Max")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(avgMax)")
+                                        .font(.title2)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(avgMax > 250 ? .red : avgMax > 180 ? .orange : .green)
+                                    Text("mg/dL")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
                         }
                     }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Glucose Outcomes")
+                } footer: {
+                    Text("Average BG and daily peak across matched days.")
                 }
-                .padding(.vertical, 4)
-            } header: {
-                Text("Glucose Outcomes")
-            } footer: {
-                Text("Average BG and daily peak across matched days.")
             }
         }
     }
