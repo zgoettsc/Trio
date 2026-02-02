@@ -168,6 +168,87 @@ The nutrition reading feature is **strictly informational**. Apple Health nutrit
 
 ---
 
+### Phase 1C: Low Treatment Detection & Real-Time Nutrition Monitoring
+
+**Date:** February 2026
+
+**Changes:**
+- Added low BG episode detection with trend analysis and recovery tracking
+- Estimated treatment carbs are subtracted from Cronometer totals for accurate meal-carb comparison
+- Added HKObserverQuery for real-time nutrition change detection (infers meal times from snapshot deltas)
+- Analysis view shows low treatment patterns: over-correction rate, avg nadir, recovery rise, etc.
+- Export report includes low treatment and adjusted sections
+
+#### New Files Created:
+
+1. **`Trio/Sources/Models/NutritionSnapshot.swift`**
+   - `NutritionSnapshot` — point-in-time cumulative nutrition totals from Apple Health for a given day
+   - `InferredMealEvent` — meal event derived from delta between consecutive snapshots (approximate meal timing)
+   - `LowEpisode` — detected low BG episode with full recovery tracking:
+     - `startTime`, `nadirTime`, `nadirBG` — when and how low
+     - `recoveryTime`, `recoveryBG` — when BG returned above threshold
+     - `peakAfterTime`, `peakAfterBG` — highest BG within 3h of nadir (over-correction detection)
+     - Computed: `overCorrected` (peak > 180), `recoveryRise`, `durationMinutes`
+   - `LowTreatmentSummary` — aggregate stats across all episodes:
+     - `totalEpisodes`, `episodesPerDay`, `averageNadir`, `averageDurationMinutes`
+     - `overCorrectionCount`, `overCorrectionRate`, `averageRecoveryRise`, `averagePeakAfterLow`
+     - `estimatedDailyTreatmentCarbs`, `correctionPattern` (human-readable)
+   - `NutritionSnapshotStore` — singleton file-based persistence for snapshots (JSON, 14-day retention)
+     - `saveSnapshot()`, `loadSnapshots()`, `snapshotsForDate()`
+     - `inferredMealEvents(for:)` — derives meal timing from snapshot deltas
+
+#### Modified Files:
+
+2. **`Trio/Sources/Models/NutritionAnalysis.swift`**
+   - `MatchedMealAnalysis` — added:
+     - `lowEpisodes: [LowEpisode]` — detected low episodes for the day
+     - `estimatedTreatmentCarbs: Double` — estimated carbs consumed to treat lows
+     - Computed: `adjustedActualCarbs` (actual minus treatment), `adjustedEstimationRatio`, `adjustedMissedCarbs`
+   - `NutritionAnalysisSummary` — added:
+     - `lowTreatmentSummary: LowTreatmentSummary?` — aggregate low treatment stats
+     - `adjustedAverageEstimationRatio: Double?` — ratio excluding low treatment carbs
+     - `adjustedAverageActualCarbs: Double?` — meal-only actual carbs
+     - Computed: `adjustedEstimationDescription`
+
+3. **`Trio/Sources/Services/HealthKit/NutritionAnalysisService.swift`**
+   - Added `detectLowEpisodes()` — scans glucose readings for low episodes:
+     - Detects BG below `lowGlucose` setting threshold (default 72 mg/dL)
+     - Also detects "trending low" — BG < threshold+10 AND dropping > 1 mg/dL/min
+     - Tracks nadir, recovery, and 3-hour post-nadir peak for over-correction detection
+     - Handles episodes that don't recover by end of day
+   - Added `estimateTreatmentCarbs()` — estimates carbs per episode from BG recovery magnitude:
+     - Uses ~4 mg/dL rise per gram of fast carbs heuristic
+     - Clamped to 8-60g range, defaults to 15g if no recovery data
+   - Updated `matchByDay()` to detect low episodes per day and compute treatment carbs
+   - Updated `computeSummary()` to produce `LowTreatmentSummary` and adjusted ratios
+
+4. **`Trio/Sources/Services/HealthKit/NutritionHealthService.swift`**
+   - Protocol: added `startObservingNutritionChanges()`, `stopObservingNutritionChanges()`, `inferredMealEvents(for:)`
+   - Implementation: `HKObserverQuery` on `dietaryCarbohydrates` with `enableBackgroundDelivery(.immediate)`
+   - On notification: queries today's cumulative totals, saves `NutritionSnapshot`
+   - Records initial snapshot when observation starts
+   - `inferredMealEvents(for:)` delegates to `NutritionSnapshotStore`
+
+5. **`Trio/Sources/Modules/HealthKit/HealthKitStateModel.swift`**
+   - Starts nutrition observer when `readNutritionFromHealth` is toggled on
+   - Stops observer when toggled off
+   - Starts observer on initial load if reading is already enabled
+
+6. **`Trio/Sources/Modules/HealthKit/View/NutritionAnalysisView.swift`**
+   - Added "Low BG Treatment Analysis" section showing:
+     - Correction pattern headline (over-correction/mixed/good)
+     - Stats grid: total episodes, per day, avg nadir, avg duration, avg rise, avg peak
+     - Estimated daily treatment carbs
+     - Over-correction count and warning
+   - Summary section now shows adjusted ratio when low treatments detected
+   - Daily rows show low episode count badge, "Low Tx" column, adjusted missed carbs
+   - Export report includes: adjusted estimation section, low treatment patterns section, expanded daily breakdown with low tx and low count columns
+
+7. **`Trio.xcodeproj/project.pbxproj`**
+   - Added PBXFileReference, PBXBuildFile, PBXGroup, and PBXSourcesBuildPhase entries for `NutritionSnapshot.swift`
+
+---
+
 ## Architecture
 
 ### Data Flow
@@ -175,8 +256,16 @@ The nutrition reading feature is **strictly informational**. Apple Health nutrit
 ```
 Cronometer App
     |
-    v
+    v  (writes instantly, timestamped at midnight)
 Apple Health (HealthKit)
+    |
+    ├──> HKObserverQuery (background delivery)
+    |       |
+    |       v
+    |    NutritionSnapshotStore (records cumulative totals with real timestamps)
+    |       |
+    |       v
+    |    InferredMealEvent[] (approximate meal times from snapshot deltas)
     |
     v
 NutritionHealthService.fetchMeals()
@@ -194,9 +283,13 @@ NutritionAnalysisService.runAnalysis()
     |-- Fetches glucose from CoreData (GlucoseStored)
     |-- Fetches boluses from CoreData (BolusStored)
     |-- Matches by calendar day
+    |-- Detects low BG episodes from glucose data
+    |-- Estimates treatment carbs from BG recovery
+    |-- Computes adjusted ratios (actual - treatment carbs)
     |
     v
-MatchedMealAnalysis[] + NutritionAnalysisSummary (display in NutritionAnalysisView)
+MatchedMealAnalysis[] + NutritionAnalysisSummary + LowTreatmentSummary
+    (display in NutritionAnalysisView, export via share sheet)
 ```
 
 ### Settings
@@ -205,6 +298,7 @@ MatchedMealAnalysis[] + NutritionAnalysisSummary (display in NutritionAnalysisVi
 |---------|---------|---------|
 | `writeNutritionToHealth` | `true` | Send Trio carb/fat/protein entries to Apple Health |
 | `readNutritionFromHealth` | `false` | Read nutrition data from external apps via Apple Health |
+| `lowGlucose` | `72` | Low BG threshold (mg/dL) — used for low episode detection |
 
 ### File Structure
 
@@ -212,15 +306,16 @@ MatchedMealAnalysis[] + NutritionAnalysisSummary (display in NutritionAnalysisVi
 Trio/Sources/
 ├── Models/
 │   ├── HealthNutrition.swift          # Nutrition entry & day models
-│   └── NutritionAnalysis.swift        # Analysis result models
+│   ├── NutritionAnalysis.swift        # Analysis result models (with low treatment fields)
+│   └── NutritionSnapshot.swift        # Snapshot, inferred meals, low episodes, snapshot store
 ├── Services/HealthKit/
-│   ├── NutritionHealthService.swift   # HealthKit nutrition reading
-│   └── NutritionAnalysisService.swift # Trio vs Cronometer comparison
+│   ├── NutritionHealthService.swift   # HealthKit reading + HKObserverQuery
+│   └── NutritionAnalysisService.swift # Trio vs Cronometer comparison + low detection
 └── Modules/HealthKit/
     ├── HealthKitStateModel.swift       # State management (modified)
     └── View/
         ├── AppleHealthKitRootView.swift    # Nutrition display (modified)
-        └── NutritionAnalysisView.swift     # Analysis + export view
+        └── NutritionAnalysisView.swift     # Analysis + low treatment + export
 ```
 
 ---
@@ -230,23 +325,26 @@ Trio/Sources/
 ### Phase 2: Real-Time Nutrition Display
 - Show Cronometer nutrition alongside Trio's main glucose chart
 - Daily macro summary widget on home screen
+- Use inferred meal events (from snapshot deltas) to show approximate meal times
 
 ### Phase 3: Dosing Awareness (Informational)
 - Show "Cronometer says X carbs, you entered Y" at bolus time
-- Suggest carb entry based on recent Cronometer data
+- Suggest carb entry based on recent Cronometer data (using inferred meal events)
 - Still informational only — user manually confirms
 
 ### Phase 4: Dosing Integration
 - Option to use Apple Health carbs for COB calculation
 - Requires ICR recalibration based on analysis findings
 - Requires extensive safety review and user acknowledgment
-- Would need real-time meal detection (not just daily totals)
+- Would need real-time meal detection (snapshot-based inferred meals as foundation)
 
 ---
 
 ## Known Limitations
 
-1. **Cronometer midnight timestamps**: All Cronometer Apple Health entries have 00:00 timestamps. This prevents per-meal analysis. Even Cronometer Gold does not fix this for Apple Health sync.
-2. **No meal-level matching**: Because of the timestamp limitation, analysis is daily only. Individual meal accuracy cannot be assessed.
-3. **Bolus attribution**: Daily bolus totals include all non-SMB boluses, which may include correction boluses not tied to meals.
-4. **Source filtering**: Entries are filtered by `org.nightscout` bundle prefix. If other apps write nutrition with different bundle IDs, those entries will be included alongside Cronometer data.
+1. **Cronometer midnight timestamps**: All Cronometer Apple Health entries have 00:00 timestamps. This prevents per-meal analysis. Even Cronometer Gold does not fix this for Apple Health sync. The HKObserverQuery snapshot approach works around this by detecting when daily totals change.
+2. **Inferred meal timing resolution**: Depends on how frequently the HK observer fires and app is active. Background delivery is enabled but iOS may batch notifications. Typical resolution: 5-30 minutes.
+3. **Treatment carb estimation**: Uses a ~4 mg/dL per gram heuristic which varies by individual, glucose absorption speed, and whether insulin was also active. Estimates are approximate.
+4. **Low episode detection**: Uses a simple threshold + trend approach. May miss episodes where BG briefly dips and recovers, or count prolonged lows as a single episode when they were actually multiple.
+5. **Bolus attribution**: Daily bolus totals include all non-SMB boluses, which may include correction boluses not tied to meals.
+6. **Source filtering**: Entries are filtered by `org.nightscout` bundle prefix. If other apps write nutrition with different bundle IDs, those entries will be included alongside Cronometer data.

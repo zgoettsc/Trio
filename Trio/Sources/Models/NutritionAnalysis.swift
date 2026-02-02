@@ -25,6 +25,10 @@ struct MatchedMealAnalysis: Identifiable, Equatable {
     let bgAtMeal: Int? // Daily average BG
     let bgPeak: Int? // Daily max BG
 
+    // Low treatment analysis
+    let lowEpisodes: [LowEpisode]
+    let estimatedTreatmentCarbs: Double // Estimated carbs consumed to treat lows
+
     init(
         id: UUID = UUID(),
         date: Date,
@@ -37,7 +41,9 @@ struct MatchedMealAnalysis: Identifiable, Equatable {
         nutritionSource: String = "",
         bolusInsulin: Double = 0,
         bgAtMeal: Int? = nil,
-        bgPeak: Int? = nil
+        bgPeak: Int? = nil,
+        lowEpisodes: [LowEpisode] = [],
+        estimatedTreatmentCarbs: Double = 0
     ) {
         self.id = id
         self.date = date
@@ -51,6 +57,8 @@ struct MatchedMealAnalysis: Identifiable, Equatable {
         self.bolusInsulin = bolusInsulin
         self.bgAtMeal = bgAtMeal
         self.bgPeak = bgPeak
+        self.lowEpisodes = lowEpisodes
+        self.estimatedTreatmentCarbs = estimatedTreatmentCarbs
     }
 
     /// Ratio of entered carbs to actual carbs (e.g., 0.41 = entered 41% of actual)
@@ -62,6 +70,22 @@ struct MatchedMealAnalysis: Identifiable, Equatable {
     /// Carbs that were unaccounted for
     var missedCarbs: Double {
         max(0, actualCarbs - trioCarbs)
+    }
+
+    /// Cronometer carbs minus estimated low treatment carbs = meal-only carbs
+    var adjustedActualCarbs: Double {
+        max(0, actualCarbs - estimatedTreatmentCarbs)
+    }
+
+    /// Adjusted ratio: Trio entered carbs vs meal-only actual carbs (excluding low treatments)
+    var adjustedEstimationRatio: Double {
+        guard adjustedActualCarbs > 0 else { return 0 }
+        return trioCarbs / adjustedActualCarbs
+    }
+
+    /// Adjusted missed carbs (excluding low treatment carbs from the gap)
+    var adjustedMissedCarbs: Double {
+        max(0, adjustedActualCarbs - trioCarbs)
     }
 
     /// Actual ICR based on actual carbs and insulin given
@@ -150,10 +174,24 @@ struct NutritionAnalysisSummary: Equatable {
     let averageDailyBG: Int?
     let averageDailyMaxBG: Int?
 
+    // Low treatment analysis
+    let lowTreatmentSummary: LowTreatmentSummary?
+
+    // Adjusted estimation (excluding low treatment carbs)
+    let adjustedAverageEstimationRatio: Double?
+    let adjustedAverageActualCarbs: Double?
+
     /// Human-readable estimation description
     var estimationDescription: String {
         let pct = Int(averageEstimationRatio * 100)
         return "You typically enter \(pct)% of actual carbs"
+    }
+
+    /// Adjusted description accounting for low treatment carbs
+    var adjustedEstimationDescription: String? {
+        guard let adjRatio = adjustedAverageEstimationRatio, adjRatio != averageEstimationRatio else { return nil }
+        let pct = Int(adjRatio * 100)
+        return "Excluding low treatments: you enter \(pct)% of meal carbs"
     }
 
     /// If we know the apparent ICR and the ratio, what should the real ICR be?

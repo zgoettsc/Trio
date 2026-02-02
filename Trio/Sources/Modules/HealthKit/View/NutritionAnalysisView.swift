@@ -43,6 +43,8 @@ struct NutritionAnalysisView: View {
             } else if let summary = summary {
                 summarySection(summary)
 
+                lowTreatmentSection(summary)
+
                 icrAnalysisSection(summary)
 
                 bgOutcomesSection(summary)
@@ -53,7 +55,7 @@ struct NutritionAnalysisView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("This analysis compares your daily Trio carb entries with actual nutrition data from Apple Health (Cronometer) to understand your carb estimation patterns.")
                             .font(.callout)
-                        Text("It matches days where both Trio and Cronometer have data, calculates how much you typically under- or over-estimate daily carbs, and shows daily BG averages.")
+                        Text("It also detects low BG episodes and estimates treatment carbs to separate low treatments from meal carb counting accuracy.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -121,6 +123,13 @@ struct NutritionAnalysisView: View {
                     .fontWeight(.semibold)
                     .foregroundColor(.orange)
 
+                // Adjusted ratio (if low treatments detected)
+                if let adjDesc = summary.adjustedEstimationDescription {
+                    Text(adjDesc)
+                        .font(.subheadline)
+                        .foregroundColor(.blue)
+                }
+
                 // Stats grid
                 LazyVGrid(columns: [
                     GridItem(.flexible()),
@@ -131,7 +140,11 @@ struct NutritionAnalysisView: View {
                     statCard("Avg Entered", value: "\(Int(summary.averageTrioCarbs))g/day")
                     statCard("Avg Actual", value: "\(Int(summary.averageActualCarbs))g/day")
                     statCard("Avg Missed", value: "\(Int(summary.averageMissedCarbs))g/day")
-                    statCard("Median Ratio", value: "\(Int(summary.medianEstimationRatio * 100))%")
+                    if let adjRatio = summary.adjustedAverageEstimationRatio {
+                        statCard("Adj. Ratio", value: "\(Int(adjRatio * 100))%")
+                    } else {
+                        statCard("Median Ratio", value: "\(Int(summary.medianEstimationRatio * 100))%")
+                    }
                 }
 
                 // Range
@@ -145,6 +158,81 @@ struct NutritionAnalysisView: View {
         } footer: {
             if summary.unmatchedTrioDays > 0 || summary.unmatchedHealthDays > 0 {
                 Text("\(summary.unmatchedTrioDays) Trio-only days and \(summary.unmatchedHealthDays) Cronometer-only days could not be matched.")
+            }
+        }
+    }
+
+    // MARK: - Low Treatment Section
+
+    @ViewBuilder
+    private func lowTreatmentSection(_ summary: NutritionAnalysisSummary) -> some View {
+        Group {
+            if let lows = summary.lowTreatmentSummary {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "arrow.down.heart")
+                                .foregroundColor(.red)
+                            Text("Low Treatment Patterns")
+                                .font(.headline)
+                        }
+
+                        // Key pattern finding
+                        Text(lows.correctionPattern)
+                            .font(.subheadline)
+                            .foregroundColor(lows.overCorrectionRate > 0.5 ? .red : lows.overCorrectionRate > 0.25 ? .orange : .green)
+
+                        // Stats
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible()),
+                            GridItem(.flexible())
+                        ], spacing: 8) {
+                            statCard("Episodes", value: "\(lows.totalEpisodes)")
+                            statCard("Per Day", value: String(format: "%.1f", lows.episodesPerDay))
+                            statCard("Avg Nadir", value: "\(lows.averageNadir)")
+                        }
+
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible()),
+                            GridItem(.flexible())
+                        ], spacing: 8) {
+                            statCard("Avg Duration", value: "\(lows.averageDurationMinutes)m")
+                            if let rise = lows.averageRecoveryRise {
+                                statCard("Avg Rise", value: "+\(rise)")
+                            }
+                            if let peak = lows.averagePeakAfterLow {
+                                statCard("Avg Peak", value: "\(peak)")
+                            }
+                        }
+
+                        // Treatment carb estimate
+                        HStack {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.secondary)
+                            Text("Est. ~\(Int(lows.estimatedDailyTreatmentCarbs))g/day in low treatment carbs")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Over-correction detail
+                        if lows.overCorrectionCount > 0 {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundColor(.orange)
+                                Text("\(lows.overCorrectionCount) of \(lows.totalEpisodes) lows spiked above 180 after treatment")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Low BG Treatment Analysis")
+                } footer: {
+                    Text("Low episodes are detected from CGM data (BG below your low threshold or trending rapidly toward it). Treatment carbs are estimated from BG recovery magnitude and subtracted from Cronometer totals to get your true meal-carb estimation accuracy.")
+                }
             }
         }
     }
@@ -275,6 +363,15 @@ struct NutritionAnalysisView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 Spacer()
+                if !day.lowEpisodes.isEmpty {
+                    Text("\(day.lowEpisodes.count) low\(day.lowEpisodes.count == 1 ? "" : "s")")
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.red.opacity(0.8))
+                        .cornerRadius(4)
+                }
                 Text("\(Int(day.estimationRatio * 100))%")
                     .font(.headline)
                     .foregroundColor(day.estimationRatio < 0.5 ? .red : day.estimationRatio < 0.8 ? .orange : .green)
@@ -297,11 +394,21 @@ struct NutritionAnalysisView: View {
                         .font(.subheadline)
                         .fontWeight(.medium)
                 }
+                if day.estimatedTreatmentCarbs > 0 {
+                    VStack(alignment: .leading) {
+                        Text("Low Tx")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("~\(Int(day.estimatedTreatmentCarbs))g")
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                    }
+                }
                 VStack(alignment: .leading) {
-                    Text("Missed")
+                    Text(day.estimatedTreatmentCarbs > 0 ? "Adj. Missed" : "Missed")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Text("\(Int(day.missedCarbs))g")
+                    Text("\(Int(day.estimatedTreatmentCarbs > 0 ? day.adjustedMissedCarbs : day.missedCarbs))g")
                         .font(.subheadline)
                         .foregroundColor(.orange)
                 }
@@ -378,6 +485,37 @@ struct NutritionAnalysisView: View {
             "Total missed carbs: \(Int(summary.totalMissedCarbs))g",
         ]
 
+        if let adjRatio = summary.adjustedAverageEstimationRatio {
+            lines += [
+                "",
+                "=== ADJUSTED (EXCLUDING LOW TREATMENTS) ===",
+                "Adjusted ratio (meal carbs only): \(Int(adjRatio * 100))%",
+            ]
+            if let adjActual = summary.adjustedAverageActualCarbs {
+                lines.append("Avg meal carbs (Cronometer minus low tx): \(Int(adjActual))g/day")
+            }
+        }
+
+        if let lows = summary.lowTreatmentSummary {
+            lines += [
+                "",
+                "=== LOW TREATMENT PATTERNS ===",
+                "Total low episodes: \(lows.totalEpisodes)",
+                "Episodes per day: \(String(format: "%.1f", lows.episodesPerDay))",
+                "Average nadir: \(lows.averageNadir) mg/dL",
+                "Average duration: \(lows.averageDurationMinutes) min",
+                "Estimated daily treatment carbs: ~\(Int(lows.estimatedDailyTreatmentCarbs))g",
+            ]
+            if let rise = lows.averageRecoveryRise {
+                lines.append("Average BG rise after treatment: +\(rise) mg/dL")
+            }
+            if let peak = lows.averagePeakAfterLow {
+                lines.append("Average peak after low: \(peak) mg/dL")
+            }
+            lines.append("Over-corrections (spike >180): \(lows.overCorrectionCount)/\(lows.totalEpisodes) (\(Int(lows.overCorrectionRate * 100))%)")
+            lines.append(lows.correctionPattern)
+        }
+
         if let apparent = summary.averageApparentICR, let effective = summary.averageEffectiveICR {
             lines += [
                 "",
@@ -409,15 +547,18 @@ struct NutritionAnalysisView: View {
         }
 
         lines += ["", "=== DAILY BREAKDOWN ==="]
-        lines.append("Date | Entered | Actual | Missed | Ratio | Bolus | Avg BG | Max BG")
-        lines.append(String(repeating: "-", count: 75))
+        lines.append("Date | Entered | Actual | Low Tx | Adj.Missed | Ratio | Lows | Bolus | Avg BG | Max BG")
+        lines.append(String(repeating: "-", count: 95))
 
         for day in days {
             let dayStr = dateFormatter.string(from: day.date)
             let bolusStr = day.bolusInsulin > 0 ? String(format: "%.1fU", day.bolusInsulin) : "-"
             let avgBGStr = day.averageBG.map { "\($0)" } ?? "-"
             let maxBGStr = day.maxBG.map { "\($0)" } ?? "-"
-            lines.append("\(dayStr) | \(Int(day.trioCarbs))g | \(Int(day.actualCarbs))g | \(Int(day.missedCarbs))g | \(Int(day.estimationRatio * 100))% | \(bolusStr) | \(avgBGStr) | \(maxBGStr)")
+            let lowTxStr = day.estimatedTreatmentCarbs > 0 ? "~\(Int(day.estimatedTreatmentCarbs))g" : "-"
+            let adjMissed = day.estimatedTreatmentCarbs > 0 ? "\(Int(day.adjustedMissedCarbs))g" : "\(Int(day.missedCarbs))g"
+            let lowCount = day.lowEpisodes.isEmpty ? "-" : "\(day.lowEpisodes.count)"
+            lines.append("\(dayStr) | \(Int(day.trioCarbs))g | \(Int(day.actualCarbs))g | \(lowTxStr) | \(adjMissed) | \(Int(day.estimationRatio * 100))% | \(lowCount) | \(bolusStr) | \(avgBGStr) | \(maxBGStr)")
         }
 
         return lines.joined(separator: "\n")

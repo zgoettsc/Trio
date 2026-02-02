@@ -79,7 +79,9 @@ extension AppleHealthKit {
                 guard let self = self else { return }
                 if value {
                     self.requestNutritionPermissionsAndFetch()
+                    self.nutritionHealthService.startObservingNutritionChanges()
                 } else {
+                    self.nutritionHealthService.stopObservingNutritionChanges()
                     Task { @MainActor in
                         self.recentMeals = []
                     }
@@ -103,9 +105,10 @@ extension AppleHealthKit {
                 self?.requestHealthMetricsPermissionsIfNeeded()
             }
 
-            // Load recent nutrition data if reading is enabled
+            // Load recent nutrition data and start observer if reading is enabled
             if readNutritionFromHealth {
                 fetchRecentNutrition()
+                nutritionHealthService.startObservingNutritionChanges()
             }
         }
 

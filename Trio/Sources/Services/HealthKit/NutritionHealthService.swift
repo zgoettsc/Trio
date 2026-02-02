@@ -18,6 +18,15 @@ protocol NutritionHealthService {
 
     /// Fetch meals from the last N hours (convenience method)
     func fetchRecentMeals(hours: Int) async throws -> [HealthNutritionMeal]
+
+    /// Start observing Apple Health for nutrition changes and record snapshots
+    func startObservingNutritionChanges()
+
+    /// Stop observing nutrition changes
+    func stopObservingNutritionChanges()
+
+    /// Get inferred meal events for a specific date from snapshot deltas
+    func inferredMealEvents(for date: Date) -> [InferredMealEvent]
 }
 
 final class BaseNutritionHealthService: NutritionHealthService, Injectable {
@@ -29,6 +38,12 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
 
     /// Bundle identifier prefix for Trio to filter out its own entries
     private let trioBundlePrefix = "org.nightscout"
+
+    /// Active observer query for nutrition changes
+    private var observerQuery: HKObserverQuery?
+
+    /// Snapshot store for tracking changes
+    private let snapshotStore = NutritionSnapshotStore.shared
 
     var isAvailable: Bool {
         HKHealthStore.isHealthDataAvailable()
@@ -89,6 +104,96 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
         let endDate = Date()
         let startDate = endDate.addingTimeInterval(-TimeInterval(hours * 3600))
         return try await fetchMeals(from: startDate, to: endDate)
+    }
+
+    // MARK: - Observer Query (Real-time Change Detection)
+
+    func startObservingNutritionChanges() {
+        guard isAvailable else { return }
+        guard observerQuery == nil else { return } // Already observing
+
+        guard let carbType = HKQuantityType.quantityType(forIdentifier: .dietaryCarbohydrates) else { return }
+
+        // Set up observer query — HK will call our handler when new carb samples appear
+        let query = HKObserverQuery(sampleType: carbType, predicate: nil) { [weak self] _, completionHandler, error in
+            guard let self = self else {
+                completionHandler()
+                return
+            }
+
+            if let error = error {
+                debug(.service, "Nutrition observer error: \(error.localizedDescription)")
+                completionHandler()
+                return
+            }
+
+            debug(.service, "Nutrition observer: change detected in Apple Health")
+
+            // Record a snapshot of today's current totals
+            Task {
+                await self.recordNutritionSnapshot()
+                completionHandler()
+            }
+        }
+
+        healthKitStore.execute(query)
+        observerQuery = query
+
+        // Enable background delivery so we get notified even when app is backgrounded
+        healthKitStore.enableBackgroundDelivery(for: carbType, frequency: .immediate) { success, error in
+            if success {
+                debug(.service, "Nutrition background delivery enabled")
+            } else if let error = error {
+                debug(.service, "Failed to enable nutrition background delivery: \(error.localizedDescription)")
+            }
+        }
+
+        debug(.service, "Started observing Apple Health nutrition changes")
+
+        // Record an initial snapshot
+        Task {
+            await recordNutritionSnapshot()
+        }
+    }
+
+    func stopObservingNutritionChanges() {
+        if let query = observerQuery {
+            healthKitStore.stop(query)
+            observerQuery = nil
+            debug(.service, "Stopped observing Apple Health nutrition changes")
+        }
+    }
+
+    func inferredMealEvents(for date: Date) -> [InferredMealEvent] {
+        snapshotStore.inferredMealEvents(for: date)
+    }
+
+    /// Query today's cumulative nutrition totals and save a snapshot
+    private func recordNutritionSnapshot() async {
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+
+        do {
+            let entries = try await fetchNutritionEntries(from: today, to: tomorrow)
+            let totalCarbs = entries.reduce(0) { $0 + $1.carbs }
+            let totalFat = entries.reduce(0) { $0 + $1.fat }
+            let totalProtein = entries.reduce(0) { $0 + $1.protein }
+
+            let snapshot = NutritionSnapshot(
+                cumulativeCarbs: totalCarbs,
+                cumulativeFat: totalFat,
+                cumulativeProtein: totalProtein,
+                forDate: today
+            )
+            snapshotStore.saveSnapshot(snapshot)
+
+            debug(
+                .service,
+                "Nutrition snapshot recorded: C=\(Int(totalCarbs))g F=\(Int(totalFat))g P=\(Int(totalProtein))g"
+            )
+        } catch {
+            debug(.service, "Failed to record nutrition snapshot: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Private Helpers
