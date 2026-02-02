@@ -163,9 +163,9 @@ extension AppleHealthKit {
         private func fetchRecentNutritionAsync() async {
             isLoadingNutrition = true
             do {
-                let meals = try await nutritionHealthService.fetchRecentMeals(hours: 24)
-                recentMeals = meals
-                debug(.service, "Fetched \(meals.count) meals from Apple Health")
+                let days = try await nutritionHealthService.fetchRecentMeals(hours: 24 * 7)
+                recentMeals = days
+                debug(.service, "Fetched \(days.count) days of nutrition from Apple Health")
             } catch {
                 debug(.service, "Failed to fetch nutrition data: \(error.localizedDescription)")
                 recentMeals = []

@@ -4,7 +4,7 @@ import Swinject
 struct NutritionAnalysisView: View {
     let resolver: Resolver
 
-    @State private var matchedMeals: [MatchedMealAnalysis] = []
+    @State private var matchedDays: [MatchedMealAnalysis] = []
     @State private var summary: NutritionAnalysisSummary?
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -21,7 +21,7 @@ struct NutritionAnalysisView: View {
                         Spacer()
                         VStack(spacing: 12) {
                             ProgressView()
-                            Text("Analyzing \(analysisDays) days of meal data...")
+                            Text("Analyzing \(analysisDays) days of nutrition data...")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -50,13 +50,13 @@ struct NutritionAnalysisView: View {
                     bgSection
                 }
 
-                matchedMealsSection
+                matchedDaysSection
             } else {
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("This analysis compares your Trio carb entries with actual nutrition data from Apple Health (Cronometer) to understand your carb estimation patterns.")
+                        Text("This analysis compares your daily Trio carb entries with actual nutrition data from Apple Health (Cronometer) to understand your carb estimation patterns.")
                             .font(.callout)
-                        Text("It will match meals by time, calculate how much you typically under- or over-estimate carbs, and show how BG responds.")
+                        Text("It matches days where both Trio and Cronometer have data, calculates how much you typically under- or over-estimate daily carbs, and shows daily BG averages.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -116,11 +116,11 @@ struct NutritionAnalysisView: View {
                     GridItem(.flexible()),
                     GridItem(.flexible())
                 ], spacing: 8) {
-                    statCard("Matched Meals", value: "\(summary.totalMatchedMeals)")
+                    statCard("Matched Days", value: "\(summary.totalMatchedDays)")
                     statCard("Avg Ratio", value: "\(Int(summary.averageEstimationRatio * 100))%")
-                    statCard("Avg Entered", value: "\(Int(summary.averageTrioCarbs))g")
-                    statCard("Avg Actual", value: "\(Int(summary.averageActualCarbs))g")
-                    statCard("Avg Missed", value: "\(Int(summary.averageMissedCarbs))g")
+                    statCard("Avg Entered", value: "\(Int(summary.averageTrioCarbs))g/day")
+                    statCard("Avg Actual", value: "\(Int(summary.averageActualCarbs))g/day")
+                    statCard("Avg Missed", value: "\(Int(summary.averageMissedCarbs))g/day")
                     statCard("Median Ratio", value: "\(Int(summary.medianEstimationRatio * 100))%")
                 }
 
@@ -133,8 +133,8 @@ struct NutritionAnalysisView: View {
         } header: {
             Text("Summary — \(summary.analysisPeriodDays) days")
         } footer: {
-            if summary.unmatchedTrioEntries > 0 || summary.unmatchedHealthEntries > 0 {
-                Text("\(summary.unmatchedTrioEntries) Trio entries and \(summary.unmatchedHealthEntries) Apple Health meals could not be matched by time.")
+            if summary.unmatchedTrioDays > 0 || summary.unmatchedHealthDays > 0 {
+                Text("\(summary.unmatchedTrioDays) Trio-only days and \(summary.unmatchedHealthDays) Cronometer-only days could not be matched.")
             }
         }
     }
@@ -190,79 +190,80 @@ struct NutritionAnalysisView: View {
 
     @ViewBuilder
     private func bgOutcomesSection(_ summary: NutritionAnalysisSummary) -> some View? {
-        if let avgRise = summary.averageBgRise, let avg2h = summary.averageBgChange2h {
+        if let avgBG = summary.averageDailyBG {
             Section {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Image(systemName: "waveform.path.ecg")
                             .foregroundColor(.red)
-                        Text("Post-Meal BG Response")
+                        Text("Daily BG Summary")
                             .font(.headline)
                     }
 
                     HStack(spacing: 24) {
                         VStack {
-                            Text("Avg Peak Rise")
+                            Text("Avg Daily BG")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text("+\(avgRise)")
+                            Text("\(avgBG)")
                                 .font(.title2)
                                 .fontWeight(.bold)
-                                .foregroundColor(avgRise > 60 ? .red : avgRise > 40 ? .orange : .green)
+                                .foregroundColor(avgBG > 180 ? .red : avgBG > 140 ? .orange : .green)
                             Text("mg/dL")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
 
-                        VStack {
-                            Text("Avg 2h Change")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("\(avg2h > 0 ? "+" : "")\(avg2h)")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(abs(avg2h) > 40 ? .orange : .green)
-                            Text("mg/dL")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                        if let avgMax = summary.averageDailyMaxBG {
+                            VStack {
+                                Text("Avg Daily Max")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text("\(avgMax)")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(avgMax > 250 ? .red : avgMax > 180 ? .orange : .green)
+                                Text("mg/dL")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                 }
                 .padding(.vertical, 4)
             } header: {
                 Text("Glucose Outcomes")
+            } footer: {
+                Text("Average BG and daily peak across matched days.")
             }
         }
     }
 
-    // MARK: - Matched Meals List
+    // MARK: - Matched Days List
 
     @ViewBuilder
-    private var matchedMealsSection: some View {
+    private var matchedDaysSection: some View {
         Section {
-            ForEach(matchedMeals.reversed()) { meal in
-                mealAnalysisRow(meal)
+            ForEach(matchedDays) { day in
+                dayAnalysisRow(day)
             }
         } header: {
-            Text("Individual Meals")
+            Text("Daily Comparison")
         }
     }
 
     @ViewBuilder
-    private func mealAnalysisRow(_ meal: MatchedMealAnalysis) -> some View {
+    private func dayAnalysisRow(_ day: MatchedMealAnalysis) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Date and time
+            // Day header
             HStack {
-                Text(meal.date, style: .date)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text(meal.date, style: .time)
+                Text(day.dayDescription)
                     .font(.subheadline)
                     .fontWeight(.medium)
                 Spacer()
-                Text("\(Int(meal.estimationRatio * 100))%")
+                Text("\(Int(day.estimationRatio * 100))%")
                     .font(.headline)
-                    .foregroundColor(meal.estimationRatio < 0.5 ? .red : meal.estimationRatio < 0.8 ? .orange : .green)
+                    .foregroundColor(day.estimationRatio < 0.5 ? .red : day.estimationRatio < 0.8 ? .orange : .green)
             }
 
             // Carb comparison
@@ -271,14 +272,14 @@ struct NutritionAnalysisView: View {
                     Text("Entered")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Text("\(Int(meal.trioCarbs))g")
+                    Text("\(Int(day.trioCarbs))g")
                         .font(.subheadline)
                 }
                 VStack(alignment: .leading) {
                     Text("Actual")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Text("\(Int(meal.actualCarbs))g")
+                    Text("\(Int(day.actualCarbs))g")
                         .font(.subheadline)
                         .fontWeight(.medium)
                 }
@@ -286,34 +287,38 @@ struct NutritionAnalysisView: View {
                     Text("Missed")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Text("\(Int(meal.missedCarbs))g")
+                    Text("\(Int(day.missedCarbs))g")
                         .font(.subheadline)
                         .foregroundColor(.orange)
                 }
                 Spacer()
-                if meal.bolusInsulin > 0 {
+                if day.bolusInsulin > 0 {
                     VStack(alignment: .trailing) {
                         Text("Bolus")
                             .font(.caption2)
                             .foregroundColor(.secondary)
-                        Text("\(String(format: "%.1f", meal.bolusInsulin))U")
+                        Text("\(String(format: "%.1f", day.bolusInsulin))U")
                             .font(.subheadline)
                     }
                 }
             }
 
-            // Macros from Cronometer
+            // Macros from Cronometer + daily BG
             HStack(spacing: 12) {
-                Text("C:\(Int(meal.actualCarbPercent))%")
+                Text("C:\(Int(day.actualCarbPercent))%")
                     .foregroundColor(.orange)
-                Text("F:\(Int(meal.actualFatPercent))%")
+                Text("F:\(Int(day.actualFatPercent))%")
                     .foregroundColor(.yellow)
-                Text("P:\(Int(meal.actualProteinPercent))%")
+                Text("P:\(Int(day.actualProteinPercent))%")
                     .foregroundColor(.red)
                 Spacer()
-                if let rise = meal.bgRise {
-                    Text("BG +\(rise)")
-                        .foregroundColor(rise > 60 ? .red : rise > 40 ? .orange : .green)
+                if let avg = day.averageBG {
+                    Text("Avg \(avg)")
+                        .foregroundColor(avg > 180 ? .red : avg > 140 ? .orange : .green)
+                }
+                if let peak = day.maxBG {
+                    Text("Max \(peak)")
+                        .foregroundColor(peak > 250 ? .red : peak > 180 ? .orange : .green)
                 }
             }
             .font(.caption)
@@ -347,7 +352,7 @@ struct NutritionAnalysisView: View {
             do {
                 let result = try await service.runAnalysis(days: analysisDays)
                 await MainActor.run {
-                    matchedMeals = result.meals
+                    matchedDays = result.days
                     summary = result.summary
                     isLoading = false
                 }

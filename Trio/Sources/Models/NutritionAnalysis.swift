@@ -1,33 +1,29 @@
 import Foundation
 
-// MARK: - Matched Meal (Trio entry paired with Cronometer data)
+// MARK: - Matched Day (Trio daily carbs paired with Cronometer daily totals)
 
-/// A single meal where we have both Trio's manual carb entry and Cronometer's actual nutrition data
+/// A single day where we have both Trio's manual carb entries and Cronometer's actual nutrition data
 struct MatchedMealAnalysis: Identifiable, Equatable {
     let id: UUID
     let date: Date
 
-    // Trio manual entry
+    // Trio manual entries (daily totals)
     let trioCarbs: Double
     let trioFat: Double
     let trioProtein: Double
 
-    // Cronometer (Apple Health) data
+    // Cronometer (Apple Health) daily totals
     let actualCarbs: Double
     let actualFat: Double
     let actualProtein: Double
     let nutritionSource: String
 
-    // Insulin delivered around this meal (within ±15 min)
+    // Total meal bolus insulin for the day (non-SMB)
     let bolusInsulin: Double
 
-    // BG response
-    let bgAtMeal: Int?
-    let bgAt1h: Int?
-    let bgAt2h: Int?
-    let bgAt3h: Int?
-    let bgPeak: Int?
-    let bgPeakTime: Date?
+    // Daily BG summary
+    let bgAtMeal: Int? // Daily average BG
+    let bgPeak: Int? // Daily max BG
 
     init(
         id: UUID = UUID(),
@@ -41,11 +37,7 @@ struct MatchedMealAnalysis: Identifiable, Equatable {
         nutritionSource: String = "",
         bolusInsulin: Double = 0,
         bgAtMeal: Int? = nil,
-        bgAt1h: Int? = nil,
-        bgAt2h: Int? = nil,
-        bgAt3h: Int? = nil,
-        bgPeak: Int? = nil,
-        bgPeakTime: Date? = nil
+        bgPeak: Int? = nil
     ) {
         self.id = id
         self.date = date
@@ -58,11 +50,7 @@ struct MatchedMealAnalysis: Identifiable, Equatable {
         self.nutritionSource = nutritionSource
         self.bolusInsulin = bolusInsulin
         self.bgAtMeal = bgAtMeal
-        self.bgAt1h = bgAt1h
-        self.bgAt2h = bgAt2h
-        self.bgAt3h = bgAt3h
         self.bgPeak = bgPeak
-        self.bgPeakTime = bgPeakTime
     }
 
     /// Ratio of entered carbs to actual carbs (e.g., 0.41 = entered 41% of actual)
@@ -88,16 +76,14 @@ struct MatchedMealAnalysis: Identifiable, Equatable {
         return trioCarbs / bolusInsulin
     }
 
-    /// BG rise from meal time to peak
-    var bgRise: Int? {
-        guard let meal = bgAtMeal, let peak = bgPeak else { return nil }
-        return peak - meal
+    /// Daily average BG
+    var averageBG: Int? {
+        bgAtMeal
     }
 
-    /// BG change from meal to 2 hours
-    var bgChange2h: Int? {
-        guard let meal = bgAtMeal, let bg2h = bgAt2h else { return nil }
-        return bg2h - meal
+    /// Daily max BG
+    var maxBG: Int? {
+        bgPeak
     }
 
     /// Actual macro percentages from Cronometer
@@ -118,15 +104,29 @@ struct MatchedMealAnalysis: Identifiable, Equatable {
         guard totalCal > 0 else { return 0 }
         return (actualProtein * 4 / totalCal) * 100
     }
+
+    /// Display-friendly day label
+    var dayDescription: String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return "Today"
+        } else if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEE, MMM d"
+            return formatter.string(from: date)
+        }
+    }
 }
 
 // MARK: - Aggregate Analysis
 
-/// Summary statistics across all matched meals
+/// Summary statistics across all matched days
 struct NutritionAnalysisSummary: Equatable {
-    let totalMatchedMeals: Int
-    let unmatchedTrioEntries: Int
-    let unmatchedHealthEntries: Int
+    let totalMatchedDays: Int
+    let unmatchedTrioDays: Int
+    let unmatchedHealthDays: Int
     let analysisPeriodDays: Int
 
     // Estimation accuracy
@@ -146,9 +146,9 @@ struct NutritionAnalysisSummary: Equatable {
     let averageEffectiveICR: Double?
     let suggestedICRAdjustment: Double?
 
-    // BG outcomes
-    let averageBgRise: Int?
-    let averageBgChange2h: Int?
+    // Daily BG summary
+    let averageDailyBG: Int?
+    let averageDailyMaxBG: Int?
 
     /// Human-readable estimation description
     var estimationDescription: String {

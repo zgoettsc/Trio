@@ -24,8 +24,8 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
     @Injected() private var healthKitStore: HKHealthStore!
     @Injected() private var settingsManager: SettingsManager!
 
-    /// Time window (in seconds) for grouping nutrition entries into a single meal
-    private let mealGroupingWindow: TimeInterval = 15 * 60 // 15 minutes
+    /// Calendar for day-based grouping
+    private let calendar = Calendar.current
 
     /// Bundle identifier prefix for Trio to filter out its own entries
     private let trioBundlePrefix = "org.nightscout"
@@ -67,10 +67,10 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
         let proteins = try await proteinSamples
 
         debug(.service, "Nutrition fetch: \(carbs.count) carb samples, \(fats.count) fat samples, \(proteins.count) protein samples")
-        for sample in carbs.prefix(5) {
+        for sample in carbs.prefix(3) {
             debug(
                 .service,
-                "  Carb sample: \(sample.quantity.doubleValue(for: .gram()))g at \(sample.startDate) from \(sample.sourceRevision.source.name)"
+                "  Carb sample: \(sample.quantity.doubleValue(for: .gram()))g start=\(sample.startDate) end=\(sample.endDate) metadata=\(sample.metadata ?? [:]) from \(sample.sourceRevision.source.name)"
             )
         }
 
@@ -82,7 +82,7 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
 
     func fetchMeals(from startDate: Date, to endDate: Date) async throws -> [HealthNutritionMeal] {
         let entries = try await fetchNutritionEntries(from: startDate, to: endDate)
-        return groupEntriesIntoMeals(entries)
+        return groupEntriesByDay(entries)
     }
 
     func fetchRecentMeals(hours: Int) async throws -> [HealthNutritionMeal] {
@@ -184,46 +184,25 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
             .sorted { $0.date < $1.date }
     }
 
-    /// Group nutrition entries into meals based on time proximity.
-    /// Entries within `mealGroupingWindow` of each other are grouped as one meal.
-    private func groupEntriesIntoMeals(_ entries: [HealthNutritionEntry]) -> [HealthNutritionMeal] {
+    /// Group nutrition entries by calendar day.
+    /// Cronometer writes all entries at midnight, so day-based grouping is the correct approach.
+    private func groupEntriesByDay(_ entries: [HealthNutritionEntry]) -> [HealthNutritionDay] {
         guard !entries.isEmpty else { return [] }
 
-        let sorted = entries.sorted { $0.date < $1.date }
-        var meals: [HealthNutritionMeal] = []
-        var currentGroup: [HealthNutritionEntry] = [sorted[0]]
+        var dayGroups: [Date: [HealthNutritionEntry]] = [:]
 
-        for i in 1 ..< sorted.count {
-            let entry = sorted[i]
-            let lastInGroup = currentGroup.last!
-
-            if entry.date.timeIntervalSince(lastInGroup.date) <= mealGroupingWindow {
-                currentGroup.append(entry)
-            } else {
-                // Finalize current group as a meal
-                meals.append(mealFromEntries(currentGroup))
-                currentGroup = [entry]
-            }
+        for entry in entries {
+            let dayStart = calendar.startOfDay(for: entry.date)
+            dayGroups[dayStart, default: []].append(entry)
         }
 
-        // Finalize last group
-        if !currentGroup.isEmpty {
-            meals.append(mealFromEntries(currentGroup))
+        return dayGroups.map { dayDate, dayEntries in
+            HealthNutritionDay(
+                date: dayDate,
+                entries: dayEntries,
+                source: dayEntries.first?.source ?? ""
+            )
         }
-
-        return meals
-    }
-
-    private func mealFromEntries(_ entries: [HealthNutritionEntry]) -> HealthNutritionMeal {
-        let startTime = entries.map(\.date).min() ?? Date()
-        let endTime = entries.map(\.date).max() ?? Date()
-        let primarySource = entries.first?.source ?? ""
-
-        return HealthNutritionMeal(
-            startTime: startTime,
-            endTime: endTime,
-            entries: entries,
-            source: primarySource
-        )
+        .sorted { $0.date > $1.date } // Most recent first
     }
 }

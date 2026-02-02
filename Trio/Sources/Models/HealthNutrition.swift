@@ -25,20 +25,18 @@ struct HealthNutritionEntry: JSON, Identifiable, Equatable {
     }
 }
 
-// MARK: - Grouped Meal from Apple Health
+// MARK: - Daily Nutrition Summary from Apple Health
 
-/// Multiple nutrition entries grouped into a single meal by time proximity
-struct HealthNutritionMeal: JSON, Identifiable, Equatable {
+/// All nutrition entries for a single day, aggregated
+struct HealthNutritionDay: JSON, Identifiable, Equatable {
     let id: UUID
-    let startTime: Date
-    let endTime: Date
+    let date: Date // The calendar day (midnight)
     let entries: [HealthNutritionEntry]
     let source: String
 
-    init(id: UUID = UUID(), startTime: Date, endTime: Date, entries: [HealthNutritionEntry], source: String = "") {
+    init(id: UUID = UUID(), date: Date, entries: [HealthNutritionEntry], source: String = "") {
         self.id = id
-        self.startTime = startTime
-        self.endTime = endTime
+        self.date = date
         self.entries = entries
         self.source = source
     }
@@ -59,6 +57,10 @@ struct HealthNutritionMeal: JSON, Identifiable, Equatable {
         entries.reduce(0) { $0 + $1.totalCalories }
     }
 
+    var entryCount: Int {
+        entries.count
+    }
+
     /// Percentage of calories from carbs (0-100)
     var carbPercentage: Double {
         guard totalCalories > 0 else { return 0 }
@@ -77,20 +79,25 @@ struct HealthNutritionMeal: JSON, Identifiable, Equatable {
         return (totalProtein * 4 / totalCalories) * 100
     }
 
-    /// Display-friendly time string using explicit local timezone
-    var timeDescription: String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-        formatter.timeZone = .current
-        formatter.locale = .current
-        return formatter.string(from: startTime)
-    }
-
-    /// How long ago this meal was
-    var timeAgo: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: startTime, relativeTo: Date())
+    /// Display-friendly date string
+    var dayDescription: String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return "Today"
+        } else if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            formatter.timeZone = .current
+            formatter.locale = .current
+            return formatter.string(from: date)
+        }
     }
 }
+
+// MARK: - Backward compatibility alias
+
+/// Alias for backward compatibility -- meals are now grouped by day since Cronometer writes midnight timestamps
+typealias HealthNutritionMeal = HealthNutritionDay

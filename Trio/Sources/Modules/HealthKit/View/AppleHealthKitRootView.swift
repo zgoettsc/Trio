@@ -181,22 +181,22 @@ extension AppleHealthKit {
                         HStack {
                             Image(systemName: "tray")
                                 .foregroundColor(.secondary)
-                            Text("No Recent Meals")
+                            Text("No Nutrition Data")
                                 .foregroundColor(.secondary)
                         }
-                        Text("No nutrition data found in Apple Health for the last 24 hours. Make sure your nutrition app is syncing to Apple Health and that read permissions are granted in iOS Settings > Health > Trio.")
+                        Text("No nutrition data found in Apple Health for the last 7 days. Make sure your nutrition app is syncing to Apple Health and that read permissions are granted in iOS Settings > Health > Trio.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     .padding(.vertical, 4)
                 } else {
-                    ForEach(state.recentMeals.reversed()) { meal in
-                        mealRow(meal)
+                    ForEach(state.recentMeals) { day in
+                        dailyNutritionRow(day)
                     }
                 }
             } header: {
                 HStack {
-                    Text("Recent Meals (24h)")
+                    Text("Daily Nutrition")
                     Spacer()
                     if !state.isLoadingNutrition {
                         Button {
@@ -208,28 +208,22 @@ extension AppleHealthKit {
                     }
                 }
             } footer: {
-                if !state.recentMeals.isEmpty {
-                    let totalCarbs = state.recentMeals.reduce(0) { $0 + $1.totalCarbs }
-                    let totalFat = state.recentMeals.reduce(0) { $0 + $1.totalFat }
-                    let totalProtein = state.recentMeals.reduce(0) { $0 + $1.totalProtein }
-                    let totalCal = state.recentMeals.reduce(0) { $0 + $1.totalCalories }
-                    Text("24h totals: \(Int(totalCarbs))g C / \(Int(totalFat))g F / \(Int(totalProtein))g P — \(Int(totalCal)) kcal")
-                }
+                Text("Nutrition data from Apple Health (e.g., Cronometer). Shown as daily totals.")
             }
         }
 
         @ViewBuilder
-        private func mealRow(_ meal: HealthNutritionMeal) -> some View {
+        private func dailyNutritionRow(_ day: HealthNutritionDay) -> some View {
             VStack(alignment: .leading, spacing: 6) {
-                // Header: time and source
+                // Header: day and source
                 HStack {
-                    Text(meal.startTime, style: .time)
+                    Text(day.dayDescription)
                         .font(.headline)
-                    Text(meal.startTime, style: .relative)
+                    Spacer()
+                    Text("\(day.entryCount) items")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Spacer()
-                    Text(meal.source)
+                    Text(day.source)
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 6)
@@ -240,17 +234,17 @@ extension AppleHealthKit {
 
                 // Macro totals
                 HStack(spacing: 16) {
-                    macroLabel("C", grams: meal.totalCarbs, color: .orange)
-                    macroLabel("F", grams: meal.totalFat, color: .yellow)
-                    macroLabel("P", grams: meal.totalProtein, color: .red)
+                    macroLabel("C", grams: day.totalCarbs, color: .orange)
+                    macroLabel("F", grams: day.totalFat, color: .yellow)
+                    macroLabel("P", grams: day.totalProtein, color: .red)
                     Spacer()
-                    Text("\(Int(meal.totalCalories)) kcal")
+                    Text("\(Int(day.totalCalories)) kcal")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 // Macro percentage bar
-                macroPercentageBar(meal: meal)
+                macroPercentageBar(day: day)
             }
             .padding(.vertical, 4)
         }
@@ -268,41 +262,41 @@ extension AppleHealthKit {
         }
 
         @ViewBuilder
-        private func macroPercentageBar(meal: HealthNutritionMeal) -> some View {
+        private func macroPercentageBar(day: HealthNutritionDay) -> some View {
             GeometryReader { geometry in
                 HStack(spacing: 1) {
-                    let carbWidth = geometry.size.width * meal.carbPercentage / 100
-                    let fatWidth = geometry.size.width * meal.fatPercentage / 100
-                    let proteinWidth = geometry.size.width * meal.proteinPercentage / 100
+                    let carbWidth = geometry.size.width * day.carbPercentage / 100
+                    let fatWidth = geometry.size.width * day.fatPercentage / 100
+                    let proteinWidth = geometry.size.width * day.proteinPercentage / 100
 
-                    if meal.carbPercentage > 0 {
+                    if day.carbPercentage > 0 {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.orange)
                             .frame(width: max(carbWidth, 2))
                             .overlay(
-                                Text("\(Int(meal.carbPercentage))%")
+                                Text("\(Int(day.carbPercentage))%")
                                     .font(.system(size: 9))
                                     .foregroundColor(.white)
                                     .opacity(carbWidth > 30 ? 1 : 0)
                             )
                     }
-                    if meal.fatPercentage > 0 {
+                    if day.fatPercentage > 0 {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.yellow)
                             .frame(width: max(fatWidth, 2))
                             .overlay(
-                                Text("\(Int(meal.fatPercentage))%")
+                                Text("\(Int(day.fatPercentage))%")
                                     .font(.system(size: 9))
                                     .foregroundColor(.black)
                                     .opacity(fatWidth > 30 ? 1 : 0)
                             )
                     }
-                    if meal.proteinPercentage > 0 {
+                    if day.proteinPercentage > 0 {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.red)
                             .frame(width: max(proteinWidth, 2))
                             .overlay(
-                                Text("\(Int(meal.proteinPercentage))%")
+                                Text("\(Int(day.proteinPercentage))%")
                                     .font(.system(size: 9))
                                     .foregroundColor(.white)
                                     .opacity(proteinWidth > 30 ? 1 : 0)
