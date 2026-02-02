@@ -757,6 +757,9 @@
 		HS65A6D45B1A4FC1B3A02035 /* HealthMetricsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = HS70616C45944CE888DC2C8D /* HealthMetricsService.swift */; };
 		NH1A2B3C4D5E6F7A8B9C0D1E /* NutritionHealthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NH2B3C4D5E6F7A8B9C0D1E2F /* NutritionHealthService.swift */; };
 		HN3C4D5E6F7A8B9C0D1E2F3A /* HealthNutrition.swift in Sources */ = {isa = PBXBuildFile; fileRef = HN4D5E6F7A8B9C0D1E2F3A4B /* HealthNutrition.swift */; };
+		NA5A6B7C8D9E0F1A2B3C4D5E /* NutritionAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = NA6B7C8D9E0F1A2B3C4D5E6F /* NutritionAnalysis.swift */; };
+		NAS7C8D9E0F1A2B3C4D5E6F7 /* NutritionAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NAS8D9E0F1A2B3C4D5E6F7A8 /* NutritionAnalysisService.swift */; };
+		NAV9E0F1A2B3C4D5E6F7A8B9 /* NutritionAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NAV0F1A2B3C4D5E6F7A8B9C0 /* NutritionAnalysisView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1614,6 +1617,9 @@
 		HS70616C45944CE888DC2C8D /* HealthMetricsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthMetricsService.swift; sourceTree = "<group>"; };
 		NH2B3C4D5E6F7A8B9C0D1E2F /* NutritionHealthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionHealthService.swift; sourceTree = "<group>"; };
 		HN4D5E6F7A8B9C0D1E2F3A4B /* HealthNutrition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthNutrition.swift; sourceTree = "<group>"; };
+		NA6B7C8D9E0F1A2B3C4D5E6F /* NutritionAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAnalysis.swift; sourceTree = "<group>"; };
+		NAS8D9E0F1A2B3C4D5E6F7A8 /* NutritionAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAnalysisService.swift; sourceTree = "<group>"; };
+		NAV0F1A2B3C4D5E6F7A8B9C0 /* NutritionAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAnalysisView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -2453,6 +2459,7 @@
 				2593404672BB08B4E9D1B22D /* ProfileSwitchEvent.swift */,
 				HMF49BBBF5CD4A9BBC14CC1F /* HealthMetrics.swift */,
 				HN4D5E6F7A8B9C0D1E2F3A4B /* HealthNutrition.swift */,
+				NA6B7C8D9E0F1A2B3C4D5E6F /* NutritionAnalysis.swift */,
 				DDFF204F2DB2C11900AB8A96 /* WatchStateSnapshot.swift */,
 				DDEBB05B2D89E9050032305D /* TimeInRangeType.swift */,
 				3B2F77852D7E52ED005ED9FA /* TDD.swift */,
@@ -3923,6 +3930,7 @@
 				HS70616C45944CE888DC2C8D /* HealthMetricsService.swift */,
 				F90692A9274B7AAE0037068D /* HealthKitManager.swift */,
 				NH2B3C4D5E6F7A8B9C0D1E2F /* NutritionHealthService.swift */,
+				NAS8D9E0F1A2B3C4D5E6F7A8 /* NutritionAnalysisService.swift */,
 			);
 			path = HealthKit;
 			sourceTree = "<group>";
@@ -3942,6 +3950,7 @@
 			isa = PBXGroup;
 			children = (
 				F90692D2274B9A130037068D /* AppleHealthKitRootView.swift */,
+				NAV0F1A2B3C4D5E6F7A8B9C0 /* NutritionAnalysisView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -4309,6 +4318,9 @@
 				HS65A6D45B1A4FC1B3A02035 /* HealthMetricsService.swift in Sources */,
 				NH1A2B3C4D5E6F7A8B9C0D1E /* NutritionHealthService.swift in Sources */,
 				HN3C4D5E6F7A8B9C0D1E2F3A /* HealthNutrition.swift in Sources */,
+				NA5A6B7C8D9E0F1A2B3C4D5E /* NutritionAnalysis.swift in Sources */,
+				NAS7C8D9E0F1A2B3C4D5E6F7 /* NutritionAnalysisService.swift in Sources */,
+				NAV9E0F1A2B3C4D5E6F7A8B9 /* NutritionAnalysisView.swift in Sources */,
 				A1B1C1D1E1F101010101A1B1 /* AIInsightsConfigDataFlow.swift in Sources */,
 				A1B1C1D1E1F101010101A1B2 /* AIInsightsConfigStateModel.swift in Sources */,
 				A1B1C1D1E1F101010101A1B3 /* AIInsightsConfigProvider.swift in Sources */,

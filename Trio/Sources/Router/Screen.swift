@@ -52,6 +52,7 @@ enum Screen: Identifiable, Hashable {
     case aiInsightsConfig
     case therapyProfileList
     case therapyProfileEditor(profile: TherapyProfile, isNew: Bool)
+    case nutritionAnalysis
 
     var id: Int { String(reflecting: self).hashValue }
 }
@@ -171,6 +172,8 @@ extension Screen {
             TherapyProfileList.RootView(resolver: resolver)
         case let .therapyProfileEditor(profile, isNew):
             configuredTherapyProfileEditor(resolver: resolver, profile: profile, isNew: isNew)
+        case .nutritionAnalysis:
+            NutritionAnalysisView(resolver: resolver)
         }
     }
 

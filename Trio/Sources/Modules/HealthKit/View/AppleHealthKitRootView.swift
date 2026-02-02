@@ -70,6 +70,25 @@ extension AppleHealthKit {
                 // Nutrition Preview (when read is enabled)
                 if state.readNutritionFromHealth {
                     nutritionPreviewSection
+
+                    // Analysis link
+                    Section {
+                        NavigationLink(destination: NutritionAnalysisView(resolver: resolver)) {
+                            HStack {
+                                Image(systemName: "chart.bar.doc.horizontal")
+                                    .foregroundColor(.purple)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading) {
+                                    Text("Nutrition Analysis")
+                                    Text("Compare your carb estimates vs actual, see BG impact")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Insights")
+                    }
                 }
 
                 // Health Metrics for AI Analysis Section
