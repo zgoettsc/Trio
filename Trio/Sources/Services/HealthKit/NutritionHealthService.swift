@@ -66,6 +66,14 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
         let fats = try await fatSamples
         let proteins = try await proteinSamples
 
+        debug(.service, "Nutrition fetch: \(carbs.count) carb samples, \(fats.count) fat samples, \(proteins.count) protein samples")
+        for sample in carbs.prefix(5) {
+            debug(
+                .service,
+                "  Carb sample: \(sample.quantity.doubleValue(for: .gram()))g at \(sample.startDate) from \(sample.sourceRevision.source.name)"
+            )
+        }
+
         // Merge samples by timestamp and source into unified nutrition entries
         return mergeNutritionSamples(carbs: carbs, fats: fats, proteins: proteins)
     }

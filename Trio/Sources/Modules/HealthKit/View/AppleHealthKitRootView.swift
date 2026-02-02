@@ -223,9 +223,9 @@ extension AppleHealthKit {
             VStack(alignment: .leading, spacing: 6) {
                 // Header: time and source
                 HStack {
-                    Text(meal.timeDescription)
+                    Text(meal.startTime, style: .time)
                         .font(.headline)
-                    Text(meal.timeAgo)
+                    Text(meal.startTime, style: .relative)
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Spacer()

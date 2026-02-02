@@ -77,21 +77,20 @@ struct HealthNutritionMeal: JSON, Identifiable, Equatable {
         return (totalProtein * 4 / totalCalories) * 100
     }
 
-    /// Display-friendly time string
+    /// Display-friendly time string using explicit local timezone
     var timeDescription: String {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        formatter.timeZone = .current
+        formatter.locale = .current
         return formatter.string(from: startTime)
     }
 
     /// How long ago this meal was
     var timeAgo: String {
-        let interval = Date().timeIntervalSince(startTime)
-        let hours = Int(interval / 3600)
-        let minutes = Int((interval.truncatingRemainder(dividingBy: 3600)) / 60)
-        if hours > 0 {
-            return "\(hours)h \(minutes)m ago"
-        }
-        return "\(minutes)m ago"
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: startTime, relativeTo: Date())
     }
 }
