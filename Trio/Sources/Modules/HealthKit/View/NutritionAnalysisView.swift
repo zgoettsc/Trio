@@ -9,6 +9,7 @@ struct NutritionAnalysisView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var analysisDays = 14
+    @State private var showShareSheet = false
 
     @Environment(\.colorScheme) var colorScheme
     @Environment(AppState.self) var appState
@@ -78,12 +79,25 @@ struct NutritionAnalysisView: View {
         .toolbar {
             if summary != nil {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        runAnalysis()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 16) {
+                        Button {
+                            showShareSheet = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        Button {
+                            runAnalysis()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let summary = summary {
+                let report = generateReport(summary: summary, days: matchedDays)
+                ShareSheet(activityItems: [report])
             }
         }
     }
@@ -343,6 +357,72 @@ struct NutritionAnalysisView: View {
         .cornerRadius(6)
     }
 
+    private func generateReport(summary: NutritionAnalysisSummary, days: [MatchedMealAnalysis]) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMM d, yyyy"
+        let now = dateFormatter.string(from: Date())
+
+        var lines: [String] = [
+            "Trio Nutrition Analysis Report",
+            "Generated: \(now)",
+            "Period: \(summary.analysisPeriodDays) days | \(summary.totalMatchedDays) matched days",
+            "",
+            "=== ESTIMATION ACCURACY ===",
+            summary.estimationDescription,
+            "Average ratio: \(Int(summary.averageEstimationRatio * 100))%",
+            "Median ratio: \(Int(summary.medianEstimationRatio * 100))%",
+            "Range: \(Int(summary.minEstimationRatio * 100))% - \(Int(summary.maxEstimationRatio * 100))%",
+            "Avg entered (Trio): \(Int(summary.averageTrioCarbs))g/day",
+            "Avg actual (Cronometer): \(Int(summary.averageActualCarbs))g/day",
+            "Avg missed carbs: \(Int(summary.averageMissedCarbs))g/day",
+            "Total missed carbs: \(Int(summary.totalMissedCarbs))g",
+        ]
+
+        if let apparent = summary.averageApparentICR, let effective = summary.averageEffectiveICR {
+            lines += [
+                "",
+                "=== ICR ANALYSIS ===",
+                "Current ICR (tuned to estimates): 1:\(String(format: "%.1f", apparent))g",
+                "True ICR (against actual carbs): 1:\(String(format: "%.1f", effective))g",
+            ]
+            if let adj = summary.suggestedICRAdjustment {
+                lines.append("Adjustment factor if switching to actual carbs: \(String(format: "%.2f", adj))x")
+            }
+        }
+
+        if let avgBG = summary.averageDailyBG {
+            lines += ["", "=== GLUCOSE OUTCOMES ==="]
+            lines.append("Avg daily BG: \(avgBG) mg/dL")
+            if let avgMax = summary.averageDailyMaxBG {
+                lines.append("Avg daily max BG: \(avgMax) mg/dL")
+            }
+        }
+
+        if summary.unmatchedTrioDays > 0 || summary.unmatchedHealthDays > 0 {
+            lines += [
+                "",
+                "=== DATA COVERAGE ===",
+                "Matched days: \(summary.totalMatchedDays)",
+                "Trio-only days (no Cronometer): \(summary.unmatchedTrioDays)",
+                "Cronometer-only days (no Trio): \(summary.unmatchedHealthDays)",
+            ]
+        }
+
+        lines += ["", "=== DAILY BREAKDOWN ==="]
+        lines.append("Date | Entered | Actual | Missed | Ratio | Bolus | Avg BG | Max BG")
+        lines.append(String(repeating: "-", count: 75))
+
+        for day in days {
+            let dayStr = dateFormatter.string(from: day.date)
+            let bolusStr = day.bolusInsulin > 0 ? String(format: "%.1fU", day.bolusInsulin) : "-"
+            let avgBGStr = day.averageBG.map { "\($0)" } ?? "-"
+            let maxBGStr = day.maxBG.map { "\($0)" } ?? "-"
+            lines.append("\(dayStr) | \(Int(day.trioCarbs))g | \(Int(day.actualCarbs))g | \(Int(day.missedCarbs))g | \(Int(day.estimationRatio * 100))% | \(bolusStr) | \(avgBGStr) | \(maxBGStr)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     private func runAnalysis() {
         let service = resolver.resolve(NutritionAnalysisService.self)!
         isLoading = true
@@ -364,4 +444,16 @@ struct NutritionAnalysisView: View {
             }
         }
     }
+}
+
+// MARK: - Share Sheet
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
