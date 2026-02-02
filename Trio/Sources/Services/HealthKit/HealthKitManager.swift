@@ -35,6 +35,10 @@ public enum AppleHealthConfig {
     static var writePermissions: Set<HKSampleType> {
         Set([healthBGObject, healthCarbObject, healthFatObject, healthProteinObject, healthInsulinObject].compactMap { $0 }) }
 
+    static var nutritionReadPermissions: Set<HKObjectType> {
+        Set([healthCarbObject, healthFatObject, healthProteinObject].compactMap { $0 })
+    }
+
     // link to object in HealthKit
     static let healthBGObject = HKObjectType.quantityType(forIdentifier: .bloodGlucose)
     static let healthCarbObject = HKObjectType.quantityType(forIdentifier: .dietaryCarbohydrates)
@@ -139,10 +143,14 @@ final class BaseHealthKitManager: HealthKitManager, Injectable {
             throw HKError.notAvailableOnCurrentDevice
         }
 
+        let readPermissions: Set<HKObjectType> = settingsManager.settings.readNutritionFromHealth
+            ? AppleHealthConfig.nutritionReadPermissions
+            : []
+
         return try await withCheckedThrowingContinuation { continuation in
             healthKitStore.requestAuthorization(
                 toShare: AppleHealthConfig.writePermissions,
-                read: nil
+                read: readPermissions
             ) { status, error in
                 if let error = error {
                     continuation.resume(throwing: error)
@@ -251,6 +259,7 @@ final class BaseHealthKitManager: HealthKitManager, Injectable {
 
     func uploadCarbs(_ carbs: [CarbsEntry]) async {
         guard settingsManager.settings.useAppleHealth,
+              settingsManager.settings.writeNutritionToHealth,
               let carbSampleType = AppleHealthConfig.healthCarbObject,
               let fatSampleType = AppleHealthConfig.healthFatObject,
               let proteinSampleType = AppleHealthConfig.healthProteinObject,

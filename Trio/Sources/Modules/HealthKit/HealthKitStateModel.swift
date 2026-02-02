@@ -5,10 +5,17 @@ extension AppleHealthKit {
     final class StateModel: BaseStateModel<Provider> {
         @Injected() var healthKitManager: HealthKitManager!
         @Injected() var healthMetricsService: HealthMetricsService!
+        @Injected() var nutritionHealthService: NutritionHealthService!
 
         @Published var units: GlucoseUnits = .mgdL
         @Published var useAppleHealth = false
         @Published var needShowInformationTextForSetPermissions = false
+
+        // Nutrition Data Settings
+        @Published var writeNutritionToHealth = true
+        @Published var readNutritionFromHealth = false
+        @Published var recentMeals: [HealthNutritionMeal] = []
+        @Published var isLoadingNutrition = false
 
         // Health Metrics Settings for AI Analysis
         @Published var enableActivityData = false
@@ -20,6 +27,10 @@ extension AppleHealthKit {
             units = settingsManager.settings.units
 
             useAppleHealth = settingsManager.settings.useAppleHealth
+
+            // Load nutrition settings
+            writeNutritionToHealth = settingsManager.settings.writeNutritionToHealth
+            readNutritionFromHealth = settingsManager.settings.readNutritionFromHealth
 
             // Load health metrics settings
             enableActivityData = settingsManager.settings.healthMetricsSettings.enableActivityData
@@ -58,8 +69,25 @@ extension AppleHealthKit {
                 }
             }
 
+            subscribeSetting(\.writeNutritionToHealth, on: $writeNutritionToHealth) {
+                writeNutritionToHealth = $0
+            }
+
+            subscribeSetting(\.readNutritionFromHealth, on: $readNutritionFromHealth) {
+                readNutritionFromHealth = $0
+            } didSet: { [weak self] value in
+                guard let self = self else { return }
+                if value {
+                    self.requestNutritionPermissionsAndFetch()
+                } else {
+                    Task { @MainActor in
+                        self.recentMeals = []
+                    }
+                }
+            }
+
             // Subscribe to health metrics settings
-            subscribeHealthMetricsSetting(\.enableActivityData, on: $enableActivityData) { [weak self] value in
+            subscribeHealthMetricsSetting(\.enableActivityData, on: $enableActivityData) { [weak self] _ in
                 self?.requestHealthMetricsPermissionsIfNeeded()
             }
 
@@ -73,6 +101,11 @@ extension AppleHealthKit {
 
             subscribeHealthMetricsSetting(\.enableWorkoutData, on: $enableWorkoutData) { [weak self] _ in
                 self?.requestHealthMetricsPermissionsIfNeeded()
+            }
+
+            // Load recent nutrition data if reading is enabled
+            if readNutritionFromHealth {
+                fetchRecentNutrition()
             }
         }
 
@@ -106,6 +139,38 @@ extension AppleHealthKit {
                     warning(.service, "Health metrics permissions not fully granted")
                 }
             }
+        }
+
+        private func requestNutritionPermissionsAndFetch() {
+            Task {
+                let granted = await nutritionHealthService.requestPermissions()
+                if granted {
+                    debug(.service, "Nutrition read permissions granted")
+                    await fetchRecentNutritionAsync()
+                } else {
+                    warning(.service, "Nutrition read permissions not fully granted")
+                }
+            }
+        }
+
+        func fetchRecentNutrition() {
+            Task {
+                await fetchRecentNutritionAsync()
+            }
+        }
+
+        @MainActor
+        private func fetchRecentNutritionAsync() async {
+            isLoadingNutrition = true
+            do {
+                let meals = try await nutritionHealthService.fetchRecentMeals(hours: 24)
+                recentMeals = meals
+                debug(.service, "Fetched \(meals.count) meals from Apple Health")
+            } catch {
+                debug(.service, "Failed to fetch nutrition data: \(error.localizedDescription)")
+                recentMeals = []
+            }
+            isLoadingNutrition = false
         }
     }
 }

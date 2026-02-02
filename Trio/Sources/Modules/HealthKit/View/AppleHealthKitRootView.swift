@@ -64,6 +64,14 @@ extension AppleHealthKit {
                     }.listRowBackground(Color.chart)
                 }
 
+                // Nutrition Data Section
+                nutritionDataSection
+
+                // Nutrition Preview (when read is enabled)
+                if state.readNutritionFromHealth {
+                    nutritionPreviewSection
+                }
+
                 // Health Metrics for AI Analysis Section
                 healthMetricsSection
             }
@@ -82,6 +90,212 @@ extension AppleHealthKit {
             .navigationTitle("Apple Health")
             .navigationBarTitleDisplayMode(.automatic)
         }
+
+        // MARK: - Nutrition Data Section
+
+        @ViewBuilder
+        private var nutritionDataSection: some View {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "fork.knife")
+                            .foregroundColor(.orange)
+                        Text("Nutrition Data")
+                            .font(.headline)
+                    }
+                    Text("Control how Trio interacts with nutrition data (carbs, fat, protein) in Apple Health. Disable writing if another app like Cronometer is your nutrition source.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section {
+                Toggle(isOn: $state.writeNutritionToHealth) {
+                    HStack {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundColor(.blue)
+                            .frame(width: 24)
+                        VStack(alignment: .leading) {
+                            Text("Write Nutrition to Apple Health")
+                            Text("Send carb/fat/protein entries from Trio to Apple Health")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                Toggle(isOn: $state.readNutritionFromHealth) {
+                    HStack {
+                        Image(systemName: "square.and.arrow.down")
+                            .foregroundColor(.green)
+                            .frame(width: 24)
+                        VStack(alignment: .leading) {
+                            Text("Read Nutrition from Apple Health")
+                            Text("Display nutrition data from external apps (e.g., Cronometer)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("Nutrition Sync")
+            } footer: {
+                Text("If you use Cronometer or another app to log food, disable writing to avoid duplicate entries and enable reading to see that data in Trio.")
+            }
+        }
+
+        // MARK: - Nutrition Preview Section
+
+        @ViewBuilder
+        private var nutritionPreviewSection: some View {
+            Section {
+                if state.isLoadingNutrition {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .padding()
+                        Spacer()
+                    }
+                } else if state.recentMeals.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "tray")
+                                .foregroundColor(.secondary)
+                            Text("No Recent Meals")
+                                .foregroundColor(.secondary)
+                        }
+                        Text("No nutrition data found in Apple Health for the last 24 hours. Make sure your nutrition app is syncing to Apple Health and that read permissions are granted in iOS Settings > Health > Trio.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                } else {
+                    ForEach(state.recentMeals.reversed()) { meal in
+                        mealRow(meal)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Recent Meals (24h)")
+                    Spacer()
+                    if !state.isLoadingNutrition {
+                        Button {
+                            state.fetchRecentNutrition()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption)
+                        }
+                    }
+                }
+            } footer: {
+                if !state.recentMeals.isEmpty {
+                    let totalCarbs = state.recentMeals.reduce(0) { $0 + $1.totalCarbs }
+                    let totalFat = state.recentMeals.reduce(0) { $0 + $1.totalFat }
+                    let totalProtein = state.recentMeals.reduce(0) { $0 + $1.totalProtein }
+                    let totalCal = state.recentMeals.reduce(0) { $0 + $1.totalCalories }
+                    Text("24h totals: \(Int(totalCarbs))g C / \(Int(totalFat))g F / \(Int(totalProtein))g P — \(Int(totalCal)) kcal")
+                }
+            }
+        }
+
+        @ViewBuilder
+        private func mealRow(_ meal: HealthNutritionMeal) -> some View {
+            VStack(alignment: .leading, spacing: 6) {
+                // Header: time and source
+                HStack {
+                    Text(meal.timeDescription)
+                        .font(.headline)
+                    Text(meal.timeAgo)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(meal.source)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.15))
+                        .cornerRadius(4)
+                }
+
+                // Macro totals
+                HStack(spacing: 16) {
+                    macroLabel("C", grams: meal.totalCarbs, color: .orange)
+                    macroLabel("F", grams: meal.totalFat, color: .yellow)
+                    macroLabel("P", grams: meal.totalProtein, color: .red)
+                    Spacer()
+                    Text("\(Int(meal.totalCalories)) kcal")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                // Macro percentage bar
+                macroPercentageBar(meal: meal)
+            }
+            .padding(.vertical, 4)
+        }
+
+        @ViewBuilder
+        private func macroLabel(_ label: String, grams: Double, color: Color) -> some View {
+            HStack(spacing: 2) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 8, height: 8)
+                Text("\(Int(grams))g \(label)")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+        }
+
+        @ViewBuilder
+        private func macroPercentageBar(meal: HealthNutritionMeal) -> some View {
+            GeometryReader { geometry in
+                HStack(spacing: 1) {
+                    let carbWidth = geometry.size.width * meal.carbPercentage / 100
+                    let fatWidth = geometry.size.width * meal.fatPercentage / 100
+                    let proteinWidth = geometry.size.width * meal.proteinPercentage / 100
+
+                    if meal.carbPercentage > 0 {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.orange)
+                            .frame(width: max(carbWidth, 2))
+                            .overlay(
+                                Text("\(Int(meal.carbPercentage))%")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.white)
+                                    .opacity(carbWidth > 30 ? 1 : 0)
+                            )
+                    }
+                    if meal.fatPercentage > 0 {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.yellow)
+                            .frame(width: max(fatWidth, 2))
+                            .overlay(
+                                Text("\(Int(meal.fatPercentage))%")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.black)
+                                    .opacity(fatWidth > 30 ? 1 : 0)
+                            )
+                    }
+                    if meal.proteinPercentage > 0 {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.red)
+                            .frame(width: max(proteinWidth, 2))
+                            .overlay(
+                                Text("\(Int(meal.proteinPercentage))%")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.white)
+                                    .opacity(proteinWidth > 30 ? 1 : 0)
+                            )
+                    }
+                }
+            }
+            .frame(height: 16)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+        }
+
+        // MARK: - Health Metrics Section
 
         @ViewBuilder
         private var healthMetricsSection: some View {

@@ -46,6 +46,8 @@ struct TrioSettings: JSON, Equatable {
     var minuteInterval: Decimal = 30
     var delay: Decimal = 60
     var useAppleHealth: Bool = false
+    var writeNutritionToHealth: Bool = true
+    var readNutritionFromHealth: Bool = false
     var healthMetricsSettings: HealthMetricsSettings = HealthMetricsSettings()
     var smoothGlucose: Bool = false
     var eA1cDisplayUnit: EstimatedA1cDisplayUnit = .percent
@@ -134,6 +136,14 @@ extension TrioSettings: Decodable {
 
         if let useAppleHealth = try? container.decode(Bool.self, forKey: .useAppleHealth) {
             settings.useAppleHealth = useAppleHealth
+        }
+
+        if let writeNutritionToHealth = try? container.decode(Bool.self, forKey: .writeNutritionToHealth) {
+            settings.writeNutritionToHealth = writeNutritionToHealth
+        }
+
+        if let readNutritionFromHealth = try? container.decode(Bool.self, forKey: .readNutritionFromHealth) {
+            settings.readNutritionFromHealth = readNutritionFromHealth
         }
 
         if let healthMetricsSettings = try? container.decode(HealthMetricsSettings.self, forKey: .healthMetricsSettings) {

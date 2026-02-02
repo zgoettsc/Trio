@@ -755,6 +755,8 @@
 		FEFFA7A22929FE49007B8193 /* UIDevice+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFFA7A12929FE49007B8193 /* UIDevice+Extensions.swift */; };
 		HME7A7FED7B34D0D8F5BC383 /* HealthMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = HMF49BBBF5CD4A9BBC14CC1F /* HealthMetrics.swift */; };
 		HS65A6D45B1A4FC1B3A02035 /* HealthMetricsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = HS70616C45944CE888DC2C8D /* HealthMetricsService.swift */; };
+		NH1A2B3C4D5E6F7A8B9C0D1E /* NutritionHealthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NH2B3C4D5E6F7A8B9C0D1E2F /* NutritionHealthService.swift */; };
+		HN3C4D5E6F7A8B9C0D1E2F3A /* HealthNutrition.swift in Sources */ = {isa = PBXBuildFile; fileRef = HN4D5E6F7A8B9C0D1E2F3A4B /* HealthNutrition.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1610,6 +1612,8 @@
 		FEFFA7A12929FE49007B8193 /* UIDevice+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UIDevice+Extensions.swift"; sourceTree = "<group>"; };
 		HMF49BBBF5CD4A9BBC14CC1F /* HealthMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthMetrics.swift; sourceTree = "<group>"; };
 		HS70616C45944CE888DC2C8D /* HealthMetricsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthMetricsService.swift; sourceTree = "<group>"; };
+		NH2B3C4D5E6F7A8B9C0D1E2F /* NutritionHealthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionHealthService.swift; sourceTree = "<group>"; };
+		HN4D5E6F7A8B9C0D1E2F3A4B /* HealthNutrition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthNutrition.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -2448,6 +2452,7 @@
 				18ED8EA2AF12F8301B9CC005 /* TherapyProfile.swift */,
 				2593404672BB08B4E9D1B22D /* ProfileSwitchEvent.swift */,
 				HMF49BBBF5CD4A9BBC14CC1F /* HealthMetrics.swift */,
+				HN4D5E6F7A8B9C0D1E2F3A4B /* HealthNutrition.swift */,
 				DDFF204F2DB2C11900AB8A96 /* WatchStateSnapshot.swift */,
 				DDEBB05B2D89E9050032305D /* TimeInRangeType.swift */,
 				3B2F77852D7E52ED005ED9FA /* TDD.swift */,
@@ -3917,6 +3922,7 @@
 			children = (
 				HS70616C45944CE888DC2C8D /* HealthMetricsService.swift */,
 				F90692A9274B7AAE0037068D /* HealthKitManager.swift */,
+				NH2B3C4D5E6F7A8B9C0D1E2F /* NutritionHealthService.swift */,
 			);
 			path = HealthKit;
 			sourceTree = "<group>";
@@ -4301,6 +4307,8 @@
 			files = (
 				HME7A7FED7B34D0D8F5BC383 /* HealthMetrics.swift in Sources */,
 				HS65A6D45B1A4FC1B3A02035 /* HealthMetricsService.swift in Sources */,
+				NH1A2B3C4D5E6F7A8B9C0D1E /* NutritionHealthService.swift in Sources */,
+				HN3C4D5E6F7A8B9C0D1E2F3A /* HealthNutrition.swift in Sources */,
 				A1B1C1D1E1F101010101A1B1 /* AIInsightsConfigDataFlow.swift in Sources */,
 				A1B1C1D1E1F101010101A1B2 /* AIInsightsConfigStateModel.swift in Sources */,
 				A1B1C1D1E1F101010101A1B3 /* AIInsightsConfigProvider.swift in Sources */,
