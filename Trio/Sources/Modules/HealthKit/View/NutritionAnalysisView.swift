@@ -1,3 +1,4 @@
+import LoopKit
 import SwiftUI
 import Swinject
 
@@ -658,6 +659,9 @@ struct NutritionAnalysisView: View {
             return
         }
 
+        let deviceManager = resolver.resolve(DeviceDataManager.self)
+        let nightscout = resolver.resolve(NightscoutManager.self)
+
         var appliedChanges: [String] = []
         var failedChanges: [String] = []
 
@@ -666,10 +670,16 @@ struct NutritionAnalysisView: View {
 
             switch rec.setting {
             case let .reduceBasal(timeWindow, pctReduction):
-                if applyBasalReduction(storage: storage, timeWindow: timeWindow, pctReduction: pctReduction) {
+                do {
+                    try await applyBasalReduction(
+                        storage: storage,
+                        deviceManager: deviceManager,
+                        timeWindow: timeWindow,
+                        pctReduction: pctReduction
+                    )
                     appliedChanges.append("Basal rate reduced \(timeWindow) by \(Int(pctReduction))%")
-                } else {
-                    failedChanges.append("Basal rate change failed")
+                } catch {
+                    failedChanges.append("Basal rate: \(error.localizedDescription)")
                 }
 
             case let .weakenICR(pctChange):
@@ -681,6 +691,13 @@ struct NutritionAnalysisView: View {
 
             default:
                 break
+            }
+        }
+
+        // Upload to Nightscout if any changes were applied (same as Claude-o-Tune)
+        if !appliedChanges.isEmpty {
+            Task.detached(priority: .low) {
+                try? await nightscout?.uploadProfiles()
             }
         }
 
@@ -702,17 +719,24 @@ struct NutritionAnalysisView: View {
         return hour * 60 + min
     }
 
-    /// Reduce basal rates within a time window by a percentage
-    private func applyBasalReduction(storage: FileStorage, timeWindow: String, pctReduction: Double) -> Bool {
+    /// Reduce basal rates within a time window by a percentage, syncing to pump
+    private func applyBasalReduction(
+        storage: FileStorage,
+        deviceManager: DeviceDataManager?,
+        timeWindow: String,
+        pctReduction: Double
+    ) async throws {
         guard var profile = storage.retrieve(OpenAPS.Settings.basalProfile, as: [BasalProfileEntry].self) else {
-            return false
+            throw ApplyError.storageFailed("Could not read current basal profile")
         }
 
         let windowParts = timeWindow.split(separator: "-")
         guard windowParts.count == 2,
               let startMin = parseTimeToMinutes(String(windowParts[0])),
               let endMin = parseTimeToMinutes(String(windowParts[1]))
-        else { return false }
+        else {
+            throw ApplyError.storageFailed("Invalid time window format")
+        }
 
         let factor = Decimal(1.0 - pctReduction / 100.0)
         var changed = false
@@ -734,10 +758,41 @@ struct NutritionAnalysisView: View {
             }
         }
 
-        if changed {
-            storage.save(profile, as: OpenAPS.Settings.basalProfile)
+        guard changed else {
+            throw ApplyError.storageFailed("No basal entries matched the time window")
         }
-        return changed
+
+        // Sync with pump (exactly as Claude-o-Tune does)
+        try await syncBasalWithPump(profile, storage: storage, deviceManager: deviceManager)
+    }
+
+    /// Sync basal profile to pump (copied from ClaudeOTuneProfileService)
+    private func syncBasalWithPump(
+        _ profile: [BasalProfileEntry],
+        storage: FileStorage,
+        deviceManager: DeviceDataManager?
+    ) async throws {
+        guard let pump = deviceManager?.pumpManager else {
+            // No pump connected - just save locally
+            storage.save(profile, as: OpenAPS.Settings.basalProfile)
+            return
+        }
+
+        let syncValues = profile.map {
+            RepeatingScheduleValue(startTime: TimeInterval($0.minutes * 60), value: Double($0.rate))
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            pump.syncBasalRateSchedule(items: syncValues) { result in
+                switch result {
+                case .success:
+                    storage.save(profile, as: OpenAPS.Settings.basalProfile)
+                    continuation.resume()
+                case let .failure(error):
+                    continuation.resume(throwing: ApplyError.basalSyncFailed(error.localizedDescription))
+                }
+            }
+        }
     }
 
     /// Weaken ICR by increasing ratio values (more carbs per unit of insulin)
@@ -757,6 +812,19 @@ struct NutritionAnalysisView: View {
         carbRatios = CarbRatios(units: carbRatios.units, schedule: newSchedule)
         storage.save(carbRatios, as: OpenAPS.Settings.carbRatios)
         return true
+    }
+
+    /// Errors that can occur during apply
+    private enum ApplyError: LocalizedError {
+        case storageFailed(String)
+        case basalSyncFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case let .storageFailed(msg): return msg
+            case let .basalSyncFailed(msg): return "Pump sync failed: \(msg)"
+            }
+        }
     }
 
     // MARK: - ICR Analysis Section
