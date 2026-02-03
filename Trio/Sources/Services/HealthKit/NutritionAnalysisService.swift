@@ -8,10 +8,15 @@ protocol NutritionAnalysisService {
 
 final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
     @Injected() private var nutritionHealthService: NutritionHealthService!
+    @Injected() private var healthMetricsService: HealthMetricsService!
     @Injected() private var settingsManager: SettingsManager!
+    @Injected() private var storage: FileStorage!
 
     private let context: NSManagedObjectContext
     private let calendar = Calendar.current
+
+    /// Maximum % change to recommend for any setting (guardrail)
+    private let maxRecommendedAdjustment: Double = 20.0
 
     init(resolver: Resolver) {
         context = CoreDataStack.shared.newTaskContext()
@@ -28,15 +33,17 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
         async let trioCarbs = fetchTrioCarbEntries(from: startDate, to: endDate)
         async let glucoseReadings = fetchGlucoseReadings(from: startDate, to: endDate)
         async let bolusEvents = fetchBolusEvents(from: startDate, to: endDate)
+        async let workoutSessions = fetchWorkouts(from: startDate, to: endDate)
 
         let ahDays = try await healthDays
         let trioCarbEntries = try await trioCarbs
         let glucose = try await glucoseReadings
         let boluses = try await bolusEvents
+        let workouts = try await workoutSessions
 
         debug(
             .service,
-            "Analysis data: \(ahDays.count) AH days, \(trioCarbEntries.count) Trio entries, \(glucose.count) glucose, \(boluses.count) boluses"
+            "Analysis data: \(ahDays.count) AH days, \(trioCarbEntries.count) Trio entries, \(glucose.count) glucose, \(boluses.count) boluses, \(workouts.count) workouts"
         )
 
         // Match by day: compare daily Trio carb totals vs daily Cronometer totals
@@ -44,7 +51,8 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
             trioEntries: trioCarbEntries,
             healthDays: ahDays,
             glucose: glucose,
-            boluses: boluses
+            boluses: boluses,
+            workouts: workouts
         )
 
         let summary = computeSummary(
@@ -124,6 +132,17 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
                 guard amount > 0 else { return nil }
                 return BolusRecord(date: timestamp, amount: amount, isSMB: isSMB)
             }
+        }
+    }
+
+    // MARK: - Workout Fetching
+
+    private func fetchWorkouts(from startDate: Date, to endDate: Date) async -> [WorkoutSession] {
+        do {
+            return try await healthMetricsService.fetchWorkouts(from: startDate, to: endDate)
+        } catch {
+            debug(.service, "Failed to fetch workouts for low classification: \(error.localizedDescription)")
+            return []
         }
     }
 
@@ -243,6 +262,179 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
         return min(60, max(8, estimated))
     }
 
+    // MARK: - Low Episode Classification
+
+    /// Classify a low episode by its probable cause based on context.
+    /// - Exercise-induced: workout ended 0-4 hours before the low
+    /// - Post-bolus: non-SMB bolus delivered 1-4 hours before the low
+    /// - Fasting/basal: no recent bolus or exercise
+    /// - Mixed: both exercise and bolus contributed
+    private func classifyLowEpisode(
+        _ episode: LowEpisode,
+        workouts: [WorkoutSession],
+        boluses: [BolusRecord]
+    ) -> (cause: LowEpisodeCause, workout: String?, bolusAmount: Double?) {
+        let lowStart = episode.startTime
+
+        // Check for exercise: workout ended 0-4h before the low started
+        let exerciseWindow: TimeInterval = 4 * 3600 // 4 hours
+        let recentWorkout = workouts.first { workout in
+            let timeSinceWorkoutEnd = lowStart.timeIntervalSince(workout.end)
+            return timeSinceWorkoutEnd >= 0 && timeSinceWorkoutEnd <= exerciseWindow
+        }
+
+        // Check for bolus: non-SMB bolus delivered 1-4h before the low started
+        let bolusWindowMin: TimeInterval = 1 * 3600 // 1 hour (insulin takes time to act)
+        let bolusWindowMax: TimeInterval = 4 * 3600 // 4 hours (DIA)
+        let recentBolus = boluses.filter { !$0.isSMB }.first { bolus in
+            let timeSinceBolus = lowStart.timeIntervalSince(bolus.date)
+            return timeSinceBolus >= bolusWindowMin && timeSinceBolus <= bolusWindowMax
+        }
+
+        let hadExercise = recentWorkout != nil
+        let hadBolus = recentBolus != nil
+
+        let cause: LowEpisodeCause
+        if hadExercise && hadBolus {
+            cause = .mixed
+        } else if hadExercise {
+            cause = .exercise
+        } else if hadBolus {
+            cause = .postBolus
+        } else {
+            // No recent exercise or bolus — likely basal-driven
+            // Check if there was ANY bolus in the last 6 hours (to catch edge cases)
+            let extendedBolusWindow: TimeInterval = 6 * 3600
+            let anyRecentBolus = boluses.filter { !$0.isSMB }.contains { bolus in
+                let timeSince = lowStart.timeIntervalSince(bolus.date)
+                return timeSince >= 0 && timeSince <= extendedBolusWindow
+            }
+            cause = anyRecentBolus ? .postBolus : .fasting
+        }
+
+        return (cause, recentWorkout?.workoutType, recentBolus?.amount)
+    }
+
+    // MARK: - Setting Recommendations
+
+    /// Generate guardrailed setting recommendations based on low episode patterns
+    private func generateRecommendations(
+        episodes: [LowEpisode],
+        daysAnalyzed: Int
+    ) -> [SettingRecommendation] {
+        guard episodes.count >= 3 else { return [] } // Need enough data
+
+        var recommendations: [SettingRecommendation] = []
+        let total = Double(episodes.count)
+        let exerciseEpisodes = episodes.filter { $0.cause == .exercise }
+        let postBolusEpisodes = episodes.filter { $0.cause == .postBolus }
+        let fastingEpisodes = episodes.filter { $0.cause == .fasting }
+        let mixedEpisodes = episodes.filter { $0.cause == .mixed }
+
+        let episodesPerDay = total / Double(max(1, daysAnalyzed))
+
+        // --- Exercise-related recommendations ---
+        if exerciseEpisodes.count >= 2 {
+            let exerciseRate = Double(exerciseEpisodes.count) / total
+            let confidence: RecommendationConfidence = exerciseEpisodes.count >= 5 ? .high : .medium
+            let severity: RecommendationSeverity = exerciseRate > 0.4 ? .recommended : .suggested
+
+            // Find most common workout types
+            let workoutTypes = exerciseEpisodes.compactMap(\.relatedWorkout)
+            let typeCounts = Dictionary(grouping: workoutTypes, by: { $0 }).mapValues(\.count)
+            let topWorkout = typeCounts.max(by: { $0.value < $1.value })?.key ?? "exercise"
+
+            recommendations.append(SettingRecommendation(
+                setting: .exerciseAdjustment(
+                    suggestion: "Consider setting a lower temp target or reduced basal 1-2h before \(topWorkout.lowercased()). \(exerciseEpisodes.count) of \(Int(total)) lows occurred within 4h of exercise."
+                ),
+                rationale: "\(Int(exerciseRate * 100))% of lows are exercise-related. \(topWorkout) is the most common trigger.",
+                confidence: confidence,
+                severity: severity
+            ))
+        }
+
+        // --- Post-bolus recommendations (ICR too aggressive) ---
+        if postBolusEpisodes.count >= 2 {
+            let bolusRate = Double(postBolusEpisodes.count) / total
+            let confidence: RecommendationConfidence = postBolusEpisodes.count >= 5 ? .high : .medium
+
+            // Calculate suggested ICR weakening based on frequency
+            // More post-bolus lows = more aggressive the ICR is
+            var suggestedPctChange = min(maxRecommendedAdjustment, bolusRate * 30)
+            suggestedPctChange = (suggestedPctChange / 5).rounded() * 5 // Round to nearest 5%
+
+            if suggestedPctChange >= 5 {
+                recommendations.append(SettingRecommendation(
+                    setting: .weakenICR(percentChange: suggestedPctChange),
+                    rationale: "\(postBolusEpisodes.count) lows occurred 1-4h after a meal bolus, suggesting your ICR may be too aggressive. Average bolus before these lows: \(String(format: "%.1f", postBolusEpisodes.compactMap(\.recentBolusAmount).reduce(0, +) / Double(max(1, postBolusEpisodes.compactMap(\.recentBolusAmount).count))))U.",
+                    confidence: confidence,
+                    severity: bolusRate > 0.3 ? .recommended : .suggested
+                ))
+            }
+        }
+
+        // --- Fasting/basal recommendations ---
+        if fastingEpisodes.count >= 2 {
+            let fastingRate = Double(fastingEpisodes.count) / total
+            let confidence: RecommendationConfidence = fastingEpisodes.count >= 5 ? .high : .medium
+
+            // Analyze time-of-day clustering to find problematic basal windows
+            let hourCounts = Dictionary(grouping: fastingEpisodes, by: { calendar.component(.hour, from: $0.startTime) })
+            let sortedHours = hourCounts.sorted { $0.value.count > $1.value.count }
+
+            // Find the peak window
+            if let peakHour = sortedHours.first {
+                let startHour = peakHour.key
+                let endHour = (startHour + 3) % 24 // 3-hour window
+                let windowStr = String(format: "%d:00-%d:00", startHour, endHour)
+                let episodesInWindow = peakHour.value.count
+
+                // Suggest reduction proportional to frequency, capped at guardrail
+                var suggestedPct = min(maxRecommendedAdjustment, Double(episodesInWindow) / Double(daysAnalyzed) * 15)
+                suggestedPct = max(5, (suggestedPct / 5).rounded() * 5)
+
+                recommendations.append(SettingRecommendation(
+                    setting: .reduceBasal(timeWindow: windowStr, percentReduction: suggestedPct),
+                    rationale: "\(fastingEpisodes.count) fasting lows detected (\(Int(fastingRate * 100))% of all lows). Peak occurrence: \(episodesInWindow) episodes around \(windowStr).",
+                    confidence: confidence,
+                    severity: fastingRate > 0.3 ? .recommended : .suggested
+                ))
+            }
+        }
+
+        // --- Overall frequency warning ---
+        if episodesPerDay > 2.0 {
+            recommendations.append(SettingRecommendation(
+                setting: .general(
+                    suggestion: "Averaging \(String(format: "%.1f", episodesPerDay)) lows/day is significantly above target. Consider discussing overall insulin sensitivity settings with your endocrinologist."
+                ),
+                rationale: "\(Int(total)) low episodes in \(daysAnalyzed) days indicates settings may need comprehensive review.",
+                confidence: total >= 14 ? .high : .medium,
+                severity: .recommended
+            ))
+        }
+
+        // --- Over-correction warning ---
+        let overCorrected = episodes.filter(\.overCorrected)
+        if overCorrected.count >= 3 {
+            let overRate = Double(overCorrected.count) / total
+            if overRate > 0.25 {
+                let avgRise = overCorrected.compactMap(\.recoveryRise).reduce(0, +) / max(1, overCorrected.compactMap(\.recoveryRise).count)
+                recommendations.append(SettingRecommendation(
+                    setting: .general(
+                        suggestion: "Consider using glucose tabs (4g each) instead of high-carb foods for lows. Target 15g, wait 15 min, recheck. Average over-correction rise: +\(avgRise) mg/dL."
+                    ),
+                    rationale: "\(overCorrected.count) of \(Int(total)) lows (\(Int(overRate * 100))%) resulted in BG spikes above 180.",
+                    confidence: overCorrected.count >= 5 ? .high : .medium,
+                    severity: overRate > 0.4 ? .recommended : .suggested
+                ))
+            }
+        }
+
+        return recommendations
+    }
+
     // MARK: - Day-Based Matching
 
     /// Match Trio carb entries and Apple Health nutrition by calendar day.
@@ -251,7 +443,8 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
         trioEntries: [TrioCarbRecord],
         healthDays: [HealthNutritionDay],
         glucose: [BGReading],
-        boluses: [BolusRecord]
+        boluses: [BolusRecord],
+        workouts: [WorkoutSession] = []
     ) -> (matched: [MatchedMealAnalysis], unmatchedTrioDays: Int, unmatchedAHDays: Int) {
         let lowThreshold = Int(truncating: settingsManager.settings.lowGlucose as NSDecimalNumber)
 
@@ -300,13 +493,32 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
             let avgBG = dayGlucose.isEmpty ? nil : dayGlucose.map(\.value).reduce(0, +) / dayGlucose.count
             let maxBG = dayGlucose.map(\.value).max()
 
-            // Detect low episodes and estimate treatment carbs
-            let lows = detectLowEpisodes(
+            // Detect low episodes, classify by cause, and estimate treatment carbs
+            let rawLows = detectLowEpisodes(
                 glucose: glucose,
                 dayStart: dayDate,
                 dayEnd: dayEnd,
                 lowThreshold: lowThreshold
             )
+            // Classify each low episode
+            let lows = rawLows.map { episode -> LowEpisode in
+                let (cause, workout, bolusAmt) = classifyLowEpisode(episode, workouts: workouts, boluses: boluses)
+                return LowEpisode(
+                    id: episode.id,
+                    startTime: episode.startTime,
+                    nadirTime: episode.nadirTime,
+                    nadirBG: episode.nadirBG,
+                    recoveryTime: episode.recoveryTime,
+                    recoveryBG: episode.recoveryBG,
+                    peakAfterTime: episode.peakAfterTime,
+                    peakAfterBG: episode.peakAfterBG,
+                    bgAtStart: episode.bgAtStart,
+                    duration: episode.duration,
+                    cause: cause,
+                    relatedWorkout: workout,
+                    recentBolusAmount: bolusAmt
+                )
+            }
             let treatmentCarbs = lows.reduce(0.0) { $0 + estimateTreatmentCarbs(for: $1) }
 
             let analysis = MatchedMealAnalysis(
@@ -413,6 +625,16 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
             let avgPeakAfter = peaksAfter.isEmpty ? nil : peaksAfter.reduce(0, +) / peaksAfter.count
             let totalTreatmentCarbs = matched.map(\.estimatedTreatmentCarbs).reduce(0, +)
 
+            // Cause breakdown
+            let exerciseCount = allEpisodes.filter { $0.cause == .exercise }.count
+            let postBolusCount = allEpisodes.filter { $0.cause == .postBolus }.count
+            let fastingCount = allEpisodes.filter { $0.cause == .fasting }.count
+            let mixedCount = allEpisodes.filter { $0.cause == .mixed }.count
+            let unknownCount = allEpisodes.filter { $0.cause == .unknown }.count
+
+            // Generate guardrailed recommendations
+            let recommendations = generateRecommendations(episodes: allEpisodes, daysAnalyzed: days)
+
             lowTreatmentSummary = LowTreatmentSummary(
                 totalEpisodes: allEpisodes.count,
                 episodesPerDay: Double(allEpisodes.count) / daysWithData,
@@ -422,7 +644,13 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
                 overCorrectionCount: overCorrCount,
                 overCorrectionRate: Double(overCorrCount) / Double(allEpisodes.count),
                 averagePeakAfterLow: avgPeakAfter,
-                estimatedDailyTreatmentCarbs: totalTreatmentCarbs / daysWithData
+                estimatedDailyTreatmentCarbs: totalTreatmentCarbs / daysWithData,
+                exerciseCount: exerciseCount,
+                postBolusCount: postBolusCount,
+                fastingCount: fastingCount,
+                mixedCount: mixedCount,
+                unknownCount: unknownCount,
+                recommendations: recommendations
             )
         } else {
             lowTreatmentSummary = nil

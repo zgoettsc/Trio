@@ -59,9 +59,45 @@ struct InferredMealEvent: Identifiable, Equatable {
     }
 }
 
+// MARK: - Low Episode Classification
+
+/// The probable cause of a low BG episode, determined by context
+enum LowEpisodeCause: String, Equatable {
+    /// Workout ended 0-4 hours before the low (exercise increases insulin sensitivity)
+    case exercise
+    /// Non-SMB bolus delivered 1-4 hours before the low (too much insulin for food)
+    case postBolus
+    /// No recent bolus (>4h) and no recent exercise (>4h) — basal rate likely too high
+    case fasting
+    /// Both exercise and bolus contributed
+    case mixed
+    /// Insufficient data to classify
+    case unknown
+
+    var displayName: String {
+        switch self {
+        case .exercise: return "Exercise"
+        case .postBolus: return "Post-Bolus"
+        case .fasting: return "Fasting/Basal"
+        case .mixed: return "Mixed"
+        case .unknown: return "Unknown"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .exercise: return "🏃"
+        case .postBolus: return "💉"
+        case .fasting: return "🌙"
+        case .mixed: return "⚡"
+        case .unknown: return "❓"
+        }
+    }
+}
+
 // MARK: - Low Episode
 
-/// A detected low blood glucose episode with recovery tracking
+/// A detected low blood glucose episode with recovery tracking and cause classification
 struct LowEpisode: Identifiable, Equatable {
     let id: UUID
     let startTime: Date // When BG first dropped below threshold
@@ -73,6 +109,9 @@ struct LowEpisode: Identifiable, Equatable {
     let peakAfterBG: Int? // Highest BG within 3h of nadir
     let bgAtStart: Int // BG when episode started
     let duration: TimeInterval // Time from start to recovery (or end of data)
+    let cause: LowEpisodeCause // Classified cause of the low
+    let relatedWorkout: String? // Workout type if exercise-related
+    let recentBolusAmount: Double? // Bolus amount if post-bolus
 
     init(
         id: UUID = UUID(),
@@ -84,7 +123,10 @@ struct LowEpisode: Identifiable, Equatable {
         peakAfterTime: Date? = nil,
         peakAfterBG: Int? = nil,
         bgAtStart: Int,
-        duration: TimeInterval = 0
+        duration: TimeInterval = 0,
+        cause: LowEpisodeCause = .unknown,
+        relatedWorkout: String? = nil,
+        recentBolusAmount: Double? = nil
     ) {
         self.id = id
         self.startTime = startTime
@@ -96,6 +138,9 @@ struct LowEpisode: Identifiable, Equatable {
         self.peakAfterBG = peakAfterBG
         self.bgAtStart = bgAtStart
         self.duration = duration
+        self.cause = cause
+        self.relatedWorkout = relatedWorkout
+        self.recentBolusAmount = recentBolusAmount
     }
 
     /// Did the recovery peak overshoot target range?
@@ -116,6 +161,80 @@ struct LowEpisode: Identifiable, Equatable {
     }
 }
 
+// MARK: - Setting Recommendation
+
+/// A guardrailed recommendation to adjust a Trio setting based on low episode analysis
+struct SettingRecommendation: Identifiable, Equatable {
+    let id: UUID
+    let setting: RecommendedSetting
+    let rationale: String
+    let confidence: RecommendationConfidence
+    let severity: RecommendationSeverity
+
+    init(
+        id: UUID = UUID(),
+        setting: RecommendedSetting,
+        rationale: String,
+        confidence: RecommendationConfidence,
+        severity: RecommendationSeverity
+    ) {
+        self.id = id
+        self.setting = setting
+        self.rationale = rationale
+        self.confidence = confidence
+        self.severity = severity
+    }
+}
+
+enum RecommendedSetting: Equatable {
+    /// Reduce basal rate during a time window (e.g., "reduce 10pm-2am by 10%")
+    case reduceBasal(timeWindow: String, percentReduction: Double)
+    /// Weaken ICR (increase the ratio number, meaning less insulin per gram)
+    case weakenICR(percentChange: Double)
+    /// Reduce pre-exercise basal or add pre-exercise carbs
+    case exerciseAdjustment(suggestion: String)
+    /// General recommendation (free text)
+    case general(suggestion: String)
+
+    var displayName: String {
+        switch self {
+        case .reduceBasal: return "Basal Rate"
+        case .weakenICR: return "Carb Ratio"
+        case .exerciseAdjustment: return "Exercise"
+        case .general: return "General"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case let .reduceBasal(window, pct):
+            return "Consider reducing basal rate \(window) by ~\(Int(pct))%"
+        case let .weakenICR(pct):
+            return "Consider weakening ICR by ~\(Int(pct))% (more carbs per unit)"
+        case let .exerciseAdjustment(suggestion):
+            return suggestion
+        case let .general(suggestion):
+            return suggestion
+        }
+    }
+}
+
+enum RecommendationConfidence: String, Equatable {
+    case low
+    case medium
+    case high
+
+    var displayName: String { rawValue.capitalized }
+}
+
+enum RecommendationSeverity: String, Equatable {
+    case informational
+    case suggested
+    case recommended
+
+    var displayName: String { rawValue.capitalized }
+}
+
 // MARK: - Low Treatment Analysis Summary
 
 /// Aggregate statistics about low episode treatment patterns
@@ -130,6 +249,32 @@ struct LowTreatmentSummary: Equatable {
     let averagePeakAfterLow: Int?
     let estimatedDailyTreatmentCarbs: Double // Based on episode count * estimated carbs per episode
 
+    // Cause breakdown
+    let exerciseCount: Int
+    let postBolusCount: Int
+    let fastingCount: Int
+    let mixedCount: Int
+    let unknownCount: Int
+
+    // Setting recommendations
+    let recommendations: [SettingRecommendation]
+
+    var exerciseRate: Double { totalEpisodes > 0 ? Double(exerciseCount) / Double(totalEpisodes) : 0 }
+    var postBolusRate: Double { totalEpisodes > 0 ? Double(postBolusCount) / Double(totalEpisodes) : 0 }
+    var fastingRate: Double { totalEpisodes > 0 ? Double(fastingCount) / Double(totalEpisodes) : 0 }
+    var mixedRate: Double { totalEpisodes > 0 ? Double(mixedCount) / Double(totalEpisodes) : 0 }
+
+    /// The dominant cause of lows
+    var dominantCause: LowEpisodeCause {
+        let counts = [
+            (LowEpisodeCause.exercise, exerciseCount),
+            (.postBolus, postBolusCount),
+            (.fasting, fastingCount),
+            (.mixed, mixedCount)
+        ]
+        return counts.max(by: { $0.1 < $1.1 })?.0 ?? .unknown
+    }
+
     /// Human-readable correction pattern description
     var correctionPattern: String {
         if overCorrectionRate > 0.5 {
@@ -139,6 +284,17 @@ struct LowTreatmentSummary: Equatable {
         } else {
             return "Good correction pattern: only \(Int(overCorrectionRate * 100))% of lows result in over-correction"
         }
+    }
+
+    /// Human-readable cause breakdown
+    var causeBreakdown: String {
+        var parts: [String] = []
+        if exerciseCount > 0 { parts.append("\(exerciseCount) exercise-related") }
+        if postBolusCount > 0 { parts.append("\(postBolusCount) post-bolus") }
+        if fastingCount > 0 { parts.append("\(fastingCount) fasting/basal") }
+        if mixedCount > 0 { parts.append("\(mixedCount) mixed") }
+        if unknownCount > 0 { parts.append("\(unknownCount) unclassified") }
+        return parts.joined(separator: ", ")
     }
 }
 

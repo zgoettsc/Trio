@@ -249,6 +249,89 @@ The nutrition reading feature is **strictly informational**. Apple Health nutrit
 
 ---
 
+### Phase 1D: Low Episode Classification & Setting Recommendations
+
+**Date:** February 2026
+
+**Changes:**
+- Each low BG episode is now classified by probable cause: exercise, post-bolus, fasting/basal, or mixed
+- Workouts are fetched from HealthKit and correlated with low episodes (workout within 4h of low)
+- Bolus history is correlated with low episodes (non-SMB bolus within 1-4h of low)
+- Fasting/basal lows are identified when no recent exercise or bolus explains the low
+- Guardrailed setting recommendations are generated based on the cause breakdown
+- Analysis view shows visual cause breakdown with proportional bars and daily cause badges
+- Export report includes cause breakdown section and detailed recommendations
+
+#### Modified Files:
+
+1. **`Trio/Sources/Models/NutritionSnapshot.swift`**
+   - Added `LowEpisodeCause` enum: `.exercise`, `.postBolus`, `.fasting`, `.mixed`, `.unknown`
+     - Each case has `displayName` and `emoji` computed properties
+   - `LowEpisode` — added fields:
+     - `cause: LowEpisodeCause` — classified cause of the low
+     - `relatedWorkout: String?` — workout type if exercise-related
+     - `recentBolusAmount: Double?` — bolus amount if post-bolus
+   - Added `SettingRecommendation` struct:
+     - `setting: RecommendedSetting` — what to change (basal, ICR, exercise, general)
+     - `rationale: String` — why this is recommended
+     - `confidence: RecommendationConfidence` — low/medium/high based on data quantity
+     - `severity: RecommendationSeverity` — informational/suggested/recommended
+   - Added `RecommendedSetting` enum: `.reduceBasal`, `.weakenICR`, `.exerciseAdjustment`, `.general`
+   - `LowTreatmentSummary` — added:
+     - Cause counts: `exerciseCount`, `postBolusCount`, `fastingCount`, `mixedCount`, `unknownCount`
+     - Cause rates: computed `exerciseRate`, `postBolusRate`, `fastingRate`, `mixedRate`
+     - `dominantCause: LowEpisodeCause` — the most frequent cause
+     - `causeBreakdown: String` — human-readable breakdown
+     - `recommendations: [SettingRecommendation]` — guardrailed suggestions
+
+2. **`Trio/Sources/Services/HealthKit/NutritionAnalysisService.swift`**
+   - Injected `HealthMetricsService` for workout data and `FileStorage` for basal profiles
+   - Added `maxRecommendedAdjustment = 20.0` guardrail constant
+   - Added `fetchWorkouts()` — fetches workout sessions from HealthKit via `HealthMetricsService`
+   - Added `classifyLowEpisode()` — classifies each low by context:
+     - Checks for workouts ending 0-4h before low (exercise)
+     - Checks for non-SMB boluses 1-4h before low (post-bolus)
+     - Falls back to fasting/basal if neither applies
+     - Marks as mixed if both exercise and bolus contributed
+   - Added `generateRecommendations()` — produces guardrailed suggestions:
+     - Exercise-related: suggests temp targets or reduced basal before workouts
+     - Post-bolus: suggests ICR weakening (% based on frequency, capped at 20%)
+     - Fasting/basal: suggests basal reduction during peak low-occurrence time windows
+     - Overall: warns if >2 lows/day, suggests endo consultation
+     - Over-correction: suggests glucose tabs and 15/15 rule
+   - Updated `runAnalysis()` to fetch workouts in parallel with other data
+   - Updated `matchByDay()` to accept workouts and classify detected low episodes
+   - Updated `computeSummary()` to compute cause breakdown counts and generate recommendations
+
+3. **`Trio/Sources/Modules/HealthKit/View/NutritionAnalysisView.swift`**
+   - Added "Low Episode Causes" section with:
+     - Visual proportional bars for each cause (exercise=green, post-bolus=blue, fasting=orange, mixed=yellow)
+     - Dominant cause callout
+   - Added "Setting Recommendations" section with:
+     - Color-coded severity badges (informational=gray, suggested=blue, recommended=orange)
+     - Confidence level display
+     - Main suggestion text and rationale for each recommendation
+     - Footer disclaiming 20% max adjustment cap and advising endo consultation
+   - Daily rows now show per-cause badges (e.g., "2E 1B" = 2 exercise, 1 post-bolus)
+   - Export report includes:
+     - "LOW EPISODE CAUSES" section with counts and percentages per cause
+     - "SETTING RECOMMENDATIONS" section with numbered suggestions, rationale, and confidence
+     - Daily breakdown shows cause breakdown per day as E/B/F/M counts
+
+4. **`documents/NUTRITION_HEALTH_INTEGRATION.md`**
+   - Added Phase 1D documentation
+
+#### Guardrail Design:
+- Maximum recommended setting change: 20% (matching Claude-o-Tune default)
+- Recommendations include confidence levels based on data quantity (≥5 episodes = high)
+- Severity levels help users prioritize (informational < suggested < recommended)
+- Time-window specificity for basal recommendations (identifies peak hours)
+- All recommendations include rationale explaining the data behind the suggestion
+- Footer text advises discussing all changes with an endocrinologist
+- ICR weakening suggestions are rounded to nearest 5% for practical applicability
+
+---
+
 ## Architecture
 
 ### Data Flow

@@ -45,6 +45,10 @@ struct NutritionAnalysisView: View {
 
                 lowTreatmentSection(summary)
 
+                lowCauseBreakdownSection(summary)
+
+                recommendationsSection(summary)
+
                 icrAnalysisSection(summary)
 
                 bgOutcomesSection(summary)
@@ -237,6 +241,176 @@ struct NutritionAnalysisView: View {
         }
     }
 
+    // MARK: - Low Cause Breakdown Section
+
+    @ViewBuilder
+    private func lowCauseBreakdownSection(_ summary: NutritionAnalysisSummary) -> some View {
+        Group {
+            if let lows = summary.lowTreatmentSummary, lows.totalEpisodes >= 2 {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "chart.pie")
+                                .foregroundColor(.purple)
+                            Text("What's Causing Your Lows?")
+                                .font(.headline)
+                        }
+
+                        // Cause breakdown bars
+                        VStack(spacing: 6) {
+                            if lows.exerciseCount > 0 {
+                                causeBar(
+                                    label: "Exercise",
+                                    count: lows.exerciseCount,
+                                    total: lows.totalEpisodes,
+                                    color: .green
+                                )
+                            }
+                            if lows.postBolusCount > 0 {
+                                causeBar(
+                                    label: "Post-Bolus",
+                                    count: lows.postBolusCount,
+                                    total: lows.totalEpisodes,
+                                    color: .blue
+                                )
+                            }
+                            if lows.fastingCount > 0 {
+                                causeBar(
+                                    label: "Fasting/Basal",
+                                    count: lows.fastingCount,
+                                    total: lows.totalEpisodes,
+                                    color: .orange
+                                )
+                            }
+                            if lows.mixedCount > 0 {
+                                causeBar(
+                                    label: "Mixed",
+                                    count: lows.mixedCount,
+                                    total: lows.totalEpisodes,
+                                    color: .yellow
+                                )
+                            }
+                            if lows.unknownCount > 0 {
+                                causeBar(
+                                    label: "Unknown",
+                                    count: lows.unknownCount,
+                                    total: lows.totalEpisodes,
+                                    color: .gray
+                                )
+                            }
+                        }
+
+                        // Dominant cause callout
+                        let dominant = lows.dominantCause
+                        if dominant != .unknown {
+                            HStack {
+                                Image(systemName: "lightbulb.fill")
+                                    .foregroundColor(.yellow)
+                                Text("Primary driver: \(dominant.displayName) (\(lows.causeBreakdown))")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Low Episode Causes")
+                } footer: {
+                    Text("Exercise: workout within 4h. Post-bolus: meal bolus within 1-4h. Fasting/basal: no recent bolus or exercise.")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func causeBar(label: String, count: Int, total: Int, color: Color) -> some View {
+        let pct = Double(count) / Double(max(1, total))
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .frame(width: 80, alignment: .leading)
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(color.opacity(0.7))
+                    .frame(width: geo.size.width * pct)
+            }
+            .frame(height: 18)
+            Text("\(count) (\(Int(pct * 100))%)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .frame(width: 60, alignment: .trailing)
+        }
+    }
+
+    // MARK: - Recommendations Section
+
+    @ViewBuilder
+    private func recommendationsSection(_ summary: NutritionAnalysisSummary) -> some View {
+        Group {
+            if let lows = summary.lowTreatmentSummary, !lows.recommendations.isEmpty {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "wand.and.stars")
+                                .foregroundColor(.teal)
+                            Text("Suggestions")
+                                .font(.headline)
+                        }
+
+                        ForEach(lows.recommendations) { rec in
+                            VStack(alignment: .leading, spacing: 6) {
+                                // Setting type and confidence
+                                HStack {
+                                    Text(rec.setting.displayName)
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(colorForSeverity(rec.severity))
+                                        .cornerRadius(4)
+
+                                    Text(rec.confidence.displayName + " confidence")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+
+                                    Spacer()
+                                }
+
+                                // Main suggestion
+                                Text(rec.setting.description)
+                                    .font(.subheadline)
+
+                                // Rationale
+                                Text(rec.rationale)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 4)
+
+                            if rec.id != lows.recommendations.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Setting Recommendations")
+                } footer: {
+                    Text("These suggestions are based on pattern analysis of your low episodes. All recommendations are capped at 20% max adjustment. Discuss changes with your endocrinologist before applying.")
+                }
+            }
+        }
+    }
+
+    private func colorForSeverity(_ severity: RecommendationSeverity) -> Color {
+        switch severity {
+        case .informational: return .gray
+        case .suggested: return .blue
+        case .recommended: return .orange
+        }
+    }
+
     // MARK: - ICR Analysis Section
 
     @ViewBuilder
@@ -364,13 +538,7 @@ struct NutritionAnalysisView: View {
                     .fontWeight(.medium)
                 Spacer()
                 if !day.lowEpisodes.isEmpty {
-                    Text("\(day.lowEpisodes.count) low\(day.lowEpisodes.count == 1 ? "" : "s")")
-                        .font(.caption2)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.red.opacity(0.8))
-                        .cornerRadius(4)
+                    lowCauseBadges(day.lowEpisodes)
                 }
                 Text("\(Int(day.estimationRatio * 100))%")
                     .font(.headline)
@@ -450,6 +618,42 @@ struct NutritionAnalysisView: View {
     // MARK: - Helpers
 
     @ViewBuilder
+    private func lowCauseBadges(_ episodes: [LowEpisode]) -> some View {
+        HStack(spacing: 2) {
+            let causeCounts = Dictionary(grouping: episodes, by: \.cause).mapValues(\.count)
+            ForEach(causeCounts.sorted(by: { $0.value > $1.value }), id: \.key.rawValue) { cause, count in
+                Text("\(count)\(causeAbbrev(cause))")
+                    .font(.caption2)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(causeColor(cause))
+                    .cornerRadius(3)
+            }
+        }
+    }
+
+    private func causeAbbrev(_ cause: LowEpisodeCause) -> String {
+        switch cause {
+        case .exercise: return "E"
+        case .postBolus: return "B"
+        case .fasting: return "F"
+        case .mixed: return "M"
+        case .unknown: return "?"
+        }
+    }
+
+    private func causeColor(_ cause: LowEpisodeCause) -> Color {
+        switch cause {
+        case .exercise: return .green
+        case .postBolus: return .blue
+        case .fasting: return .orange
+        case .mixed: return .yellow
+        case .unknown: return .gray
+        }
+    }
+
+    @ViewBuilder
     private func statCard(_ label: String, value: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
@@ -514,6 +718,33 @@ struct NutritionAnalysisView: View {
             }
             lines.append("Over-corrections (spike >180): \(lows.overCorrectionCount)/\(lows.totalEpisodes) (\(Int(lows.overCorrectionRate * 100))%)")
             lines.append(lows.correctionPattern)
+
+            // Cause breakdown
+            lines += [
+                "",
+                "=== LOW EPISODE CAUSES ===",
+                "Exercise-related: \(lows.exerciseCount) (\(Int(lows.exerciseRate * 100))%)",
+                "Post-bolus (over-dosed): \(lows.postBolusCount) (\(Int(lows.postBolusRate * 100))%)",
+                "Fasting/basal (too high): \(lows.fastingCount) (\(Int(lows.fastingRate * 100))%)",
+                "Mixed (exercise + bolus): \(lows.mixedCount) (\(Int(lows.mixedRate * 100))%)",
+            ]
+            if lows.unknownCount > 0 {
+                lines.append("Unclassified: \(lows.unknownCount)")
+            }
+            lines.append("Primary driver: \(lows.dominantCause.displayName)")
+
+            // Recommendations
+            if !lows.recommendations.isEmpty {
+                lines += ["", "=== SETTING RECOMMENDATIONS ==="]
+                lines.append("(All suggestions capped at 20% max adjustment. Discuss with your endocrinologist.)")
+                lines.append("")
+                for (i, rec) in lows.recommendations.enumerated() {
+                    lines.append("\(i + 1). [\(rec.setting.displayName)] \(rec.setting.description)")
+                    lines.append("   Rationale: \(rec.rationale)")
+                    lines.append("   Confidence: \(rec.confidence.displayName) | Priority: \(rec.severity.displayName)")
+                    lines.append("")
+                }
+            }
         }
 
         if let apparent = summary.averageApparentICR, let effective = summary.averageEffectiveICR {
@@ -547,8 +778,8 @@ struct NutritionAnalysisView: View {
         }
 
         lines += ["", "=== DAILY BREAKDOWN ==="]
-        lines.append("Date | Entered | Actual | Low Tx | Adj.Missed | Ratio | Lows | Bolus | Avg BG | Max BG")
-        lines.append(String(repeating: "-", count: 95))
+        lines.append("Date | Entered | Actual | Low Tx | Adj.Missed | Ratio | Lows (E/B/F/M) | Bolus | Avg BG | Max BG")
+        lines.append(String(repeating: "-", count: 105))
 
         for day in days {
             let dayStr = dateFormatter.string(from: day.date)
@@ -557,8 +788,18 @@ struct NutritionAnalysisView: View {
             let maxBGStr = day.maxBG.map { "\($0)" } ?? "-"
             let lowTxStr = day.estimatedTreatmentCarbs > 0 ? "~\(Int(day.estimatedTreatmentCarbs))g" : "-"
             let adjMissed = day.estimatedTreatmentCarbs > 0 ? "\(Int(day.adjustedMissedCarbs))g" : "\(Int(day.missedCarbs))g"
-            let lowCount = day.lowEpisodes.isEmpty ? "-" : "\(day.lowEpisodes.count)"
-            lines.append("\(dayStr) | \(Int(day.trioCarbs))g | \(Int(day.actualCarbs))g | \(lowTxStr) | \(adjMissed) | \(Int(day.estimationRatio * 100))% | \(lowCount) | \(bolusStr) | \(avgBGStr) | \(maxBGStr)")
+            // Low cause breakdown per day
+            let lowStr: String
+            if day.lowEpisodes.isEmpty {
+                lowStr = "-"
+            } else {
+                let e = day.lowEpisodes.filter { $0.cause == .exercise }.count
+                let b = day.lowEpisodes.filter { $0.cause == .postBolus }.count
+                let f = day.lowEpisodes.filter { $0.cause == .fasting }.count
+                let m = day.lowEpisodes.filter { $0.cause == .mixed || $0.cause == .unknown }.count
+                lowStr = "\(day.lowEpisodes.count) (\(e)/\(b)/\(f)/\(m))"
+            }
+            lines.append("\(dayStr) | \(Int(day.trioCarbs))g | \(Int(day.actualCarbs))g | \(lowTxStr) | \(adjMissed) | \(Int(day.estimationRatio * 100))% | \(lowStr) | \(bolusStr) | \(avgBGStr) | \(maxBGStr)")
         }
 
         return lines.joined(separator: "\n")
