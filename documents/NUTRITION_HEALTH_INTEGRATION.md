@@ -332,6 +332,61 @@ The nutrition reading feature is **strictly informational**. Apple Health nutrit
 
 ---
 
+### Phase 1E: Apply Recommendations to Settings
+
+**Date:** February 2026
+
+**Changes:**
+- Actionable recommendations (basal rate reduction, ICR weakening) can now be applied directly to settings
+- Mimics the Claude-o-Tune apply flow: checkbox selection, current→proposed preview, confirmation dialog
+- Automatic backup before any changes (using ClaudeOTuneProfileService backup system)
+- Users can undo changes via the existing Claude-o-Tune Profile History screen
+- Advisory recommendations (exercise tips, general guidance) shown separately without apply controls
+
+#### Modified Files:
+
+1. **`Trio/Sources/Models/NutritionSnapshot.swift`**
+   - `RecommendedSetting` — added `isActionable: Bool` computed property
+     - `.reduceBasal` and `.weakenICR` are actionable (can be applied directly)
+     - `.exerciseAdjustment` and `.general` are advisory-only
+
+2. **`Trio/Sources/Modules/HealthKit/View/NutritionAnalysisView.swift`**
+   - Added apply state variables: `selectedRecommendations`, `showApplyConfirmation`, `isApplying`, `applyResult`, `applyError`
+   - Rewrote `recommendationsSection` splitting into:
+     - **Actionable section** — checkboxes for selectable recommendations with "Apply Changes" header
+     - **Advisory section** — read-only guidance with "Additional Guidance" header
+   - Added `actionableRecommendationRow()` — tappable row with checkbox toggle, severity badge, confidence level, recommendation text, and current→proposed preview
+   - Added `previewForRecommendation()` — reads current basal profile or carb ratios from FileStorage to show:
+     - Basal: average affected rate → proposed rate after reduction
+     - ICR: current average ICR → proposed ICR after weakening
+   - Added `applyCard` — warning banner about backup creation, apply button with loading state, confirmation dialog
+   - Added `applySelectedChanges()` async method:
+     - Creates backup via `ClaudeOTuneProfileService.createBackup(reason:)` before any changes
+     - Resolves `FileStorage` from the Swinject resolver
+     - Iterates selected recommendations and applies each change
+     - Shows success/failure messages
+   - Added `applyBasalReduction(storage:timeWindow:pctReduction:)`:
+     - Parses time window string (e.g., "22:00-2:00")
+     - Handles wrapping windows (e.g., 10pm-2am crosses midnight)
+     - Reduces matching `BasalProfileEntry` rates by the specified percentage
+     - Saves modified profile via `FileStorage.save()`
+   - Added `applyICRWeakening(storage:pctChange:)`:
+     - Reads current `CarbRatios` from FileStorage
+     - Increases all carb ratio values by the specified percentage (weaker = more carbs per unit)
+     - Creates new `CarbRatioEntry` instances and saves via FileStorage
+   - Added `parseTimeToMinutes()` helper for time window parsing
+
+#### Apply Flow Design:
+- **Selection**: Users tap checkboxes next to actionable recommendations they want to apply
+- **Preview**: Each actionable recommendation shows current→proposed values in real time
+- **Confirmation**: Tap "Apply N Selected Changes" → confirmation dialog warns about profile modification
+- **Backup**: A profile backup is created automatically before any changes are applied
+- **Undo**: Users can restore previous settings from the Claude-o-Tune Profile History screen
+- **Safety**: All recommended adjustments are already capped at 20% by the recommendation engine
+- **Separation**: Advisory recommendations (exercise tips, general guidance) are displayed in a separate section without apply controls
+
+---
+
 ## Architecture
 
 ### Data Flow

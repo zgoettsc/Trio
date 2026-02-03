@@ -217,6 +217,14 @@ enum RecommendedSetting: Equatable {
             return suggestion
         }
     }
+
+    /// Whether this recommendation can be directly applied to settings
+    var isActionable: Bool {
+        switch self {
+        case .reduceBasal, .weakenICR: return true
+        case .exerciseAdjustment, .general: return false
+        }
+    }
 }
 
 enum RecommendationConfidence: String, Equatable {

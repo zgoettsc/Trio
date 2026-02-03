@@ -11,6 +11,13 @@ struct NutritionAnalysisView: View {
     @State private var analysisDays = 14
     @State private var showShareSheet = false
 
+    // Apply flow state
+    @State private var selectedRecommendations: Set<UUID> = []
+    @State private var showApplyConfirmation = false
+    @State private var isApplying = false
+    @State private var applyResult: String?
+    @State private var applyError: String?
+
     @Environment(\.colorScheme) var colorScheme
     @Environment(AppState.self) var appState
 
@@ -348,57 +355,273 @@ struct NutritionAnalysisView: View {
     private func recommendationsSection(_ summary: NutritionAnalysisSummary) -> some View {
         Group {
             if let lows = summary.lowTreatmentSummary, !lows.recommendations.isEmpty {
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "wand.and.stars")
-                                .foregroundColor(.teal)
-                            Text("Suggestions")
-                                .font(.headline)
-                        }
+                // Actionable recommendations (can be applied)
+                let actionable = lows.recommendations.filter(\.setting.isActionable)
+                let advisory = lows.recommendations.filter { !$0.setting.isActionable }
 
-                        ForEach(lows.recommendations) { rec in
-                            VStack(alignment: .leading, spacing: 6) {
-                                // Setting type and confidence
-                                HStack {
-                                    Text(rec.setting.displayName)
+                if !actionable.isEmpty {
+                    Section {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "wand.and.stars")
+                                    .foregroundColor(.teal)
+                                Text("Apply Changes")
+                                    .font(.headline)
+                                Spacer()
+                                if !selectedRecommendations.isEmpty {
+                                    Text("\(selectedRecommendations.count) selected")
                                         .font(.caption)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(colorForSeverity(rec.severity))
-                                        .cornerRadius(4)
-
-                                    Text(rec.confidence.displayName + " confidence")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-
-                                    Spacer()
+                                        .foregroundColor(.blue)
                                 }
-
-                                // Main suggestion
-                                Text(rec.setting.description)
-                                    .font(.subheadline)
-
-                                // Rationale
-                                Text(rec.rationale)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
                             }
-                            .padding(.vertical, 4)
 
-                            if rec.id != lows.recommendations.last?.id {
-                                Divider()
+                            ForEach(actionable) { rec in
+                                actionableRecommendationRow(rec)
+                                if rec.id != actionable.last?.id {
+                                    Divider()
+                                }
+                            }
+
+                            // Apply section (when items selected)
+                            if !selectedRecommendations.isEmpty {
+                                applyCard
+                            }
+
+                            // Result/Error messages
+                            if let result = applyResult {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                    Text(result)
+                                        .font(.caption)
+                                        .foregroundColor(.green)
+                                }
+                            }
+                            if let error = applyError {
+                                HStack {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                    Text(error)
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                }
                             }
                         }
+                        .padding(.vertical, 4)
+                    } header: {
+                        Text("Setting Recommendations")
+                    } footer: {
+                        Text("Select changes to apply. A backup is created automatically so you can undo. All adjustments capped at 20%. Discuss with your endocrinologist.")
                     }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text("Setting Recommendations")
-                } footer: {
-                    Text("These suggestions are based on pattern analysis of your low episodes. All recommendations are capped at 20% max adjustment. Discuss changes with your endocrinologist before applying.")
                 }
+
+                // Advisory-only recommendations
+                if !advisory.isEmpty {
+                    Section {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "lightbulb.fill")
+                                    .foregroundColor(.yellow)
+                                Text("Additional Guidance")
+                                    .font(.headline)
+                            }
+                            ForEach(advisory) { rec in
+                                advisoryRecommendationRow(rec)
+                                if rec.id != advisory.last?.id {
+                                    Divider()
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    } header: {
+                        Text("Advisory")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actionableRecommendationRow(_ rec: SettingRecommendation) -> some View {
+        let isSelected = selectedRecommendations.contains(rec.id)
+
+        Button {
+            if isSelected {
+                selectedRecommendations.remove(rec.id)
+            } else {
+                selectedRecommendations.insert(rec.id)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(isSelected ? .blue : .secondary)
+                    .font(.title3)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    // Type badge + confidence
+                    HStack {
+                        Text(rec.setting.displayName)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(colorForSeverity(rec.severity))
+                            .cornerRadius(4)
+
+                        Text(rec.confidence.displayName)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+
+                    // What will change
+                    Text(rec.setting.description)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+
+                    // Preview of current -> proposed
+                    previewForRecommendation(rec)
+
+                    // Rationale
+                    Text(rec.rationale)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func previewForRecommendation(_ rec: SettingRecommendation) -> some View {
+        switch rec.setting {
+        case let .reduceBasal(_, pct):
+            if let profile = resolver.resolve(FileStorage.self)?
+                .retrieve(OpenAPS.Settings.basalProfile, as: [BasalProfileEntry].self)
+            {
+                let avgRate = profile.map { Double(truncating: $0.rate as NSDecimalNumber) }.reduce(0, +) / Double(max(1, profile.count))
+                let factor = 1.0 - pct / 100.0
+                let proposedAvg = avgRate * factor
+                HStack(spacing: 8) {
+                    Text("Affected rates:")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.2f", avgRate))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundColor(.blue)
+                    Text(String(format: "%.2f U/hr", proposedAvg))
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.blue)
+                }
+            }
+        case let .weakenICR(pct):
+            if let carbRatios = resolver.resolve(FileStorage.self)?
+                .retrieve(OpenAPS.Settings.carbRatios, as: CarbRatios.self)
+            {
+                let currentCR = carbRatios.schedule.map { Double(truncating: $0.ratio as NSDecimalNumber) }
+                let avgCR = currentCR.reduce(0, +) / Double(max(1, currentCR.count))
+                let factor = 1.0 + pct / 100.0
+                let proposedCR = avgCR * factor
+                HStack(spacing: 8) {
+                    Text("Avg ICR:")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text("1:\(String(format: "%.1f", avgCR))g")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundColor(.blue)
+                    Text("1:\(String(format: "%.1f", proposedCR))g")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.blue)
+                }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func advisoryRecommendationRow(_ rec: SettingRecommendation) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(rec.setting.displayName)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.gray)
+                    .cornerRadius(4)
+                Text(rec.confidence.displayName)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            Text(rec.setting.description)
+                .font(.subheadline)
+            Text(rec.rationale)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var applyCard: some View {
+        VStack(spacing: 10) {
+            // Warning
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                Text("A backup will be created automatically so you can undo if needed. Have you discussed these changes with your healthcare provider?")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.1))
+            .cornerRadius(8)
+
+            // Apply button
+            Button {
+                showApplyConfirmation = true
+            } label: {
+                HStack {
+                    if isApplying {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "checkmark.circle")
+                    }
+                    Text("Apply \(selectedRecommendations.count) Selected Change\(selectedRecommendations.count == 1 ? "" : "s")")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(12)
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(10)
+            }
+            .disabled(isApplying)
+            .confirmationDialog(
+                "Apply Changes",
+                isPresented: $showApplyConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Apply \(selectedRecommendations.count) Change\(selectedRecommendations.count == 1 ? "" : "s")", role: .destructive) {
+                    Task { await applySelectedChanges() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will modify your profile settings. A backup will be created so you can undo from the Claude-o-Tune Profile History screen.")
             }
         }
     }
@@ -409,6 +632,131 @@ struct NutritionAnalysisView: View {
         case .suggested: return .blue
         case .recommended: return .orange
         }
+    }
+
+    // MARK: - Apply Logic
+
+    private func applySelectedChanges() async {
+        guard let lows = summary?.lowTreatmentSummary else { return }
+
+        isApplying = true
+        applyResult = nil
+        applyError = nil
+
+        // Create backup first (reusing Claude-o-Tune's backup system)
+        let profileService = ClaudeOTuneProfileService()
+        profileService.injectServices(resolver)
+        guard profileService.createBackup(reason: "Before nutrition analysis changes") != nil else {
+            applyError = "Failed to create profile backup"
+            isApplying = false
+            return
+        }
+
+        guard let storage = resolver.resolve(FileStorage.self) else {
+            applyError = "Could not access settings storage"
+            isApplying = false
+            return
+        }
+
+        var appliedChanges: [String] = []
+        var failedChanges: [String] = []
+
+        for recId in selectedRecommendations {
+            guard let rec = lows.recommendations.first(where: { $0.id == recId }) else { continue }
+
+            switch rec.setting {
+            case let .reduceBasal(timeWindow, pctReduction):
+                if applyBasalReduction(storage: storage, timeWindow: timeWindow, pctReduction: pctReduction) {
+                    appliedChanges.append("Basal rate reduced \(timeWindow) by \(Int(pctReduction))%")
+                } else {
+                    failedChanges.append("Basal rate change failed")
+                }
+
+            case let .weakenICR(pctChange):
+                if applyICRWeakening(storage: storage, pctChange: pctChange) {
+                    appliedChanges.append("ICR weakened by \(Int(pctChange))%")
+                } else {
+                    failedChanges.append("ICR change failed")
+                }
+
+            default:
+                break
+            }
+        }
+
+        if !appliedChanges.isEmpty {
+            applyResult = "Applied: " + appliedChanges.joined(separator: "; ") + ". Undo available in Profile History."
+            selectedRecommendations.removeAll()
+        }
+        if !failedChanges.isEmpty {
+            applyError = "Failed: " + failedChanges.joined(separator: "; ")
+        }
+
+        isApplying = false
+    }
+
+    /// Parse "H:00" to minutes from midnight
+    private func parseTimeToMinutes(_ time: String) -> Int? {
+        let parts = time.split(separator: ":")
+        guard parts.count == 2, let hour = Int(parts[0]), let min = Int(parts[1]) else { return nil }
+        return hour * 60 + min
+    }
+
+    /// Reduce basal rates within a time window by a percentage
+    private func applyBasalReduction(storage: FileStorage, timeWindow: String, pctReduction: Double) -> Bool {
+        guard var profile = storage.retrieve(OpenAPS.Settings.basalProfile, as: [BasalProfileEntry].self) else {
+            return false
+        }
+
+        let windowParts = timeWindow.split(separator: "-")
+        guard windowParts.count == 2,
+              let startMin = parseTimeToMinutes(String(windowParts[0])),
+              let endMin = parseTimeToMinutes(String(windowParts[1]))
+        else { return false }
+
+        let factor = Decimal(1.0 - pctReduction / 100.0)
+        var changed = false
+
+        for i in 0 ..< profile.count {
+            let entryMin = profile[i].minutes
+            // Handle wrapping (e.g., 22:00-1:00)
+            let inWindow: Bool
+            if startMin <= endMin {
+                inWindow = entryMin >= startMin && entryMin < endMin
+            } else {
+                inWindow = entryMin >= startMin || entryMin < endMin
+            }
+
+            if inWindow {
+                let newRate = profile[i].rate * factor
+                profile[i] = BasalProfileEntry(start: profile[i].start, minutes: profile[i].minutes, rate: newRate)
+                changed = true
+            }
+        }
+
+        if changed {
+            storage.save(profile, as: OpenAPS.Settings.basalProfile)
+        }
+        return changed
+    }
+
+    /// Weaken ICR by increasing ratio values (more carbs per unit of insulin)
+    private func applyICRWeakening(storage: FileStorage, pctChange: Double) -> Bool {
+        guard var carbRatios = storage.retrieve(OpenAPS.Settings.carbRatios, as: CarbRatios.self) else {
+            return false
+        }
+
+        let factor = Decimal(1.0 + pctChange / 100.0)
+        var newSchedule: [CarbRatioEntry] = []
+
+        for entry in carbRatios.schedule {
+            let newRatio = entry.ratio * factor
+            newSchedule.append(CarbRatioEntry(start: entry.start, offset: entry.offset, ratio: newRatio))
+        }
+
+        carbRatios = CarbRatios(units: carbRatios.units, schedule: newSchedule)
+        storage.save(carbRatios, as: OpenAPS.Settings.carbRatios)
+        return true
     }
 
     // MARK: - ICR Analysis Section
