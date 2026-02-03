@@ -365,9 +365,12 @@ final class BaseNutritionAnalysisService: NutritionAnalysisService, Injectable {
             suggestedPctChange = (suggestedPctChange / 5).rounded() * 5 // Round to nearest 5%
 
             if suggestedPctChange >= 5 {
+                let bolusAmounts = postBolusEpisodes.compactMap(\.recentBolusAmount)
+                let avgBolus = bolusAmounts.isEmpty ? 0.0 : bolusAmounts.reduce(0, +) / Double(bolusAmounts.count)
+                let avgBolusStr = String(format: "%.1f", avgBolus)
                 recommendations.append(SettingRecommendation(
                     setting: .weakenICR(percentChange: suggestedPctChange),
-                    rationale: "\(postBolusEpisodes.count) lows occurred 1-4h after a meal bolus, suggesting your ICR may be too aggressive. Average bolus before these lows: \(String(format: "%.1f", postBolusEpisodes.compactMap(\.recentBolusAmount).reduce(0, +) / Double(max(1, postBolusEpisodes.compactMap(\.recentBolusAmount).count))))U.",
+                    rationale: "\(postBolusEpisodes.count) lows occurred 1-4h after a meal bolus, suggesting your ICR may be too aggressive. Average bolus before these lows: \(avgBolusStr)U.",
                     confidence: confidence,
                     severity: bolusRate > 0.3 ? .recommended : .suggested
                 ))
