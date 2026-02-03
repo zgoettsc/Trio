@@ -99,7 +99,7 @@ struct NutritionAnalysisView: View {
         .sheet(isPresented: $showShareSheet) {
             if let summary = summary {
                 let report = generateReport(summary: summary, days: matchedDays)
-                ShareSheet(activityItems: [report])
+                NutritionShareSheet(activityItems: [report])
             }
         }
     }
@@ -589,7 +589,7 @@ struct NutritionAnalysisView: View {
 
 // MARK: - Share Sheet
 
-private struct ShareSheet: UIViewControllerRepresentable {
+private struct NutritionShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
