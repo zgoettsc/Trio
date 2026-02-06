@@ -377,4 +377,25 @@ final class NutritionSnapshotStore {
         }
         return events
     }
+
+    /// Derive inferred meal events from snapshot deltas for the last N hours.
+    /// Covers today and yesterday (if the time window extends past midnight).
+    func inferredMealEvents(forLastHours hours: Int) -> [InferredMealEvent] {
+        let cutoff = Date().addingTimeInterval(-TimeInterval(hours * 3600))
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        // Always get today's events
+        var allEvents = inferredMealEvents(for: today)
+
+        // If the window extends into yesterday, include yesterday's events too
+        if cutoff < today, let yesterday = calendar.date(byAdding: .day, value: -1, to: today) {
+            allEvents += inferredMealEvents(for: yesterday)
+        }
+
+        // Filter to only events within the time window
+        return allEvents
+            .filter { $0.detectedAt >= cutoff }
+            .sorted { $0.detectedAt < $1.detectedAt }
+    }
 }

@@ -155,6 +155,9 @@ Provide:
 2. **Contributing Factors**: Any secondary factors
 3. **Suggestion**: A conservative recommendation if appropriate
 
+If Cronometer meal data is available, also analyze the nutrition vs what was entered for dosing.
+All recommendations are advisory only — the user must decide whether to act on them.
+
 Keep the response concise and actionable. Focus on the most likely explanation.
 """
 
@@ -257,6 +260,7 @@ Respond with a JSON object following the Claude-o-Tune output format.
         @Injected() private var keychain: Keychain!
         @Injected() private var storage: FileStorage!
         @Injected() private var healthMetricsService: HealthMetricsService!
+        @Injected() private var apsManager: APSManager!
 
         private let coredataContext = CoreDataStack.shared.newTaskContext()
         private let claudeService = ClaudeAPIService()
@@ -896,8 +900,26 @@ Respond with a JSON object following the Claude-o-Tune output format.
                     healthMetrics = fullData.healthMetrics
                 }
 
-                // Format prompt
-                let prompt = exporter.formatWhyHighLowPrompt(data, settings: whlSettings, healthMetrics: healthMetrics)
+                // Fetch inferred meals from Cronometer (last 12 hours via snapshot deltas)
+                let inferredMeals = NutritionSnapshotStore.shared.inferredMealEvents(forLastHours: 12)
+
+                // Build meal simulation results by matching Cronometer meals to Trio entries
+                let mealSimulations = await buildMealSimulations(
+                    inferredMeals: inferredMeals,
+                    trioCarbEntries: data.carbEntries,
+                    trioBolusEvents: data.bolusEvents,
+                    currentCR: currentCR,
+                    settings: settings
+                )
+
+                // Format prompt with meal data and simulation results
+                let prompt = exporter.formatWhyHighLowPrompt(
+                    data,
+                    settings: whlSettings,
+                    healthMetrics: healthMetrics,
+                    inferredMeals: inferredMeals,
+                    mealSimulations: mealSimulations
+                )
 
                 // Call Claude API
                 let result = try await claudeService.analyze(prompt: prompt, apiKey: apiKey)
@@ -917,6 +939,149 @@ Respond with a JSON object following the Claude-o-Tune output format.
             }
 
             isAnalyzingWhyHighLow = false
+        }
+
+        // MARK: - Meal Simulation Helpers
+
+        /// Match Cronometer inferred meals to Trio carb entries and run simulations for discrepancies
+        private func buildMealSimulations(
+            inferredMeals: [InferredMealEvent],
+            trioCarbEntries: [HealthDataExporter.ExportedData.CarbEntry],
+            trioBolusEvents: [HealthDataExporter.ExportedData.BolusEvent],
+            currentCR: Decimal,
+            settings: TrioSettings
+        ) async -> [HealthDataExporter.MealSimulationResult] {
+            guard !inferredMeals.isEmpty else { return [] }
+
+            var simulations: [HealthDataExporter.MealSimulationResult] = []
+
+            for meal in inferredMeals {
+                // Skip tiny snacks (< 5g carbs and < 5g fat and < 5g protein)
+                guard meal.carbsDelta >= 5 || meal.fatDelta >= 5 || meal.proteinDelta >= 5 else { continue }
+
+                // Find the closest Trio carb entry within 1 hour of this inferred meal
+                let trioMatch = findClosestTrioEntry(to: meal.detectedAt, in: trioCarbEntries, withinMinutes: 60)
+                let trioCarbs = trioMatch?.carbs ?? 0
+
+                // Find boluses given within 30 minutes of the meal
+                let mealBolus = findMealBolus(near: meal.detectedAt, in: trioBolusEvents, withinMinutes: 30)
+
+                // Calculate missed carbs
+                let missedCarbs = max(0, meal.carbsDelta - trioCarbs)
+
+                // Calculate FPU carb equivalents using Warsaw Method (same formula as CarbsStorage)
+                let fpuResult = calculateFPUCarbEquivalents(
+                    fat: Decimal(meal.fatDelta),
+                    protein: Decimal(meal.proteinDelta),
+                    settings: settings
+                )
+
+                // Run simulation with missed carbs if there's a significant discrepancy (> 10g)
+                var simulatedEventualBG: Decimal?
+                var currentEventualBG: Decimal?
+                var simulatedMinPredBG: Decimal?
+
+                if missedCarbs > 10 {
+                    // Get current prediction (no additional carbs)
+                    if let currentDetermination = await apsManager.simulateDetermineBasal(
+                        simulatedCarbsAmount: 0,
+                        simulatedBolusAmount: 0,
+                        simulatedCarbsDate: nil
+                    ) {
+                        if let bg = currentDetermination.eventualBG {
+                            currentEventualBG = Decimal(bg)
+                        }
+                    }
+
+                    // Get prediction with the missed carbs entered at the meal time
+                    if let simDetermination = await apsManager.simulateDetermineBasal(
+                        simulatedCarbsAmount: Decimal(missedCarbs),
+                        simulatedBolusAmount: 0,
+                        simulatedCarbsDate: meal.detectedAt
+                    ) {
+                        if let bg = simDetermination.eventualBG {
+                            simulatedEventualBG = Decimal(bg)
+                        }
+                        simulatedMinPredBG = simDetermination.minPredBG
+                    }
+                }
+
+                let simulation = HealthDataExporter.MealSimulationResult(
+                    mealTime: meal.detectedAt,
+                    cronometerCarbs: meal.carbsDelta,
+                    cronometerFat: meal.fatDelta,
+                    cronometerProtein: meal.proteinDelta,
+                    trioEnteredCarbs: trioCarbs,
+                    missedCarbs: missedCarbs,
+                    bolusGivenForMeal: mealBolus,
+                    simulatedEventualBG: simulatedEventualBG,
+                    currentEventualBG: currentEventualBG,
+                    simulatedMinPredBG: simulatedMinPredBG,
+                    fpuCarbEquivalents: fpuResult.carbEquivalents,
+                    fpuDurationHours: fpuResult.durationHours
+                )
+
+                simulations.append(simulation)
+            }
+
+            return simulations
+        }
+
+        /// Find the closest Trio carb entry to a given time
+        private func findClosestTrioEntry(
+            to date: Date,
+            in entries: [HealthDataExporter.ExportedData.CarbEntry],
+            withinMinutes: Int
+        ) -> HealthDataExporter.ExportedData.CarbEntry? {
+            let maxInterval = TimeInterval(withinMinutes * 60)
+            return entries
+                .filter { abs($0.date.timeIntervalSince(date)) <= maxInterval }
+                .min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+        }
+
+        /// Find the total manual bolus given near a meal time
+        private func findMealBolus(
+            near date: Date,
+            in boluses: [HealthDataExporter.ExportedData.BolusEvent],
+            withinMinutes: Int
+        ) -> Decimal {
+            let maxInterval = TimeInterval(withinMinutes * 60)
+            return boluses
+                .filter { !$0.isSMB && abs($0.date.timeIntervalSince(date)) <= maxInterval }
+                .reduce(Decimal(0)) { $0 + $1.amount }
+        }
+
+        /// Calculate FPU carb equivalents using the Warsaw Method (mirrors CarbsStorage.processFPU)
+        private func calculateFPUCarbEquivalents(
+            fat: Decimal,
+            protein: Decimal,
+            settings: TrioSettings
+        ) -> (carbEquivalents: Double, durationHours: Double) {
+            guard fat > 0 || protein > 0 else { return (0, 0) }
+
+            let adjustment = settings.individualAdjustmentFactor
+            let timeCap = settings.timeCap
+
+            let kcal = protein * 4 + fat * 9
+            let carbEquivalents = (kcal / 10) * adjustment
+            let fpus = carbEquivalents / 10
+
+            // Duration calculation (same as CarbsStorage.calculateComputedDuration)
+            let computedDuration: Decimal
+            if fpus < 2 {
+                computedDuration = min(3, timeCap)
+            } else if fpus < 3 {
+                computedDuration = min(4, timeCap)
+            } else if fpus < 4 {
+                computedDuration = min(5, timeCap)
+            } else {
+                computedDuration = timeCap
+            }
+
+            return (
+                carbEquivalents: NSDecimalNumber(decimal: carbEquivalents).doubleValue,
+                durationHours: NSDecimalNumber(decimal: computedDuration).doubleValue
+            )
         }
 
         /// Get the current value from a time-based schedule

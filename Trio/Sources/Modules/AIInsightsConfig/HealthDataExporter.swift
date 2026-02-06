@@ -1529,8 +1529,30 @@ final class HealthDataExporter {
         let hours: Int
     }
 
+    /// Result of running a simulation with corrected Cronometer carbs for a meal
+    struct MealSimulationResult {
+        let mealTime: Date
+        let cronometerCarbs: Double
+        let cronometerFat: Double
+        let cronometerProtein: Double
+        let trioEnteredCarbs: Double // What the user actually entered in Trio
+        let missedCarbs: Double // cronometerCarbs - trioEnteredCarbs
+        let bolusGivenForMeal: Decimal // Bolus given around the meal time
+        let simulatedEventualBG: Decimal? // Predicted eventual BG if correct carbs had been entered
+        let currentEventualBG: Decimal? // Current prediction without correction
+        let simulatedMinPredBG: Decimal? // Predicted minimum BG with correct dosing
+        let fpuCarbEquivalents: Double // Carb equivalents from fat + protein (Warsaw Method)
+        let fpuDurationHours: Double // How long FPU absorption would take
+    }
+
     /// Format data for Why High/Low analysis prompt
-    func formatWhyHighLowPrompt(_ data: WhyHighLowData, settings: WhyHighLowSettings, healthMetrics: ExportedData.HealthMetrics? = nil) -> String {
+    func formatWhyHighLowPrompt(
+        _ data: WhyHighLowData,
+        settings: WhyHighLowSettings,
+        healthMetrics: ExportedData.HealthMetrics? = nil,
+        inferredMeals: [InferredMealEvent] = [],
+        mealSimulations: [MealSimulationResult] = []
+    ) -> String {
         let timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "HH:mm"
 
@@ -1566,18 +1588,81 @@ final class HealthDataExporter {
             }
         }
 
-        // Add carb entries
+        // Add carb entries (what user entered in Trio)
         if !data.carbEntries.isEmpty {
-            prompt += "\n🍽️ CARB ENTRIES\n"
+            prompt += "\n🍽️ TRIO CARB ENTRIES (what user entered for dosing)\n"
             for entry in data.carbEntries {
-                var line = "\(dateTimeFormatter.string(from: entry.date)): \(Int(entry.carbs))g"
+                var line = "\(dateTimeFormatter.string(from: entry.date)): \(Int(entry.carbs))g carbs"
+                if entry.fat > 0 || entry.protein > 0 {
+                    line += " (F:\(Int(entry.fat))g P:\(Int(entry.protein))g)"
+                }
                 if let note = entry.note, !note.isEmpty {
-                    line += " (\(note))"
+                    line += " \"\(note)\""
                 }
                 prompt += line + "\n"
             }
         } else {
-            prompt += "\n🍽️ CARB ENTRIES: None in this period\n"
+            prompt += "\n🍽️ TRIO CARB ENTRIES: None in this period\n"
+        }
+
+        // Add Cronometer nutrition data (actual meals from Apple Health)
+        if !inferredMeals.isEmpty {
+            prompt += "\n📱 ACTUAL MEALS FROM CRONOMETER (via Apple Health, last 12 hours)\n"
+            prompt += "These are the ACTUAL foods tracked in Cronometer — compare to Trio entries above.\n"
+            prompt += "Meal times are approximate (detected when Cronometer syncs to Apple Health).\n\n"
+            for meal in inferredMeals {
+                let calories = Int(meal.totalCalories)
+                let carbPct = meal.totalCalories > 0 ? Int((meal.carbsDelta * 4 / meal.totalCalories) * 100) : 0
+                let fatPct = meal.totalCalories > 0 ? Int((meal.fatDelta * 9 / meal.totalCalories) * 100) : 0
+                let proteinPct = meal.totalCalories > 0 ? Int((meal.proteinDelta * 4 / meal.totalCalories) * 100) : 0
+                prompt += "~\(dateTimeFormatter.string(from: meal.detectedAt)): \(Int(meal.carbsDelta))g carbs | \(Int(meal.fatDelta))g fat | \(Int(meal.proteinDelta))g protein | \(calories) kcal"
+                prompt += " (C:\(carbPct)% F:\(fatPct)% P:\(proteinPct)%)\n"
+            }
+
+            // Summary totals
+            let totalCarbs = inferredMeals.reduce(0.0) { $0 + $1.carbsDelta }
+            let totalFat = inferredMeals.reduce(0.0) { $0 + $1.fatDelta }
+            let totalProtein = inferredMeals.reduce(0.0) { $0 + $1.proteinDelta }
+            let totalCal = inferredMeals.reduce(0.0) { $0 + $1.totalCalories }
+            prompt += "TOTALS: \(Int(totalCarbs))g carbs | \(Int(totalFat))g fat | \(Int(totalProtein))g protein | \(Int(totalCal)) kcal\n"
+        }
+
+        // Add meal simulation results (what-if analysis)
+        if !mealSimulations.isEmpty {
+            prompt += "\n🔬 MEAL DOSING ANALYSIS (simulation vs actual)\n"
+            prompt += "Compares what the user entered in Trio vs actual Cronometer nutrition.\n"
+            prompt += "Simulations show predicted glucose if the full Cronometer carbs had been entered.\n\n"
+
+            for sim in mealSimulations {
+                let mealTimeStr = dateTimeFormatter.string(from: sim.mealTime)
+                prompt += "--- Meal at ~\(mealTimeStr) ---\n"
+                prompt += "• Cronometer actual: \(Int(sim.cronometerCarbs))g C | \(Int(sim.cronometerFat))g F | \(Int(sim.cronometerProtein))g P\n"
+                prompt += "• Trio entered: \(Int(sim.trioEnteredCarbs))g carbs (missed \(Int(sim.missedCarbs))g = \(sim.trioEnteredCarbs > 0 ? Int((sim.missedCarbs / sim.cronometerCarbs) * 100) : 100)% under-counted)\n"
+                prompt += "• Bolus given: \(String(format: "%.2f", NSDecimalNumber(decimal: sim.bolusGivenForMeal).doubleValue))U\n"
+
+                // What bolus SHOULD have been
+                let crDecimal = NSDecimalNumber(decimal: data.currentCR).doubleValue
+                if crDecimal > 0 {
+                    let idealBolus = sim.cronometerCarbs / crDecimal
+                    prompt += "• Bolus needed for actual carbs: \(String(format: "%.1f", idealBolus))U (at current CR 1:\(data.currentCR))\n"
+                }
+
+                // Simulation predictions
+                if let simEventual = sim.simulatedEventualBG, let curEventual = sim.currentEventualBG {
+                    prompt += "• Current predicted eventual BG: \(curEventual) \(data.units)\n"
+                    prompt += "• If correctly dosed, predicted eventual BG: \(simEventual) \(data.units)\n"
+                }
+                if let simMin = sim.simulatedMinPredBG {
+                    prompt += "• Simulated minimum predicted BG: \(simMin) \(data.units)\n"
+                }
+
+                // FPU analysis
+                if sim.fpuCarbEquivalents > 1 {
+                    prompt += "• Fat/Protein Units (FPU): \(Int(sim.cronometerFat))g fat + \(Int(sim.cronometerProtein))g protein = \(Int(sim.fpuCarbEquivalents))g carb-equivalents over \(String(format: "%.1f", sim.fpuDurationHours))h\n"
+                    prompt += "  → If fat+protein had been entered, the app's FPU system would have spread \(Int(sim.fpuCarbEquivalents))g of additional carb-equivalent absorption starting 1h after the meal\n"
+                }
+                prompt += "\n"
+            }
         }
 
         // Add bolus events
@@ -1615,8 +1700,36 @@ final class HealthDataExporter {
         // Add the analysis request
         prompt += "\n---\n\n"
 
-        if !settings.customPrompt.isEmpty {
+        let hasMealData = !inferredMeals.isEmpty || !mealSimulations.isEmpty
+
+        // Check if the user has a truly custom prompt (not the default)
+        let isDefaultPrompt = settings.customPrompt.isEmpty ||
+            settings.customPrompt.trimmingCharacters(in: .whitespacesAndNewlines) ==
+            AIInsightsConfig.defaultWhyHighLowPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !isDefaultPrompt {
             prompt += settings.customPrompt
+        } else if hasMealData {
+            prompt += """
+            Please analyze why my blood glucose is currently \(condition.lowercased()).
+
+            You have BOTH my Trio entries (what I entered for insulin dosing) and my Cronometer data (what I actually ate).
+            I know I tend to under-count carbs. Use the Cronometer data as the source of truth for what was actually consumed.
+
+            Provide:
+            1. **Probable Cause**: The most likely reason for this \(condition.lowercased()) (be specific about timing, amounts, and the gap between entered vs actual carbs)
+            2. **Nutrition Analysis**: Compare what I entered in Trio vs what Cronometer recorded. How did the carb under-counting contribute?
+            3. **Fat & Protein Impact**: Analyze the meal composition. High fat/protein meals cause delayed glucose rises (2-5 hours post-meal) through gluconeogenesis and delayed gastric emptying. Did this contribute?
+            4. **Dosing Strategy for Next Time**: Suggest a specific dosing approach for this meal:
+               - How many grams of carbs, fat, and protein should be entered in the app
+               - The app has a Fat Protein Unit (FPU) system that converts fat+protein into delayed carb-equivalents — recommend whether to use it
+               - Suggest pre-bolus timing adjustments if relevant
+               - Note: These are SUGGESTIONS for the user to consider — not automated actions
+            5. **Simulation Insight**: If simulation data is provided above, explain what the predictions show about correct dosing vs what actually happened
+
+            Keep the response concise and actionable. Focus on practical strategies to prevent this pattern.
+            IMPORTANT: All recommendations are advisory only. The user must decide whether to act on them.
+            """
         } else {
             prompt += """
             Please analyze why my blood glucose is currently \(condition.lowercased()).
@@ -1627,6 +1740,7 @@ final class HealthDataExporter {
             3. **Suggestion**: A conservative recommendation if appropriate
 
             Keep the response concise and actionable. Focus on the most likely explanation.
+            IMPORTANT: All recommendations are advisory only. The user must decide whether to act on them.
             """
         }
 
