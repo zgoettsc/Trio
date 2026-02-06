@@ -761,6 +761,7 @@
 		NA5A6B7C8D9E0F1A2B3C4D5E /* NutritionAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = NA6B7C8D9E0F1A2B3C4D5E6F /* NutritionAnalysis.swift */; };
 		A1B2C3D400000081 /* NutritionSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000080 /* NutritionSnapshot.swift */; };
 		CR0N0M3T3R00000002 /* CronometerRecommendation.swift in Sources */ = {isa = PBXBuildFile; fileRef = CR0N0M3T3R00000001 /* CronometerRecommendation.swift */; };
+		M3ALP3D1CT000002 /* MealOutcomePrediction.swift in Sources */ = {isa = PBXBuildFile; fileRef = M3ALP3D1CT000001 /* MealOutcomePrediction.swift */; };
 		NAS7C8D9E0F1A2B3C4D5E6F7 /* NutritionAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NAS8D9E0F1A2B3C4D5E6F7A8 /* NutritionAnalysisService.swift */; };
 		NAV9E0F1A2B3C4D5E6F7A8B9 /* NutritionAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NAV0F1A2B3C4D5E6F7A8B9C0 /* NutritionAnalysisView.swift */; };
 /* End PBXBuildFile section */
@@ -1624,6 +1625,7 @@
 		NA6B7C8D9E0F1A2B3C4D5E6F /* NutritionAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAnalysis.swift; sourceTree = "<group>"; };
 		A1B2C3D400000080 /* NutritionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionSnapshot.swift; sourceTree = "<group>"; };
 		CR0N0M3T3R00000001 /* CronometerRecommendation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CronometerRecommendation.swift; sourceTree = "<group>"; };
+		M3ALP3D1CT000001 /* MealOutcomePrediction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealOutcomePrediction.swift; sourceTree = "<group>"; };
 		NAS8D9E0F1A2B3C4D5E6F7A8 /* NutritionAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAnalysisService.swift; sourceTree = "<group>"; };
 		NAV0F1A2B3C4D5E6F7A8B9C0 /* NutritionAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAnalysisView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -2468,6 +2470,7 @@
 				NA6B7C8D9E0F1A2B3C4D5E6F /* NutritionAnalysis.swift */,
 				A1B2C3D400000080 /* NutritionSnapshot.swift */,
 				CR0N0M3T3R00000001 /* CronometerRecommendation.swift */,
+				M3ALP3D1CT000001 /* MealOutcomePrediction.swift */,
 				DDFF204F2DB2C11900AB8A96 /* WatchStateSnapshot.swift */,
 				DDEBB05B2D89E9050032305D /* TimeInRangeType.swift */,
 				3B2F77852D7E52ED005ED9FA /* TDD.swift */,
@@ -4330,6 +4333,7 @@
 				NA5A6B7C8D9E0F1A2B3C4D5E /* NutritionAnalysis.swift in Sources */,
 				A1B2C3D400000081 /* NutritionSnapshot.swift in Sources */,
 				CR0N0M3T3R00000002 /* CronometerRecommendation.swift in Sources */,
+				M3ALP3D1CT000002 /* MealOutcomePrediction.swift in Sources */,
 				NAS7C8D9E0F1A2B3C4D5E6F7 /* NutritionAnalysisService.swift in Sources */,
 				NAV9E0F1A2B3C4D5E6F7A8B9 /* NutritionAnalysisView.swift in Sources */,
 				A1B1C1D1E1F101010101A1B1 /* AIInsightsConfigDataFlow.swift in Sources */,

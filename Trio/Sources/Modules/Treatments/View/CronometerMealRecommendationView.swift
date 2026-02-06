@@ -18,6 +18,7 @@ struct CronometerMealRecommendationView: View {
     let glucoseHistory: [GlucosePoint] // Recent readings for chart
     let predictionCurve: [Int]? // Predicted BG values at 5-min intervals
     let outcomeStats: CronometerOutcomeStats
+    let mealPrediction: MealOutcomePrediction?
 
     let onApply: (Double, Double, Double) -> Void // (carbs, fat, protein) to populate
     let onAdjustFactor: (Double) -> Void
@@ -47,6 +48,7 @@ struct CronometerMealRecommendationView: View {
         glucoseHistory: [GlucosePoint],
         predictionCurve: [Int]?,
         outcomeStats: CronometerOutcomeStats,
+        mealPrediction: MealOutcomePrediction?,
         onApply: @escaping (Double, Double, Double) -> Void,
         onAdjustFactor: @escaping (Double) -> Void,
         onDismiss: @escaping () -> Void
@@ -65,6 +67,7 @@ struct CronometerMealRecommendationView: View {
         self.glucoseHistory = glucoseHistory
         self.predictionCurve = predictionCurve
         self.outcomeStats = outcomeStats
+        self.mealPrediction = mealPrediction
         self.onApply = onApply
         self.onAdjustFactor = onAdjustFactor
         self.onDismiss = onDismiss
@@ -87,6 +90,11 @@ struct CronometerMealRecommendationView: View {
                     // FPU info
                     if fpuCarbEquivalents > 1 {
                         fpuSection
+                    }
+
+                    // Similar meal prediction
+                    if let prediction = mealPrediction, prediction.similarMealCount > 0 {
+                        mealPredictionSection(prediction)
                     }
 
                     // Past performance
@@ -388,6 +396,148 @@ struct CronometerMealRecommendationView: View {
         .padding()
         .background(Color.indigo.opacity(0.05))
         .cornerRadius(12)
+    }
+
+    // MARK: - Meal Prediction Section
+
+    private func mealPredictionSection(_ prediction: MealOutcomePrediction) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Similar Meal Insights", systemImage: "brain")
+                    .font(.headline)
+                    .foregroundStyle(.teal)
+                Spacer()
+                confidenceBadge(prediction.confidence)
+            }
+
+            Text("Based on \(prediction.similarMealCount) similar past meal\(prediction.similarMealCount == 1 ? "" : "s")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // Predicted BG trajectory
+            if prediction.predictedBGAt1h != nil || prediction.predictedBGAt2h != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Expected BG Response")
+                        .font(.subheadline.bold())
+
+                    HStack(spacing: 12) {
+                        if let bg1h = prediction.predictedBGAt1h {
+                            trajectoryPoint("1h", value: bg1h)
+                        }
+                        if let bg2h = prediction.predictedBGAt2h {
+                            trajectoryPoint("2h", value: bg2h)
+                        }
+                        if let bg3h = prediction.predictedBGAt3h {
+                            trajectoryPoint("3h", value: bg3h)
+                        }
+                        if let bg4h = prediction.predictedBGAt4h {
+                            trajectoryPoint("4h", value: bg4h)
+                        }
+                        if let bg6h = prediction.predictedBGAt6h {
+                            trajectoryPoint("6h", value: bg6h)
+                        }
+                    }
+                }
+            }
+
+            // Peak and rise
+            HStack(spacing: 16) {
+                if let peak = prediction.predictedPeakBG {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up")
+                            .foregroundStyle(glucoseColor(for: peak))
+                        Text("Peak: \(peak) \(units)")
+                            .font(.caption)
+                            .foregroundStyle(glucoseColor(for: peak))
+                    }
+                }
+                if let rise = prediction.predictedBGRise {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .foregroundStyle(.secondary)
+                        Text("Rise: +\(rise) \(units)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // Suggested dosing
+            if let suggestedICR = prediction.suggestedEffectiveICR {
+                Divider()
+                HStack {
+                    Image(systemName: "syringe")
+                        .foregroundStyle(.teal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Effective ICR from similar meals: 1:\(String(format: "%.1f", suggestedICR))")
+                            .font(.caption.bold())
+                        if let suggestedBolus = prediction.suggestedBolus {
+                            Text("Suggested bolus: \(String(format: "%.1f", suggestedBolus)) U")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            // Top similar meals summary
+            if !prediction.topSimilarMeals.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Top Matches")
+                        .font(.caption.bold())
+                    ForEach(prediction.topSimilarMeals.prefix(3), id: \.meal.id) { match in
+                        HStack {
+                            Text(match.meal.date.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2)
+                            Spacer()
+                            Text("\(Int(match.meal.carbs))g carb")
+                                .font(.caption2)
+                            if let peak = match.meal.peakBG {
+                                Text("peak \(peak)")
+                                    .font(.caption2)
+                                    .foregroundStyle(glucoseColor(for: peak))
+                            }
+                            Text("\(Int(match.similarity * 100))%")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.teal)
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color.teal.opacity(0.05))
+        .cornerRadius(12)
+    }
+
+    private func trajectoryPoint(_ label: String, value: Int) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)")
+                .font(.subheadline.bold().monospacedDigit())
+                .foregroundStyle(glucoseColor(for: value))
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func confidenceBadge(_ confidence: MealOutcomePrediction.PredictionConfidence) -> some View {
+        let (text, color): (String, Color) = {
+            switch confidence {
+            case .high: return ("High", .green)
+            case .medium: return ("Medium", .yellow)
+            case .low: return ("Low", .orange)
+            case .none: return ("None", .gray)
+            }
+        }()
+        return Text(text)
+            .font(.caption2.bold())
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.2))
+            .foregroundStyle(color)
+            .cornerRadius(4)
     }
 
     // MARK: - Action Buttons

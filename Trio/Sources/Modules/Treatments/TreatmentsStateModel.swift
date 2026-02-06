@@ -116,6 +116,7 @@ extension Treatments {
         var cronometerPredictedEventualBG: Int?
         var cronometerPredictedMinBG: Int?
         var cronometerPredictionCurve: [Int]?
+        var cronometerMealPrediction: MealOutcomePrediction?
         var cronometerOutcomeStats = CronometerOutcomeStats(
             totalApplied: 0, completedCount: 0, inRangeCount: 0, averagePeakBG: nil, cleanWindowCount: 0
         )
@@ -341,6 +342,31 @@ extension Treatments {
             let store = CronometerRecommendationStore.shared
             cronometerAdjustmentFactor = store.personalAdjustmentFactor()
             cronometerOutcomeStats = store.outcomeStats()
+
+            // Build historical meal outcomes and predict BG response
+            let predictionContext = CoreDataStack.shared.newTaskContext()
+            let predictionService = MealOutcomePredictionService.shared
+            let history = await predictionService.buildHistoricalOutcomes(context: predictionContext)
+            cronometerMealPrediction = predictionService.predictOutcome(
+                forCarbs: latestMeal.carbsDelta,
+                fat: latestMeal.fatDelta,
+                protein: latestMeal.proteinDelta,
+                currentBG: Int(NSDecimalNumber(decimal: currentBG).intValue),
+                currentIOB: NSDecimalNumber(decimal: iob).doubleValue,
+                history: history
+            )
+
+            // If we have a predicted effective ICR, use it to inform the adjustment factor
+            if let suggestedICR = cronometerMealPrediction?.suggestedEffectiveICR,
+               suggestedICR > 0, currentCarbRatio > 0
+            {
+                // Factor = pump CR / effective ICR (how much to scale carbs given current settings)
+                let pumpCR = NSDecimalNumber(decimal: currentCarbRatio).doubleValue
+                let predictedFactor = pumpCR / suggestedICR
+                // Blend with stored factor: 60% predicted, 40% historical
+                let blendedFactor = max(0.2, min(1.5, predictedFactor * 0.6 + cronometerAdjustmentFactor * 0.4))
+                cronometerAdjustmentFactor = blendedFactor
+            }
 
             // Calculate recommended entry
             calculateCronometerRecommendation()

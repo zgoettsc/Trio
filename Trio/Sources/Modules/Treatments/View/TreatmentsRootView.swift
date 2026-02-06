@@ -553,6 +553,7 @@ extension Treatments {
                         },
                         predictionCurve: state.cronometerPredictionCurve,
                         outcomeStats: state.cronometerOutcomeStats,
+                        mealPrediction: state.cronometerMealPrediction,
                         onApply: { carbs, fat, protein in
                             state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein)
                             handleDebouncedInput()
