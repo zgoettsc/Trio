@@ -168,6 +168,35 @@ extension Treatments {
                     }
                     .buttonStyle(.plain)
 
+                    // Cronometer meal button
+                    Button(action: {
+                        Task {
+                            await state.fetchCronometerMeal()
+                            if state.cronometerMeal != nil {
+                                state.showCronometerSheet = true
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            if state.isFetchingCronometerMeal {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            } else {
+                                Image(systemName: "fork.knife")
+                                    .font(.caption)
+                            }
+                            Text("Crono")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundColor(.orange)
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(state.isFetchingCronometerMeal)
+
                     Button(action: {
                         state.carbs += 5
                         handleDebouncedInput()
@@ -503,6 +532,47 @@ extension Treatments {
                         handleDebouncedInput()
                     }
                 )
+            }
+            .sheet(isPresented: $state.showCronometerSheet) {
+                if let meal = state.cronometerMeal {
+                    CronometerMealRecommendationView(
+                        meal: meal,
+                        recommendedCarbs: state.cronometerRecommendedCarbs,
+                        recommendedFat: state.cronometerRecommendedFat,
+                        recommendedProtein: state.cronometerRecommendedProtein,
+                        adjustmentFactor: state.cronometerAdjustmentFactor,
+                        fpuCarbEquivalents: state.cronometerFPUCarbEquivalents,
+                        fpuDurationHours: state.cronometerFPUDurationHours,
+                        predictedEventualBG: state.cronometerPredictedEventualBG,
+                        predictedMinBG: state.cronometerPredictedMinBG,
+                        currentBG: Int(NSDecimalNumber(decimal: state.currentBG).intValue),
+                        units: state.units.rawValue,
+                        glucoseHistory: state.glucoseFromPersistence.prefix(48).compactMap { g in
+                            guard let date = g.date else { return nil }
+                            return CronometerMealRecommendationView.GlucosePoint(date: date, value: Int(g.glucose))
+                        },
+                        predictionCurve: state.cronometerPredictionCurve,
+                        outcomeStats: state.cronometerOutcomeStats,
+                        onApply: { carbs, fat, protein in
+                            state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein)
+                            handleDebouncedInput()
+                        },
+                        onAdjustFactor: { newFactor in
+                            state.adjustCronometerFactor(newFactor)
+                        },
+                        onDismiss: {
+                            state.showCronometerSheet = false
+                        }
+                    )
+                }
+            }
+            .alert("Cronometer", isPresented: Binding(
+                get: { state.cronometerError != nil },
+                set: { if !$0 { state.cronometerError = nil } }
+            )) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(state.cronometerError ?? "")
             }
         }
 

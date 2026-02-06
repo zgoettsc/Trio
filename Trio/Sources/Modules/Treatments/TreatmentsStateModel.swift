@@ -105,6 +105,22 @@ extension Treatments {
 
         var externalInsulin: Bool = false
         var showInfo: Bool = false
+        var showCronometerSheet: Bool = false
+        var cronometerMeal: InferredMealEvent?
+        var cronometerRecommendedCarbs: Double = 0
+        var cronometerRecommendedFat: Double = 0
+        var cronometerRecommendedProtein: Double = 0
+        var cronometerAdjustmentFactor: Double = 0.5
+        var cronometerFPUCarbEquivalents: Double = 0
+        var cronometerFPUDurationHours: Double = 0
+        var cronometerPredictedEventualBG: Int?
+        var cronometerPredictedMinBG: Int?
+        var cronometerPredictionCurve: [Int]?
+        var cronometerOutcomeStats = CronometerOutcomeStats(
+            totalApplied: 0, completedCount: 0, inRangeCount: 0, averagePeakBG: nil, cleanWindowCount: 0
+        )
+        var isFetchingCronometerMeal: Bool = false
+        var cronometerError: String?
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
         var preprocessedData: [(id: UUID, forecast: Forecast, forecastValue: ForecastValue)] = []
@@ -302,6 +318,137 @@ extension Treatments {
             useFPUconversion = settingsManager.settings.useFPUconversion
             isSmoothingEnabled = settingsManager.settings.smoothGlucose
             glucoseColorScheme = settingsManager.settings.glucoseColorScheme
+        }
+
+        // MARK: - Cronometer Meal Recommendation
+
+        /// Fetch the most recent Cronometer meal and prepare a recommendation
+        @MainActor func fetchCronometerMeal() async {
+            isFetchingCronometerMeal = true
+            cronometerError = nil
+
+            // Get inferred meals from last 2 hours (recent enough to be the current meal)
+            let recentMeals = NutritionSnapshotStore.shared.inferredMealEvents(forLastHours: 2)
+            guard let latestMeal = recentMeals.last else {
+                cronometerError = "No recent Cronometer meal detected. Log your food in Cronometer and wait for it to sync to Apple Health."
+                isFetchingCronometerMeal = false
+                return
+            }
+
+            cronometerMeal = latestMeal
+
+            // Get personal adjustment factor (learned from outcomes)
+            let store = CronometerRecommendationStore.shared
+            cronometerAdjustmentFactor = store.personalAdjustmentFactor()
+            cronometerOutcomeStats = store.outcomeStats()
+
+            // Calculate recommended entry
+            calculateCronometerRecommendation()
+
+            // Run simulation with recommended values
+            await runCronometerSimulation()
+
+            // Trigger background outcome backfill for pending recommendations
+            Task {
+                await store.backfillOutcomes(context: CoreDataStack.shared.newTaskContext())
+                // Recalculate factor if we have new outcome data
+                let _ = store.recalculateFactorFromOutcomes()
+            }
+
+            isFetchingCronometerMeal = false
+        }
+
+        /// Calculate recommended carbs/fat/protein from Cronometer meal using personal factor
+        @MainActor private func calculateCronometerRecommendation() {
+            guard let meal = cronometerMeal else { return }
+
+            // Carbs are scaled by the personal factor
+            // Fat and protein are passed through fully (for FPU calculation)
+            cronometerRecommendedCarbs = meal.carbsDelta * cronometerAdjustmentFactor
+            cronometerRecommendedFat = meal.fatDelta
+            cronometerRecommendedProtein = meal.proteinDelta
+
+            // Calculate FPU carb equivalents (Warsaw Method)
+            let trioSettings = settingsManager.settings
+            let adjustment = NSDecimalNumber(decimal: trioSettings.individualAdjustmentFactor).doubleValue
+            let timeCap = NSDecimalNumber(decimal: trioSettings.timeCap).doubleValue
+
+            let kcal = meal.proteinDelta * 4 + meal.fatDelta * 9
+            let carbEquivalents = (kcal / 10) * adjustment
+            let fpus = carbEquivalents / 10
+
+            let duration: Double
+            if fpus < 2 { duration = min(3, timeCap) }
+            else if fpus < 3 { duration = min(4, timeCap) }
+            else if fpus < 4 { duration = min(5, timeCap) }
+            else { duration = timeCap }
+
+            cronometerFPUCarbEquivalents = carbEquivalents
+            cronometerFPUDurationHours = duration
+        }
+
+        /// Run oref simulation with the recommended Cronometer entry
+        @MainActor private func runCronometerSimulation() async {
+            guard cronometerRecommendedCarbs > 0 else { return }
+
+            let simResult = await apsManager.simulateDetermineBasal(
+                simulatedCarbsAmount: Decimal(cronometerRecommendedCarbs),
+                simulatedBolusAmount: 0,
+                simulatedCarbsDate: nil // Current time
+            )
+
+            if let sim = simResult {
+                cronometerPredictedEventualBG = sim.eventualBG
+                cronometerPredictedMinBG = sim.minPredBG.map { NSDecimalNumber(decimal: $0).intValue }
+
+                // Get prediction curve for chart (use COB predictions as they account for carbs)
+                cronometerPredictionCurve = sim.predictions?.cob ?? sim.predictions?.iob
+            }
+        }
+
+        /// Called when the user adjusts the personal factor in the recommendation view
+        @MainActor func adjustCronometerFactor(_ newFactor: Double) {
+            cronometerAdjustmentFactor = max(0.2, min(1.5, newFactor))
+            CronometerRecommendationStore.shared.savePersonalFactor(cronometerAdjustmentFactor)
+            calculateCronometerRecommendation()
+            // Re-run simulation with new values
+            Task { await runCronometerSimulation() }
+        }
+
+        /// Called when user taps Apply — populates carb/fat/protein fields and logs the recommendation
+        @MainActor func applyCronometerRecommendation(carbs appliedCarbs: Double, fat appliedFat: Double, protein appliedProtein: Double) {
+            guard let meal = cronometerMeal else { return }
+
+            // Populate the treatment fields
+            self.carbs = Decimal(appliedCarbs)
+            self.fat = Decimal(appliedFat)
+            self.protein = Decimal(appliedProtein)
+
+            // Log the recommendation for outcome tracking
+            let recommendation = CronometerMealRecommendation.create(
+                cronometerCarbs: meal.carbsDelta,
+                cronometerFat: meal.fatDelta,
+                cronometerProtein: meal.proteinDelta,
+                recommendedCarbs: cronometerRecommendedCarbs,
+                recommendedFat: cronometerRecommendedFat,
+                recommendedProtein: cronometerRecommendedProtein,
+                appliedCarbs: appliedCarbs,
+                appliedFat: appliedFat,
+                appliedProtein: appliedProtein,
+                bgAtMeal: Int(NSDecimalNumber(decimal: currentBG).intValue),
+                carbRatioAtMeal: NSDecimalNumber(decimal: currentCarbRatio).doubleValue,
+                isfAtMeal: NSDecimalNumber(decimal: currentISF).doubleValue,
+                adjustmentFactor: cronometerAdjustmentFactor,
+                predictedEventualBG: cronometerPredictedEventualBG,
+                predictedMinBG: cronometerPredictedMinBG
+            )
+            CronometerRecommendationStore.shared.save(recommendation)
+
+            // Dismiss the sheet
+            showCronometerSheet = false
+
+            // Reset Cronometer state
+            cronometerMeal = nil
         }
 
         private func getCurrentSettingValue(for type: SettingType) async {
