@@ -356,33 +356,15 @@ final class NutritionSnapshotStore {
     /// Cronometer writes cumulative daily totals to Apple Health. Each snapshot captures
     /// the running total at the time the observer fired. Meals are inferred from deltas
     /// between consecutive snapshots.
-    ///
-    /// Special case: if only 1 snapshot exists for a day, the baseline is implicitly
-    /// midnight with 0g across all macros (since Cronometer's daily totals start at zero).
-    /// This means the first snapshot's cumulative values ARE the food logged so far.
     func inferredMealEvents(for date: Date) -> [InferredMealEvent] {
         let snapshots = snapshotsForDate(date).sorted { $0.timestamp < $1.timestamp }
-        guard !snapshots.isEmpty else { return [] }
+        guard snapshots.count >= 2 else { return [] }
 
         var events: [InferredMealEvent] = []
 
-        // Create a synthetic midnight baseline — Cronometer daily totals start at 0
-        let calendar = Calendar.current
-        let midnight = calendar.startOfDay(for: date)
-        let baseline = NutritionSnapshot(
-            timestamp: midnight,
-            cumulativeCarbs: 0,
-            cumulativeFat: 0,
-            cumulativeProtein: 0,
-            forDate: midnight
-        )
-
-        // Prepend baseline so we can always diff against it
-        let allSnapshots = [baseline] + snapshots
-
-        for i in 1 ..< allSnapshots.count {
-            let prev = allSnapshots[i - 1]
-            let curr = allSnapshots[i]
+        for i in 1 ..< snapshots.count {
+            let prev = snapshots[i - 1]
+            let curr = snapshots[i]
             let carbDelta = curr.cumulativeCarbs - prev.cumulativeCarbs
             let fatDelta = curr.cumulativeFat - prev.cumulativeFat
             let proteinDelta = curr.cumulativeProtein - prev.cumulativeProtein
@@ -398,6 +380,63 @@ final class NutritionSnapshotStore {
             }
         }
         return events
+    }
+
+    /// Compute the meal delta between the most recent stored snapshot and new cumulative totals.
+    /// Used when the Crono button is tapped: we query HealthKit for current totals and diff
+    /// against the last stored snapshot to get just the recently-logged food.
+    /// If no prior snapshot exists, uses the full cumulative values (first meal of the day).
+    func recordAndComputeLatestMeal(
+        currentCarbs: Double,
+        currentFat: Double,
+        currentProtein: Double
+    ) -> InferredMealEvent? {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        // Save the fresh snapshot
+        let freshSnapshot = NutritionSnapshot(
+            timestamp: Date(),
+            cumulativeCarbs: currentCarbs,
+            cumulativeFat: currentFat,
+            cumulativeProtein: currentProtein,
+            forDate: today
+        )
+        saveSnapshot(freshSnapshot)
+
+        // Find the previous snapshot for today (the one right before this one)
+        let todaySnapshots = snapshotsForDate(today)
+            .filter { $0.id != freshSnapshot.id }
+            .sorted { $0.timestamp < $1.timestamp }
+
+        let prev: NutritionSnapshot
+        if let lastSnapshot = todaySnapshots.last {
+            prev = lastSnapshot
+        } else {
+            // No prior snapshot today — use midnight baseline (0g)
+            // This means the entire cumulative total IS the food logged today
+            prev = NutritionSnapshot(
+                timestamp: today,
+                cumulativeCarbs: 0,
+                cumulativeFat: 0,
+                cumulativeProtein: 0,
+                forDate: today
+            )
+        }
+
+        let carbDelta = currentCarbs - prev.cumulativeCarbs
+        let fatDelta = currentFat - prev.cumulativeFat
+        let proteinDelta = currentProtein - prev.cumulativeProtein
+
+        // Only return a meal if there's a meaningful change
+        guard carbDelta > 1 || fatDelta > 1 || proteinDelta > 1 else { return nil }
+
+        return InferredMealEvent(
+            detectedAt: Date(),
+            carbsDelta: max(0, carbDelta),
+            fatDelta: max(0, fatDelta),
+            proteinDelta: max(0, proteinDelta)
+        )
     }
 
     /// Derive inferred meal events from snapshot deltas for the last N hours.

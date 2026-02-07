@@ -27,6 +27,10 @@ protocol NutritionHealthService {
 
     /// Get inferred meal events for a specific date from snapshot deltas
     func inferredMealEvents(for date: Date) -> [InferredMealEvent]
+
+    /// Query current cumulative nutrition totals from Apple Health and return
+    /// the delta since the last snapshot (i.e. the most recently logged food).
+    func fetchLatestMealDelta() async -> InferredMealEvent?
 }
 
 final class BaseNutritionHealthService: NutritionHealthService, Injectable {
@@ -166,6 +170,34 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
 
     func inferredMealEvents(for date: Date) -> [InferredMealEvent] {
         snapshotStore.inferredMealEvents(for: date)
+    }
+
+    /// Query current cumulative totals from Apple Health, save a snapshot,
+    /// and return the delta from the previous snapshot (= latest food logged).
+    func fetchLatestMealDelta() async -> InferredMealEvent? {
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+
+        do {
+            let entries = try await fetchNutritionEntries(from: today, to: tomorrow)
+            let totalCarbs = entries.reduce(0) { $0 + $1.carbs }
+            let totalFat = entries.reduce(0) { $0 + $1.fat }
+            let totalProtein = entries.reduce(0) { $0 + $1.protein }
+
+            debug(
+                .service,
+                "Crono button: HealthKit current totals C=\(Int(totalCarbs))g F=\(Int(totalFat))g P=\(Int(totalProtein))g"
+            )
+
+            return snapshotStore.recordAndComputeLatestMeal(
+                currentCarbs: totalCarbs,
+                currentFat: totalFat,
+                currentProtein: totalProtein
+            )
+        } catch {
+            debug(.service, "Crono button: Failed to query HealthKit: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Query today's cumulative nutrition totals and save a snapshot
