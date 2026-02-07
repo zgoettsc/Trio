@@ -112,6 +112,7 @@ extension Treatments {
         var cronometerRecommendedFat: Double = 0
         var cronometerRecommendedProtein: Double = 0
         var cronometerAdjustmentFactor: Double = 0.5
+        var cronometerFactorLocked: Bool = false
         var cronometerFPUCarbEquivalents: Double = 0
         var cronometerFPUDurationHours: Double = 0
         var cronometerPredictedEventualBG: Int?
@@ -374,6 +375,7 @@ extension Treatments {
             // Get personal adjustment factor (learned from outcomes)
             let store = CronometerRecommendationStore.shared
             cronometerAdjustmentFactor = store.personalAdjustmentFactor()
+            cronometerFactorLocked = store.isFactorLocked
             cronometerOutcomeStats = store.outcomeStats()
 
             // Build historical meal outcomes and predict BG response
@@ -389,10 +391,10 @@ extension Treatments {
                 history: history
             )
 
-            // If we have predicted entry factors from similar meals, use them
+            // If we have predicted entry factors from similar meals, use them (unless locked)
             // The prediction model learns coupled carb/fat/protein factors as a system:
             // more fat/protein entry → more FPU → more loop SMBs → less upfront carb bolus needed
-            if let prediction = cronometerMealPrediction {
+            if !store.isFactorLocked, let prediction = cronometerMealPrediction {
                 if let suggestedCarbFactor = prediction.suggestedCarbFactor {
                     // Blend predicted carb factor with stored factor: 60% predicted, 40% historical
                     cronometerAdjustmentFactor = max(0.2, min(1.5,
@@ -417,8 +419,10 @@ extension Treatments {
             // Trigger background outcome backfill for pending recommendations
             Task {
                 await store.backfillOutcomes(context: CoreDataStack.shared.newTaskContext())
-                // Recalculate factor if we have new outcome data
-                let _ = store.recalculateFactorFromOutcomes()
+                // Recalculate factor if we have new outcome data (respects lock + ICR match)
+                let _ = store.recalculateFactorFromOutcomes(
+                    currentCarbRatio: NSDecimalNumber(decimal: currentCarbRatio).doubleValue
+                )
             }
 
             isFetchingCronometerMeal = false
@@ -495,6 +499,14 @@ extension Treatments {
             Task { await runCronometerSimulation() }
         }
 
+        /// Toggle the factor lock. When locked, auto-learning from outcomes and prediction blending
+        /// are disabled — the user's manually-set factor values are preserved.
+        @MainActor func toggleCronometerFactorLock() {
+            let store = CronometerRecommendationStore.shared
+            store.isFactorLocked.toggle()
+            cronometerFactorLocked = store.isFactorLocked
+        }
+
         /// Record a snapshot of current HealthKit nutrition totals to establish a baseline.
         /// Called before opening Cronometer so the next Crono tap only shows food logged AFTER this point.
         @MainActor func recordCronometerBaseline() async {
@@ -517,6 +529,7 @@ extension Treatments {
             // Get personal adjustment factor
             let store = CronometerRecommendationStore.shared
             cronometerAdjustmentFactor = store.personalAdjustmentFactor()
+            cronometerFactorLocked = store.isFactorLocked
             cronometerOutcomeStats = store.outcomeStats()
 
             // Build prediction from similar meals
@@ -532,8 +545,8 @@ extension Treatments {
                 history: history
             )
 
-            // Apply learned factors (same as normal flow)
-            if let prediction = cronometerMealPrediction {
+            // Apply learned factors (same as normal flow, unless locked)
+            if !store.isFactorLocked, let prediction = cronometerMealPrediction {
                 if let suggestedCarbFactor = prediction.suggestedCarbFactor {
                     cronometerAdjustmentFactor = max(0.2, min(1.5,
                         suggestedCarbFactor * 0.6 + cronometerAdjustmentFactor * 0.4))
@@ -592,7 +605,9 @@ extension Treatments {
             // Background outcome backfill
             Task {
                 await store.backfillOutcomes(context: CoreDataStack.shared.newTaskContext())
-                let _ = store.recalculateFactorFromOutcomes()
+                let _ = store.recalculateFactorFromOutcomes(
+                    currentCarbRatio: NSDecimalNumber(decimal: currentCarbRatio).doubleValue
+                )
             }
 
             isFetchingCronometerMeal = false

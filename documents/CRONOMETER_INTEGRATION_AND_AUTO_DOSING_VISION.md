@@ -95,6 +95,21 @@ Raw Cronometer values are rarely what you should enter in Trio for dosing. Reaso
 
 The adjustment factor (default 0.5, range 0.2-1.5) scales Cronometer macros to Trio entry values. It's learned from meal outcomes over time (see Phase 3).
 
+#### Factor Lock & ICR-Tagged Learning
+
+The factor can be **locked** via a toggle in the recommendation view's factor editor. When locked:
+- Auto-learning from outcomes is disabled (`recalculateFactorFromOutcomes` is a no-op)
+- Prediction blending is skipped — the stored factor values are used as-is
+- Manual slider adjustments are still allowed and persist
+
+This is useful when changing pump ICR settings. For example, if moving from ICR 1:10 (with factor ~0.5) to ICR 1:20 (where factor should be ~1.0):
+1. Lock the factor
+2. Set it to 1.0 manually
+3. Observe outcomes for a week
+4. Unlock to resume auto-learning once the new ICR is stable
+
+Additionally, outcome-based factor learning is **ICR-tagged**: only outcomes recorded at an ICR within ±10% of the current pump ICR are used. This prevents stale outcomes from a previous pump configuration from polluting the learning when the ICR changes.
+
 ### The Recommendation Is Logged for Outcome Tracking
 
 Every time the user taps "Apply," a `CronometerMealRecommendation` is saved with:
@@ -783,7 +798,13 @@ Cronometer App
 
 **Reason:** For late dosing, we need to estimate how many carbs remain unabsorbed. Time-based decay (`exp(-0.025 * minutes)`) gives a reasonable estimate but can't account for individual meal composition or current insulin action. BG-informed estimation (`bgRise * CR / ISF`) uses actual glucose rise to infer absorption. Taking the minimum of the two is more conservative (safer) — it prevents overdosing in cases where either model is inaccurate.
 
-### 8. Firestore for Garmin Data (Not HealthKit)
+### 8. Factor Lock + ICR-Tagged Outcome Learning
+
+**Decision:** Factor lock toggle disables all auto-learning; outcome learning filters by ICR (±10% match)
+
+**Reason:** When the user changes their pump ICR, all existing outcome-derived factor values become invalid — they were calibrated to a different ratio. The lock lets the user freeze factors during a transition (e.g., ICR 1:10→1:20, factor 0.5→1.0). ICR tagging ensures that even when unlocked, only outcomes from the same pump configuration influence learning, preventing stale data from pulling the factor in the wrong direction.
+
+### 9. Firestore for Garmin Data (Not HealthKit)
 
 **Decision:** Read Garmin data from existing Firestore database via Garmin Health API
 
@@ -834,3 +855,4 @@ Cronometer App
 | 9 | Fix meal grouping — group snapshots within 15 minutes as single meal |
 | 10 | Late dosing with meal picker, carb decay model, FPU decay, BG-informed hybrid |
 | 11 | Fix Decimal→Double conversion for individualAdjustmentFactor |
+| 12 | Factor lock toggle + ICR-tagged outcome learning |

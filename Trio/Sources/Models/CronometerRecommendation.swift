@@ -155,7 +155,12 @@ final class CronometerRecommendationStore {
     private let factorKey = "CronometerPersonalFactor"
     private let fatFactorKey = "CronometerFatFactor"
     private let proteinFactorKey = "CronometerProteinFactor"
+    private let factorLockedKey = "CronometerFactorLocked"
     private let retentionDays = 90
+
+    /// ICR tolerance for matching outcomes — outcomes recorded at an ICR within ±10% of the current ICR
+    /// are considered relevant for factor learning. Outcomes outside this range are ignored.
+    private let icrMatchTolerance = 0.10
 
     private init() {}
 
@@ -236,6 +241,13 @@ final class CronometerRecommendationStore {
         UserDefaults.standard.set(clamped, forKey: factorKey)
     }
 
+    /// Whether factors are locked (auto-learning disabled).
+    /// When locked, outcome-based recalculation is skipped and the user's manual factor values stick.
+    var isFactorLocked: Bool {
+        get { UserDefaults.standard.bool(forKey: factorLockedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: factorLockedKey) }
+    }
+
     /// Get the personal fat entry factor (how much of Cronometer fat to enter)
     /// Returns 0-1.5. Default 1.0 (enter full Cronometer fat) until learned.
     func personalFatFactor() -> Double {
@@ -265,7 +277,18 @@ final class CronometerRecommendationStore {
     /// Carb factor: learned from early BG (1-4h) — covers acute carb spike.
     /// Fat/protein factors: learned from late BG (4-10h) — covers delayed FPU absorption.
     /// More fat/protein entry → more FPU → more loop SMBs → more insulin over hours.
-    func recalculateFactorFromOutcomes(targetLow: Int = 70, targetHigh: Int = 180) -> Double {
+    ///
+    /// When `isFactorLocked` is true, this is a no-op — factors remain at their manually-set values.
+    /// When `currentCarbRatio` is provided, only outcomes recorded at a similar ICR (±10%) are used,
+    /// preventing stale outcomes from a different pump configuration from polluting the learning.
+    func recalculateFactorFromOutcomes(
+        targetLow: Int = 70,
+        targetHigh: Int = 180,
+        currentCarbRatio: Double? = nil
+    ) -> Double {
+        // When locked, skip all auto-learning
+        guard !isFactorLocked else { return personalAdjustmentFactor() }
+
         let completed = completedRecommendations()
         guard !completed.isEmpty else { return personalAdjustmentFactor() }
 
@@ -286,6 +309,14 @@ final class CronometerRecommendationStore {
 
         for rec in completed {
             guard rec.hasCleanEarlyWindow else { continue }
+
+            // ICR-tagged filtering: skip outcomes recorded at a significantly different carb ratio
+            if let currentCR = currentCarbRatio, currentCR > 0 {
+                let recCR = rec.carbRatioAtMeal
+                guard recCR > 0 else { continue }
+                let ratio = recCR / currentCR
+                guard ratio >= (1.0 - icrMatchTolerance), ratio <= (1.0 + icrMatchTolerance) else { continue }
+            }
 
             let ageInDays = now.timeIntervalSince(rec.date) / 86400
             let recencyWeight = max(0.1, 1.0 - (ageInDays / Double(retentionDays)))
