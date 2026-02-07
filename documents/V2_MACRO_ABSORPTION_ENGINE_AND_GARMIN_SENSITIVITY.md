@@ -1,8 +1,8 @@
 # V2: Macro Absorption Engine & Garmin Sensitivity Model
 
-**Version:** 2.2
+**Version:** 2.3
 **Date:** February 7, 2026
-**Status:** Implementation in progress (Phases A-G coded, wiring complete)
+**Status:** Implementation in progress (Phases A-G coded, Firebase wired, CI secrets ready)
 **Prerequisite:** V1 Cronometer Integration (Phases 1-5b, implemented)
 
 ---
@@ -1308,6 +1308,17 @@ struct MealModeState {
 
 ## Layer 3: Garmin Sensitivity Model
 
+Trio connects to the user's personal Firebase project (separate from Trio's Crashlytics project) to read Garmin health data. The integration uses a secondary `FirebaseApp` instance configured from build-time secrets, with email/password authentication matching the Firestore security rules.
+
+**Data pipeline:** Garmin Watch → Garmin Connect → Garmin Health API v1.2.3 webhooks → Cloud Function → Firestore → Trio (via Firebase iOS SDK)
+
+**Firebase architecture:**
+- Trio's **default** FirebaseApp = `trio-e776c` (Crashlytics only)
+- Trio's **secondary** FirebaseApp (`"garmin"`) = user's personal Firebase project (Firestore reads)
+- Configuration injected at build time from GitHub secrets (see §10.3)
+- Authentication: email/password sign-in at app launch (`GarminFirebaseManager.configureAndSignIn()`)
+- Firestore security rules require `request.auth.uid == userId` — satisfied by the authenticated session
+
 ### 7.1 Firestore Database Structure
 
 Data flows from the Garmin watch via **Garmin Health API v1.2.3** (server-to-server push) through a Cloud Function into Firestore. The Cloud Function receives webhook POST notifications containing summary data and stores each summary as a document keyed by `calendarDate`.
@@ -2068,26 +2079,66 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 **Goal:** Query Garmin health data from the user's existing Firestore database.
 
+**Status:** IMPLEMENTED
+
 **New files:**
-- `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` — Firestore queries
-- `Trio/Sources/Models/GarminContextSnapshot.swift` — data model
+- `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` — Firestore queries, `GarminFirebaseManager`
+- `Trio/Sources/Services/Garmin/GarminFirebaseConfig.swift` — Build-time config with placeholder values
+- `Trio/Sources/Models/GarminContextSnapshot.swift` — Data model (Garmin Health API v1.2.3 fields)
 
-**Dependencies:**
-- Firebase iOS SDK (FirebaseFirestore) — add via SPM
-- `GoogleService-Info.plist` or manual Firestore configuration
+**Dependencies (already in project):**
+- `firebase-ios-sdk` v11.11+ (already used for Crashlytics)
+- Added products: `FirebaseAuth`, `FirebaseFirestore` (from same SPM package)
 
-**Steps:**
-1. Add Firebase SDK dependency to the project
-2. Implement `GarminFirestoreService` with configurable collection paths
-3. Build `GarminContextSnapshot` from query results
-4. Add Settings UI: Firestore project config, collection paths, enable/disable toggle
-5. Test with user's actual Firestore data to confirm schema mapping
-6. Add caching (don't re-query within 5 minutes)
+**Architecture: Secondary Firebase App**
 
-**Configuration needed from user:**
-- Firebase project ID
-- Firestore collection paths (may differ from assumed schema above)
-- Read-only security rules for Trio's access
+Trio already uses Firebase for Crashlytics (`trio-e776c` project). The user's Garmin data lives in a separate Firebase project. We use Firebase's multi-app support:
+
+```swift
+// Default app (Crashlytics) — configured in AppDelegate
+FirebaseApp.configure()
+
+// Secondary app (Garmin Firestore) — configured after default
+let options = FirebaseOptions(googleAppID: "...", gcmSenderID: "...")
+options.apiKey = "..."
+options.projectID = "..."
+FirebaseApp.configure(name: "garmin", options: options)
+
+// Sign in to the secondary app
+let auth = Auth.auth(app: FirebaseApp.app(name: "garmin")!)
+try await auth.signIn(withEmail: email, password: password)
+
+// Access Firestore via the secondary app
+let db = Firestore.firestore(app: FirebaseApp.app(name: "garmin")!)
+```
+
+**Build-Time Secret Injection (GitHub Actions)**
+
+The `GarminFirebaseConfig.swift` file contains placeholder values (`__GARMIN_FIREBASE_API_KEY__`, etc.) that are replaced by `sed` during the `build_trio.yml` workflow, before Xcode compilation.
+
+| GitHub Secret | Purpose | Example Value |
+|---------------|---------|---------------|
+| `GARMIN_FIREBASE_API_KEY` | Firebase Web API Key | `AIzaSy...` |
+| `GARMIN_FIREBASE_PROJECT_ID` | Firebase Project ID | `my-health-project` |
+| `GARMIN_FIREBASE_GCM_SENDER_ID` | GCM Sender ID | `123456789` |
+| `GARMIN_FIREBASE_GOOGLE_APP_ID` | Google App ID | `1:123456:ios:abc123` |
+| `GARMIN_FIREBASE_STORAGE_BUCKET` | Storage Bucket | `my-project.appspot.com` |
+| `GARMIN_FIREBASE_CLIENT_ID` | iOS Client ID | `123456-xxx.apps.googleusercontent.com` |
+| `GARMIN_FIREBASE_USER_ID` | Firestore user UID | `0Zp7LAT9bLMIEFWNyy694Gylf0n1` |
+| `GARMIN_FIREBASE_EMAIL` | Firebase Auth email | `user@example.com` |
+| `GARMIN_FIREBASE_PASSWORD` | Firebase Auth password | `(your password)` |
+
+**If secrets are not configured:** `GarminFirebaseConstants.isConfigured` returns `false`, `GarminFirebaseManager.configureAndSignIn()` is a no-op, all Firestore queries return `nil`, and the sensitivity model defaults to factor 1.0 (no adjustment). Zero impact on normal Trio operation.
+
+**Firestore security rules (user's Firebase project):**
+```
+match /garminData/{dataType} {
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if false;  // server-only writes via Cloud Function
+}
+```
+
+The email/password account must have a UID matching the Firestore path user ID. The sign-in happens once at app launch; Firebase Auth handles token refresh automatically.
 
 ---
 
@@ -2186,8 +2237,9 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 | `Trio/Sources/Models/MacroAbsorptionResult.swift` | A | Result struct: upfront carbs, future entries, curve metadata |
 | `Trio/Sources/Services/MacroAdaptiveService.swift` | B | BG-adaptive loop: predicted vs actual, entry scaling, runs BEFORE oref |
 | `Trio/Sources/Models/MealModeState.swift` | B | Meal-mode SMB evaluation with safety gates |
-| `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` | C | Firestore queries for Garmin health data |
-| `Trio/Sources/Models/GarminContextSnapshot.swift` | C | Structured Garmin data at meal time |
+| `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` | C | Firestore queries, GarminFirebaseManager (secondary FirebaseApp + auth) |
+| `Trio/Sources/Services/Garmin/GarminFirebaseConfig.swift` | C | Build-time placeholder config (replaced by GitHub secrets during CI) |
+| `Trio/Sources/Models/GarminContextSnapshot.swift` | C | Structured Garmin data at meal time (Garmin Health API v1.2.3 field names) |
 | `Trio/Sources/Models/GarminSensitivityModel.swift` | D | Rule-based sensitivity factor from Garmin context |
 | `Trio/Sources/Models/MacrosOnBoardTracker.swift` | E | MOB state machine, active meal tracking, dosing state, double-dose protection |
 | `Trio/Sources/Modules/Treatments/View/MealDetectedBannerView.swift` | E | In-app recommendation banner with split dosing display |
@@ -2200,6 +2252,9 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 |------|-------|--------|
 | `Trio/Sources/APS/Storage/CarbsStorage.swift` | A, B | `processFPU()` calls `MacroAbsorptionEngine`; method to update future entries by mealID |
 | `Trio/Sources/APS/OpenAPS/OpenAPS.swift` | B | Hook adaptive service BEFORE oref in loop cycle; pass effectiveMaxSMB |
+| `Trio/Sources/Application/AppDelegate.swift` | C | Call `GarminFirebaseManager.configureAndSignIn()` after default Firebase init |
+| `.github/workflows/build_trio.yml` | C | "Inject Garmin Firebase Config" step: `sed` replaces placeholders from 9 GitHub secrets |
+| `Trio/Sources/Models/TrioSettings.swift` | All | V2 settings: `useV2MacroAbsorption`, `insulinType`, `garminEnabled`, etc. |
 | `Trio/Sources/Modules/Treatments/TreatmentsStateModel.swift` | D, E | Query Garmin, wire MOB tracker, display sensitivity info |
 | `Trio/Sources/Services/HealthKit/NutritionHealthService.swift` | E | Trigger MOB on observer fire |
 | `Trio/Sources/Modules/Home/HomeRootView.swift` | E | Display meal detection banner, double-dose warnings |
@@ -2256,9 +2311,11 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 ### 7. Firestore for Garmin Data (Not HealthKit)
 
-**Decision:** Read Garmin data from existing Firestore database rather than Apple HealthKit.
+**Decision:** Read Garmin data from the user's existing Firestore database via a secondary Firebase app, rather than Apple HealthKit.
 
-**Reason:** HealthKit only receives a subset of Garmin data (steps, HR samples, sleep duration, workouts). The most important signals for sensitivity — Body Battery, stress scores, HRV status, training load, detailed sleep stages — are Garmin-proprietary and never reach HealthKit. The Firestore database already has all of this via the Garmin Health API, structured and queryable.
+**Reason:** HealthKit only receives a subset of Garmin data (steps, HR samples, sleep duration, workouts). The most important signals for sensitivity — Body Battery, stress scores, HRV status, training load, detailed sleep stages — are Garmin-proprietary and never reach HealthKit. The Firestore database already has all of this via the Garmin Health API v1.2.3, structured and queryable.
+
+**Implementation:** Since Trio already uses Firebase for Crashlytics, we use `FirebaseApp.configure(name: "garmin", options:)` to create a secondary app instance pointing to the user's personal Firebase project. Firebase config values are injected at build time from GitHub secrets via `sed` replacement in the CI workflow. Authentication uses email/password (`Auth.auth(app:).signIn(withEmail:password:)`) at app launch. If secrets are not configured, the entire Garmin integration is a no-op.
 
 ### 8. Curve-Driven Split Dosing (Not Full Upfront Bolus)
 
