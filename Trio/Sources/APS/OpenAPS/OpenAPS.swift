@@ -431,6 +431,27 @@ final class OpenAPS {
 
             let glucose = try self.fetchGlucose()
 
+            // Determine effective SMB minutes (may be enhanced by V2 meal-mode)
+            var effectiveSMBMinutes = activeOverrides.first?.smbMinutes?.decimalValue ?? maxSMBBasalMinutes
+            var effectiveUAMMinutes = activeOverrides.first?.uamMinutes?.decimalValue ?? maxUAMBasalMinutes
+
+            // V2 Meal-Mode SMB Enhancement: temporarily increase maxSMB during active meal absorption
+            let trioSettings = self.storage.retrieve(OpenAPS.Trio.settings, as: TrioSettings.self) ?? TrioSettings()
+            if trioSettings.useV2MacroAbsorption {
+                let hasFutureFPU = self.hasActiveFPUEntries()
+                if hasFutureFPU {
+                    let latestBG = glucose.first
+                    let bgFloor = Double(truncating: trioSettings.mealModeBGFloor as NSDecimalNumber)
+                    let multiplier = Double(truncating: trioSettings.mealModeSMBMultiplier as NSDecimalNumber)
+
+                    // Check meal-mode safety gates inline (simplified — full gate check in MacroAdaptiveService)
+                    if let latestBGValue = latestBG, Double(latestBGValue.glucose) > bgFloor {
+                        effectiveSMBMinutes = Decimal(Double(truncating: effectiveSMBMinutes as NSDecimalNumber) * multiplier)
+                        effectiveUAMMinutes = Decimal(Double(truncating: effectiveUAMMinutes as NSDecimalNumber) * multiplier)
+                    }
+                }
+            }
+
             // Prepare Trio's custom oref variables
             let trioCustomOrefVariablesData = TrioCustomOrefVariables(
                 average_total_data: currentTDD > 0 ? averageTDDLastTenDays : 0,
@@ -451,14 +472,26 @@ final class OpenAPS {
                 smbIsScheduledOff: activeOverrides.first?.smbIsScheduledOff ?? false,
                 start: (activeOverrides.first?.start ?? 0) as Decimal,
                 end: (activeOverrides.first?.end ?? 0) as Decimal,
-                smbMinutes: activeOverrides.first?.smbMinutes?.decimalValue ?? maxSMBBasalMinutes,
-                uamMinutes: activeOverrides.first?.uamMinutes?.decimalValue ?? maxUAMBasalMinutes
+                smbMinutes: effectiveSMBMinutes,
+                uamMinutes: effectiveUAMMinutes
             )
 
             // Save and return contents of Trio's custom oref variables
             self.storage.save(trioCustomOrefVariablesData, as: OpenAPS.Monitor.trio_custom_oref_variables)
             return self.loadFileFromStorage(name: Monitor.trio_custom_oref_variables)
         }
+    }
+
+    /// V2: Check if any FPU entries exist in the future (for meal-mode gate).
+    /// Called from within context.perform so must be synchronous.
+    private func hasActiveFPUEntries() -> Bool {
+        let fetchRequest: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
+        fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "isFPU == YES"),
+            NSPredicate(format: "date > %@", Date() as NSDate)
+        ])
+        fetchRequest.fetchLimit = 1
+        return (try? context.count(for: fetchRequest)) ?? 0 > 0
     }
 
     func autosense() async throws -> Autosens? {

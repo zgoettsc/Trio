@@ -74,6 +74,27 @@ struct TrioSettings: JSON, Equatable {
     var smartStackView: LockScreenView = .simple
     var bolusShortcut: BolusShortcutLimit = .notAllowed
     var timeInRangeType: TimeInRangeType = .timeInTightRange
+
+    // MARK: - V2 Macro Absorption Engine Settings
+
+    /// Use the V2 three-curve absorption engine instead of the linear Warsaw Method.
+    var useV2MacroAbsorption: Bool = false
+    /// Insulin type for safe window calculation.
+    var insulinType: String = "rapidActing" // "ultraRapid" or "rapidActing"
+    /// Override for the safe window (minutes). nil = use insulin type default.
+    var v2SafeWindowMinutes: Int?
+    /// Meal-mode SMB multiplier (1.0 = no enhancement, 2.0 = default, max 3.0).
+    var mealModeSMBMultiplier: Decimal = 2.0
+    /// BG floor for meal-mode SMB activation (mg/dL).
+    var mealModeBGFloor: Decimal = 90
+    /// Enable Garmin sensitivity integration.
+    var garminEnabled: Bool = false
+    /// Firebase project ID for Garmin Firestore.
+    var garminFirebaseProjectID: String = ""
+    /// Enable V2 outcome learning.
+    var v2OutcomeLearningEnabled: Bool = true
+    /// Enable Claude weekly recalibration.
+    var claudeRecalibrationEnabled: Bool = true
 }
 
 extension TrioSettings: Decodable {
@@ -318,6 +339,35 @@ extension TrioSettings: Decodable {
 
         if let timeInRangeType = try? container.decode(TimeInRangeType.self, forKey: .timeInRangeType) {
             settings.timeInRangeType = timeInRangeType
+        }
+
+        // V2 Macro Absorption Engine settings
+        if let useV2MacroAbsorption = try? container.decode(Bool.self, forKey: .useV2MacroAbsorption) {
+            settings.useV2MacroAbsorption = useV2MacroAbsorption
+        }
+        if let insulinType = try? container.decode(String.self, forKey: .insulinType) {
+            settings.insulinType = insulinType
+        }
+        if let v2SafeWindowMinutes = try? container.decode(Int.self, forKey: .v2SafeWindowMinutes) {
+            settings.v2SafeWindowMinutes = v2SafeWindowMinutes
+        }
+        if let mealModeSMBMultiplier = try? container.decode(Decimal.self, forKey: .mealModeSMBMultiplier) {
+            settings.mealModeSMBMultiplier = mealModeSMBMultiplier
+        }
+        if let mealModeBGFloor = try? container.decode(Decimal.self, forKey: .mealModeBGFloor) {
+            settings.mealModeBGFloor = mealModeBGFloor
+        }
+        if let garminEnabled = try? container.decode(Bool.self, forKey: .garminEnabled) {
+            settings.garminEnabled = garminEnabled
+        }
+        if let garminFirebaseProjectID = try? container.decode(String.self, forKey: .garminFirebaseProjectID) {
+            settings.garminFirebaseProjectID = garminFirebaseProjectID
+        }
+        if let v2OutcomeLearningEnabled = try? container.decode(Bool.self, forKey: .v2OutcomeLearningEnabled) {
+            settings.v2OutcomeLearningEnabled = v2OutcomeLearningEnabled
+        }
+        if let claudeRecalibrationEnabled = try? container.decode(Bool.self, forKey: .claudeRecalibrationEnabled) {
+            settings.claudeRecalibrationEnabled = claudeRecalibrationEnabled
         }
 
         self = settings
