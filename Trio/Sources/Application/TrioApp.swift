@@ -75,6 +75,7 @@ extension Notification.Name {
         _ = resolver.resolve(WatchManager.self)!
         _ = resolver.resolve(ContactImageManager.self)!
         _ = resolver.resolve(HealthKitManager.self)!
+        _ = resolver.resolve(NutritionHealthService.self)!
         _ = resolver.resolve(WatchManager.self)!
         _ = resolver.resolve(GarminManager.self)!
         _ = resolver.resolve(ContactImageManager.self)!

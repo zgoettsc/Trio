@@ -56,6 +56,13 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
     init(resolver: Resolver) {
         injectServices(resolver)
         debug(.service, "NutritionHealthService initialized")
+
+        // Auto-start the nutrition observer at app launch if reading is enabled.
+        // This ensures snapshots are recorded whenever Cronometer writes to Apple Health,
+        // even when the user hasn't visited the HealthKit settings view.
+        if settingsManager.settings.readNutritionFromHealth {
+            startObservingNutritionChanges()
+        }
     }
 
     func requestPermissions() async -> Bool {

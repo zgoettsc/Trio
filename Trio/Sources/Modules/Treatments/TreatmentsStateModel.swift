@@ -473,6 +473,12 @@ extension Treatments {
             Task { await runCronometerSimulation() }
         }
 
+        /// Record a snapshot of current HealthKit nutrition totals to establish a baseline.
+        /// Called before opening Cronometer so the next Crono tap only shows food logged AFTER this point.
+        @MainActor func recordCronometerBaseline() async {
+            let _ = await nutritionHealthService.fetchLatestMealDelta()
+        }
+
         /// Called when user taps Apply — populates carb/fat/protein fields and logs the recommendation
         @MainActor func applyCronometerRecommendation(carbs appliedCarbs: Double, fat appliedFat: Double, protein appliedProtein: Double) {
             guard let meal = cronometerMeal else { return }

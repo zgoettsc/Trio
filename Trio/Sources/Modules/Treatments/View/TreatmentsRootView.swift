@@ -35,6 +35,7 @@ extension Treatments {
         }
 
         @Environment(\.colorScheme) var colorScheme
+        @Environment(\.openURL) private var openURL
         @Environment(AppState.self) var appState
 
         private var formatter: NumberFormatter {
@@ -168,7 +169,30 @@ extension Treatments {
                     }
                     .buttonStyle(.plain)
 
-                    // Cronometer meal button
+                    // Open Cronometer to log food (records snapshot baseline first)
+                    Button(action: {
+                        Task {
+                            await state.recordCronometerBaseline()
+                            if let url = URL(string: "cronometer://") {
+                                openURL(url)
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.forward.app")
+                                .font(.caption)
+                            Text("Log")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.green.opacity(0.15))
+                        .foregroundColor(.green)
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+
+                    // Cronometer meal import + dosing recommendation
                     Button(action: {
                         Task {
                             await state.fetchCronometerMeal()
