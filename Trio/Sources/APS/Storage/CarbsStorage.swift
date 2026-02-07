@@ -208,6 +208,38 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
         guard let lastEntry = entries.last else { return }
 
         if let fat = lastEntry.fat, let protein = lastEntry.protein, fat > 0 || protein > 0 {
+            let trioSettings = settings.settings
+
+            // V2 three-curve engine path
+            if trioSettings.useV2MacroAbsorption {
+                let carbsValue = Double(truncating: lastEntry.carbs as NSDecimalNumber)
+                let fatValue = Double(truncating: fat as NSDecimalNumber)
+                let proteinValue = Double(truncating: protein as NSDecimalNumber)
+                let adjustmentFactor = Double(truncating: trioSettings.individualAdjustmentFactor as NSDecimalNumber)
+                let insulinType: InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+
+                let result = MacroAbsorptionEngine.generateEntries(
+                    carbs: carbsValue,
+                    fat: fatValue,
+                    protein: proteinValue,
+                    mealTime: lastEntry.actualDate ?? lastEntry.createdAt,
+                    insulinDemandFactor: 1.0, // Garmin factor applied at meal detection time, not here
+                    upfrontPercent: nil, // Use curve-calculated default
+                    insulinType: insulinType,
+                    individualAdjustmentFactor: adjustmentFactor,
+                    safeWindowOverride: trioSettings.v2SafeWindowMinutes
+                )
+
+                if !result.futureEntries.isEmpty {
+                    await saveFPUToCoreDataAsBatchInsert(
+                        entries: result.futureEntries,
+                        areFetchedFromRemote: areFetchedFromRemote
+                    )
+                }
+                return
+            }
+
+            // V1 legacy path (Warsaw Method)
             let (futureCarbEquivalents, carbEquivalentCount) = processFPU(
                 entries: entries,
                 fat: fat,

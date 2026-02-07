@@ -1,8 +1,8 @@
 # V2: Macro Absorption Engine & Garmin Sensitivity Model
 
-**Version:** 2.1
+**Version:** 2.2
 **Date:** February 7, 2026
-**Status:** Design complete, implementation not started
+**Status:** Implementation in progress (Phases A-G coded, wiring complete)
 **Prerequisite:** V1 Cronometer Integration (Phases 1-5b, implemented)
 
 ---
@@ -93,7 +93,7 @@ V2 replaces the core absorption model with something physiologically accurate, a
 
 2. **Meal-mode SMB enhancement:** During active meal absorption, the maxSMB ceiling is temporarily raised (configurable multiplier, default 2.0x) with strict safety gates, so SMBs can keep pace with the curve-predicted absorption.
 
-3. **Sensitivity-adjusted entries:** The Garmin sensitivity factor scales ALL entry amounts (carbs + fat + protein). COB displays "insulin-equivalent carbs" with a UI annotation showing both eaten and effective amounts.
+3. **Insulin-demand-adjusted entries:** The Garmin model produces an `insulinDemandFactor` (multiply, not divide — self-documenting code). All entry amounts are scaled by this factor. COB displays "insulin-equivalent carbs" with a UI annotation showing both eaten and effective amounts.
 
 4. **Zero double-dosing:** Every meal entry is tagged with a unique mealID. The system tracks dosing state per meal and warns the user if they attempt to dose the same meal twice. Entries are never duplicated.
 
@@ -540,7 +540,7 @@ Cronometer App
                -> Remaining carbs become future entries along the curve
             -> Curve 2: Protein (slow sigmoid, smooth ramp 15-40g)
             -> Curve 3: Fat resistance (normalized Gaussian, 0.69 total coeff)
-            -> Sensitivity factor scales ALL entry amounts
+            -> Insulin demand factor scales ALL entry amounts
             -> All entries -> CarbEntryStored records tagged with mealID
             -> oref sees: shaped future carb entries (not flat/linear)
 
@@ -839,24 +839,23 @@ For 35g fat with default adjustment factor 1.0:
 - Peak at 6h (360 min), sigma = 90 min
 - Matches Wolpert's measured 40% more insulin (24g at CR 10 = 2.4U additional = 40% of base 6U)
 
-#### Fat Ramp (Not Hard Cutoff)
+#### Fat Minimum Threshold (Not Ramp)
 
-Instead of a hard 10g cutoff, fat resistance uses a smooth ramp:
+Instead of a hard 10g cutoff or a ramp, fat resistance uses a simple minimum threshold:
 
 ```
-fatEffectiveFraction(fatGrams):
-  if fatGrams <= 0:    0.0
-  if fatGrams >= 20:   1.0
-  else: fatGrams / 20  (linear ramp)
-
-totalFatEquiv = fatGrams x 0.69 x fatEffectiveFraction(fatGrams) x individualAdjustmentFactor
+if fatGrams < 5:  no fat resistance entries (negligible effect)
+if fatGrams >= 5: totalFatEquiv = fatGrams x 0.69 x individualAdjustmentFactor
 ```
+
+**Why a threshold instead of a ramp:** The 0.69 coefficient is already a per-gram rate derived from Wolpert's data. Applying a dose-dependent ramp ON TOP of a dose-dependent per-gram coefficient double-discounts moderate fat amounts. The ramp was intended to replace the hard cutoff, but it inadvertently reduced the per-gram rate at moderate fat levels. A simple 5g minimum threshold achieves the goal (ignore negligible fat) without distorting the per-gram coefficient.
 
 This means:
-- 5g fat -> 5 x 0.69 x 0.25 = 0.86g carb-equiv (tiny)
-- 10g fat -> 10 x 0.69 x 0.50 = 3.45g carb-equiv (small)
-- 20g fat -> 20 x 0.69 x 1.0 = 13.8g carb-equiv (full coefficient)
-- 35g fat -> 35 x 0.69 x 1.0 = 24.15g carb-equiv (matches Wolpert)
+- 3g fat -> no entries (below threshold)
+- 5g fat -> 5 x 0.69 = 3.45g carb-equiv
+- 10g fat -> 10 x 0.69 = 6.9g carb-equiv
+- 20g fat -> 20 x 0.69 = 13.8g carb-equiv
+- 35g fat -> 35 x 0.69 = 24.15g carb-equiv (matches Wolpert)
 
 #### Gaussian Parameters
 
@@ -943,34 +942,55 @@ Replace `processFPU()` with `MacroAbsorptionEngine.generateEntries()`:
 ```swift
 struct MacroAbsorptionEngine {
 
-    /// Generate all carb entries for a mixed meal using the three-curve model.
-    /// Returns: (upfrontCarbs: Double, futureEntries: [CarbsEntry])
-    /// - upfrontCarbs: the amount to recommend for immediate bolus
-    /// - futureEntries: curve-shaped entries for oref to cover via SMBs
+    /// Generate future carb entries for a mixed meal using the three-curve model.
+    ///
+    /// CRITICAL: Carb entries are ONLY generated for the portion AFTER the safe window.
+    /// The upfront portion (0 to safeWindow) is returned as `upfrontCarbs` for the bolus
+    /// recommendation — NO entries are created for it. This prevents double-counting:
+    /// the bolus covers the upfront carbs, and oref sees only the future entries.
+    ///
+    /// Returns: MacroAbsorptionResult with:
+    /// - upfrontCarbs: the amount to recommend for immediate bolus (NOT stored as entries)
+    /// - futureEntries: curve-shaped entries for oref to cover via SMBs (stored to Core Data)
     static func generateEntries(
         carbs: Double,
         fat: Double,
         protein: Double,
         mealTime: Date,
-        sensitivityFactor: Double,     // from Garmin layer (0.60-1.40)
+        insulinDemandFactor: Double,    // from Garmin layer (0.71-1.67, where 1.0 = normal)
         upfrontPercent: Double? = nil,  // user override; nil = curve-calculated
+        insulinType: InsulinType = .rapidActing,  // affects safe window default
         settings: FPUSettings           // individualAdjustmentFactor, etc.
     ) -> MacroAbsorptionResult {
 
         let mealID = UUID().uuidString
-        var allEntries: [CarbsEntry] = []
+
+        // --- Determine safe window based on insulin type ---
+        let safeWindowMinutes = settings.upfrontWindowMinutes
+            ?? insulinType.defaultSafeWindowMinutes  // Fiasp=30, Humalog=45
 
         // --- Curve 1: Carbohydrate absorption (gamma-shaped) ---
+        // Only generate entries AFTER the safe window. The upfront portion
+        // is covered by the bolus — creating entries for it would double-count.
         let tauCarb = carbTau(baseTau: 35, fatGrams: fat)
+        let curveSuggestedPercent = gammaCDFPercent(
+            tau: tauCarb, windowMinutes: safeWindowMinutes
+        )
+        let effectivePercent = upfrontPercent ?? curveSuggestedPercent
+        let remainingCarbGrams = carbs * (1.0 - effectivePercent)
+
         let carbEntries = generateGammaCurveEntries(
-            totalAmount: carbs,
+            totalAmount: remainingCarbGrams,
             tau: tauCarb,
             mealTime: mealTime,
+            startAfterMinutes: safeWindowMinutes,  // entries start AFTER safe window
             intervalMinutes: 10,
             mealID: mealID,
             note: "carb-absorption"
         )
-        allEntries.append(contentsOf: carbEntries)
+
+        var futureEntries: [CarbsEntry] = []
+        futureEntries.append(contentsOf: carbEntries)
 
         // --- Curve 2: Protein gluconeogenesis (delayed sigmoid, smooth ramp) ---
         let proteinFactor = proteinGlucoFactor(proteinGrams: protein)
@@ -983,58 +1003,53 @@ struct MacroAbsorptionEngine {
                 intervalMinutes: 15,
                 mealID: mealID
             )
-            allEntries.append(contentsOf: proteinEntries)
+            futureEntries.append(contentsOf: proteinEntries)
         }
 
         // --- Curve 3: Fat insulin resistance (normalized gaussian) ---
-        let fatFraction = fatEffectiveFraction(fatGrams: fat)
-        if fatFraction > 0 {
-            let totalFatEquiv = fat * 0.69 * fatFraction
-                * settings.individualAdjustmentFactor
+        // Fat coefficient 0.69 is the total carb-equivalent per gram of fat.
+        // Minimum threshold: below 5g fat, effect is negligible — skip entirely.
+        let fatTotalEquiv: Double
+        if fat >= 5 {
+            fatTotalEquiv = fat * 0.69 * settings.individualAdjustmentFactor
             let fatEntries = generateNormalizedFatResistanceEntries(
-                totalEquiv: totalFatEquiv,
+                totalEquiv: fatTotalEquiv,
                 mealTime: mealTime,
                 intervalMinutes: 15,
                 mealID: mealID
             )
-            allEntries.append(contentsOf: fatEntries)
+            futureEntries.append(contentsOf: fatEntries)
+        } else {
+            fatTotalEquiv = 0
         }
 
-        // --- Apply sensitivity factor to ALL entries ---
-        let adjustedEntries = allEntries.map { entry in
+        // --- Apply insulin demand factor to ALL future entries ---
+        // insulinDemandFactor > 1.0 means more resistant (e.g., 1.25 = bad sleep)
+        // Multiply entries to increase insulin demand. Self-documenting: bigger
+        // factor = bigger entries = more insulin.
+        let adjustedEntries = futureEntries.map { entry in
             var adjusted = entry
-            adjusted.carbs = Decimal(Double(entry.carbs) / sensitivityFactor)
+            adjusted.carbs = Decimal(Double(entry.carbs) * insulinDemandFactor)
             return adjusted
         }
 
-        // --- Split into upfront and future ---
-        let safeWindowMinutes = settings.upfrontWindowMinutes  // default 45
-        let curveSuggestedPercent = gammaCDFPercent(
-            tau: tauCarb, windowMinutes: safeWindowMinutes
-        )
-        let effectivePercent = upfrontPercent ?? curveSuggestedPercent
-
-        let upfrontCarbs = carbs * effectivePercent / sensitivityFactor
-        let futureEntries = adjustedEntries.filter {
-            $0.actualDate > mealTime.addingTimeInterval(
-                Double(safeWindowMinutes) * 60
-            )
-        }
+        // --- Upfront carbs (for bolus recommendation, NOT stored as entries) ---
+        let upfrontCarbs = carbs * effectivePercent * insulinDemandFactor
 
         return MacroAbsorptionResult(
             mealID: mealID,
             upfrontCarbs: upfrontCarbs,
             upfrontPercent: effectivePercent,
             curveSuggestedPercent: curveSuggestedPercent,
-            futureEntries: futureEntries,
-            allEntries: adjustedEntries,
-            sensitivityFactor: sensitivityFactor,
+            futureEntries: adjustedEntries,  // only entries AFTER safe window
+            insulinDemandFactor: insulinDemandFactor,
             originalCarbs: carbs,
             originalFat: fat,
             originalProtein: protein,
             tauCarb: tauCarb,
             proteinFactor: proteinFactor,
-            fatTotalEquiv: fat > 0 ? fat * 0.69 * fatFraction : 0
+            fatTotalEquiv: fatTotalEquiv,
+            safeWindowMinutes: safeWindowMinutes
         )
     }
 
@@ -1045,11 +1060,17 @@ struct MacroAbsorptionEngine {
         return (proteinGrams - 15) / (40 - 15) * 0.35
     }
 
-    /// Smooth fat ramp: linear 0->1 over 0-20g
-    static func fatEffectiveFraction(fatGrams: Double) -> Double {
-        if fatGrams <= 0 { return 0.0 }
-        if fatGrams >= 20 { return 1.0 }
-        return fatGrams / 20.0
+    /// Insulin type affects default safe window for split dosing
+    enum InsulinType {
+        case ultraRapid    // Fiasp, Lyumjev — peaks at 30-45 min
+        case rapidActing   // Humalog, Novolog — peaks at 60-90 min
+
+        var defaultSafeWindowMinutes: Int {
+            switch self {
+            case .ultraRapid: return 30
+            case .rapidActing: return 45
+            }
+        }
     }
 }
 ```
@@ -1076,10 +1097,17 @@ Higher fat content automatically reduces the upfront percentage because the gamm
 
 #### Safe Window Configuration
 
-The safe window duration is configurable (default 45 min, range 30-60 min):
+The safe window duration depends on the user's insulin type and is configurable (range 20-60 min):
 
-- **Shorter (30 min):** More conservative initial dose. Better for users who experience fast insulin onset or have high fat meals. More reliance on SMBs.
-- **Longer (60 min):** Larger initial dose. Better for users with slower insulin action or low-fat meals. Less reliance on SMBs.
+| Insulin Type | Default Safe Window | Rationale |
+|-------------|-------------------|-----------|
+| Ultra-rapid (Fiasp, Lyumjev) | 30 min | Insulin peaks at 30-45 min; shorter window prevents insulin outpacing carbs |
+| Rapid-acting (Humalog, Novolog) | 45 min | Insulin peaks at 60-90 min; slightly wider window is safe |
+
+The safe window represents the overlap period where insulin action and carb absorption are temporally aligned. A user on Fiasp with a 45-min window might front-load too much because their insulin peaks faster than the carbs arrive — hence the shorter default.
+
+- **Shorter (20-30 min):** More conservative initial dose. Better for ultra-rapid insulins and high-fat meals. More reliance on SMBs.
+- **Longer (45-60 min):** Larger initial dose. Better for standard rapid-acting insulins and low-fat meals. Less reliance on SMBs.
 
 #### Examples Across Meal Types
 
@@ -1093,21 +1121,32 @@ The safe window duration is configurable (default 45 min, range 30-60 min):
 
 ---
 
-### 5.7 Sensitivity-Adjusted Entries
+### 5.7 Insulin-Demand-Adjusted Entries
 
-The Garmin sensitivity factor is applied to ALL entry amounts (carbs + protein + fat). This means oref sees "insulin-equivalent carbs" rather than grams eaten.
+The Garmin **insulin demand factor** is applied to ALL entry amounts (carbs + protein + fat). This means oref sees "insulin-equivalent carbs" rather than grams eaten.
+
+**Insulin demand factor vs sensitivity factor:** Internally we use `insulinDemandFactor` rather than `sensitivityFactor` to make the code self-documenting. A demand factor of 1.25 means "25% more insulin needed" — entries are MULTIPLIED by this value. No counter-intuitive division. The mapping:
+
+```
+Bad sleep + high stress:  insulinDemandFactor = 1.25  (entries x 1.25 = 25% more insulin)
+Normal day:               insulinDemandFactor = 1.00  (no adjustment)
+Good sleep + post-workout: insulinDemandFactor = 0.83  (entries x 0.83 = 17% less insulin)
+
+Conversion: insulinDemandFactor = 1.0 / sensitivityFactor
+Range: 0.71 (very sensitive) to 1.67 (very resistant)
+```
 
 **Why scale entries instead of CR/ISF:**
 
 1. oref reads ISF/CR from the pump profile — we cannot easily change those on the fly
 2. Fat/protein entries are already "fake carbs" (carb-equivalents), so scaling them is natural
 3. If entries stay at real grams but the user is 20% resistant, oref will under-deliver SMBs for the remaining carbs -> late hyperglycemia (the exact problem we're solving)
-4. The upfront bolus recommendation also uses the sensitivity factor: `upfrontCarbs / (CR x sensitivityFactor)` equivalent to `(upfrontCarbs / sensitivityFactor) / CR`
+4. The upfront bolus recommendation also uses the demand factor: `upfrontCarbs * insulinDemandFactor / CR`
 
 **COB display concern:** COB has never shown "grams eaten" — it already includes FPU entries (fat/protein "fake carbs"). The display should show:
 
 ```
-COB: 83g (65g eaten, sensitivity-adjusted)
+COB: 83g (65g eaten, demand-adjusted)
 ```
 
 This is transparent to the user: "I ate 65g carbs, but because of poor sleep my body treats it like 83g from an insulin perspective."
@@ -1123,10 +1162,17 @@ Every 5 minutes (each loop cycle), the adaptive layer runs **BEFORE oref** so th
 1. **Computes predicted BG** from the three curves and insulin delivered:
 ```
 predictedBG(t) = mealTimeBG
-    + SUM carbCurve.glucoseImpact(0..t) / ISF_adjusted
-    + SUM proteinCurve.glucoseImpact(0..t) / ISF_adjusted
-    + SUM fatResistanceEquiv.glucoseImpact(0..t) / ISF_adjusted
-    - SUM insulinDelivered(0..t) x ISF_adjusted
+    + (carbsAbsorbed(0..t) / CR) x ISF       -- carbs -> insulin equiv -> BG rise
+    + (proteinGlucose(0..t) / CR) x ISF      -- protein glucose equiv -> BG rise
+    + (fatResistanceEquiv(0..t) / CR) x ISF   -- fat resistance equiv -> BG rise
+    - insulinDelivered(0..t) x ISF             -- insulin -> BG drop
+
+where:
+  carbsAbsorbed(0..t) = integral of gamma curve from 0 to t (grams)
+  CR = carb ratio (grams per unit)
+  ISF = insulin sensitivity factor (mg/dL per unit)
+  (grams / CR) x ISF = (grams / (grams/unit)) x (mg_dL/unit) = mg/dL  [dimensionally correct]
+  insulinDelivered x ISF = units x (mg_dL/unit) = mg/dL               [dimensionally correct]
 ```
 
 2. **Reads actual CGM value**
@@ -1264,221 +1310,320 @@ struct MealModeState {
 
 ### 7.1 Firestore Database Structure
 
-The user has an existing Firebase Firestore database that receives all Garmin Health API data whenever the watch syncs to Garmin Connect. The last 30 days of data are available.
+Data flows from the Garmin watch via **Garmin Health API v1.2.3** (server-to-server push) through a Cloud Function into Firestore. The Cloud Function receives webhook POST notifications containing summary data and stores each summary as a document keyed by `calendarDate`.
 
-**Expected Firestore collections:**
+**Firestore path:**
 
 ```
-firestore/
-|-- dailySummaries/
-|   +-- {date}/
+/users/{uid}/garminData/
+```
+
+Where `uid` is the Firebase user ID (e.g., `0Zp7LAT9bLMIEFWNyy694Gylf0n1`).
+
+**Collection structure (matching Garmin Health API summary types):**
+
+```
+/users/{uid}/garminData/
+|-- dailies/                          # §7.1 Daily Summaries
+|   +-- {yyyy-MM-dd}/                 # Document ID = calendarDate
+|       |-- summaryId: String
+|       |-- calendarDate: String      # "2026-02-07"
 |       |-- steps: Int
-|       |-- activeCalories: Int
-|       |-- intensityMinutes: Int
-|       |-- restingHeartRate: Int
-|       |-- maxHeartRate: Int
-|       |-- averageStress: Int
-|       |-- maxStress: Int
-|       |-- bodyBatteryHigh: Int
-|       |-- bodyBatteryLow: Int
-|       |-- bodyBatteryAtWake: Int
-|       +-- ...
-|-- sleepData/
-|   +-- {date}/
-|       |-- sleepScore: Int (0-100)
-|       |-- totalSleepMinutes: Int
-|       |-- deepSleepMinutes: Int
-|       |-- lightSleepMinutes: Int
-|       |-- remSleepMinutes: Int
-|       |-- awakeSleepMinutes: Int
-|       |-- averageSpO2: Double
-|       |-- lowestSpO2: Double
-|       |-- averageRespirationRate: Double
-|       +-- ...
-|-- stressData/
-|   +-- {date}/
-|       |-- samples: [{timestamp, stressLevel}]
-|       |-- averageStress: Int
-|       +-- ...
-|-- heartRateData/
-|   +-- {date}/
-|       |-- restingHR: Int
-|       |-- averageHR: Int
-|       |-- samples: [{timestamp, heartRate}]
-|       +-- ...
-|-- hrvData/
-|   +-- {date}/
-|       |-- weeklyAverage: Double
-|       |-- lastNightAverage: Double
-|       |-- status: String  // "balanced", "low", "unbalanced"
-|       +-- ...
-|-- activities/
-|   +-- {activityId}/
-|       |-- startTime: Timestamp
-|       |-- duration: Int (seconds)
-|       |-- activityType: String
-|       |-- activeCalories: Int
-|       |-- averageHR: Int
-|       |-- maxHR: Int
-|       |-- trainingEffect: Double
-|       +-- ...
-|-- bodyBattery/
-|   +-- {date}/
-|       |-- samples: [{timestamp, level}]  // continuous throughout day
-|       |-- highestLevel: Int
-|       |-- lowestLevel: Int
-|       +-- ...
-+-- trainingStatus/
-    +-- latest/
-        |-- trainingLoad: String  // "low"/"optimal"/"high"/"very high"
-        |-- trainingStatus: String  // "productive"/"recovery"/"overreaching"/"detraining"
-        |-- vo2Max: Double
-        |-- recoveryTimeHours: Int
-        +-- ...
+|       |-- activeKilocalories: Int   # Active kcal (excludes BMR)
+|       |-- bmrKilocalories: Int
+|       |-- restingHeartRateInBeatsPerMinute: Int
+|       |-- averageHeartRateInBeatsPerMinute: Int  # 7-day avg HR
+|       |-- minHeartRateInBeatsPerMinute: Int
+|       |-- maxHeartRateInBeatsPerMinute: Int
+|       |-- averageStressLevel: Int   # 1-100 (-1 = insufficient data)
+|       |-- maxStressLevel: Int
+|       |-- stressDurationInSeconds: Int      # Time in stress range (26-100)
+|       |-- restStressDurationInSeconds: Int   # Time in rest range (1-25)
+|       |-- lowStressDurationInSeconds: Int    # Stress 26-50
+|       |-- mediumStressDurationInSeconds: Int # Stress 51-75
+|       |-- highStressDurationInSeconds: Int   # Stress 76-100
+|       |-- stressQualifier: String   # "calm","balanced","stressful","very_stressful"
+|       |-- moderateIntensityDurationInSeconds: Int  # MET 3-6
+|       |-- vigorousIntensityDurationInSeconds: Int   # MET > 6
+|       |-- bodyBatteryChargedValue: Int  # BB charged (moved here in API v1.2.1)
+|       |-- bodyBatteryDrainedValue: Int  # BB drained
+|       |-- distanceInMeters: Double
+|       |-- floorsClimbed: Int
+|       +-- timeOffsetHeartRateSamples: Map  # {offsetSeconds: bpm}
+|
+|-- sleeps/                           # §7.3 Sleep Summaries
+|   +-- {yyyy-MM-dd}/
+|       |-- summaryId: String
+|       |-- calendarDate: String
+|       |-- durationInSeconds: Int    # Total sleep (excludes awake/unmeasurable)
+|       |-- deepSleepDurationInSeconds: Int
+|       |-- lightSleepDurationInSeconds: Int
+|       |-- remSleepInSeconds: Int    # Only on REM-capable devices
+|       |-- awakeDurationInSeconds: Int
+|       |-- unmeasurableSleepInSeconds: Int
+|       |-- validation: String        # AUTO_FINAL, ENHANCED_FINAL, etc.
+|       |-- overallSleepScore: Map    # {value: Int(0-100), qualifierKey: String}
+|       |   |-- value: Int            # 90-100=EXCELLENT, 80-89=GOOD, 60-79=FAIR, <60=POOR
+|       |   +-- qualifierKey: String  # "EXCELLENT"/"GOOD"/"FAIR"/"POOR"
+|       |-- sleepScores: Map          # Per-category: totalDuration, stress, awakeCount, etc.
+|       |-- sleepLevelsMap: Map       # {deep: [{start,end}], light: [...], rem: [...]}
+|       +-- timeOffsetSleepSpo2: Map  # {offsetSeconds: spo2Value}
+|
+|-- stressDetails/                    # §7.5 Stress Details
+|   +-- {yyyy-MM-dd}/
+|       |-- summaryId: String
+|       |-- calendarDate: String
+|       |-- timeOffsetStressLevelValues: Map   # {offsetSeconds: stressLevel}
+|       |   # Values: 1-25=rest, 26-50=low, 51-75=medium, 76-100=high
+|       |   # Special: -1=OFF_WRIST, -2=LARGE_MOTION, -3=NOT_ENOUGH_DATA
+|       |-- timeOffsetBodyBatteryValues: Map   # {offsetSeconds: bodyBatteryLevel}
+|       |   # Values: 0-100, sampled every ~3 minutes
+|       |   # First entry ≈ wake BB, last entry ≈ current BB
+|       |-- bodyBatteryDynamicFeedbackEvent: Map  # {eventStartTimeInSeconds, bodyBatteryLevel}
+|       +-- bodyBatteryActivityEvents: List    # [{eventType, duration, bodyBatteryImpact}]
+|
+|-- hrv/                              # §7.10 HRV Summaries
+|   +-- {yyyy-MM-dd}/
+|       |-- summaryId: String
+|       |-- calendarDate: String
+|       |-- lastNightAvg: Int         # Overnight RMSSD average (ms)
+|       |-- lastNight5MinHigh: Int    # Max 5-min HRV window (ms)
+|       +-- hrvValues: Map            # {offsetSeconds: rmssdValue}
+|
++-- userMetrics/                      # §7.6 User Metrics
+    +-- {yyyy-MM-dd}/
+        |-- summaryId: String
+        |-- calendarDate: String
+        |-- vo2Max: Double            # mL/min/kg
+        |-- fitnessAge: Int
+        +-- enhanced: Bool            # New algorithm for fitnessAge
 ```
 
-**Note:** The exact collection structure needs to be confirmed with the user's actual Firestore schema. The service will be configurable to map to the actual field paths.
+**Key Garmin Health API behaviors:**
+- All timestamps are Unix seconds (UTC). `startTimeOffsetInSeconds` gives local time offset.
+- Daily summaries update throughout the day as the user syncs. **Always replace old with new.**
+- Sleep summaries may arrive as `AUTO_TENTATIVE` and update to `AUTO_FINAL` or `ENHANCED_FINAL`.
+- Stress details contain per-3-minute samples. We extract the most recent valid reading (positive values only).
+- Body Battery is in the stress details `timeOffsetBodyBatteryValues` map. First entry = wake level, last entry = current level.
+- `bodyBatteryChargedValue` and `bodyBatteryDrainedValue` were moved from stressDetails to dailies in API v1.2.1 (Aug 2025).
+
+**Data pipeline:** Garmin Health API webhooks → Cloud Function → Firestore → Trio (via Firebase iOS SDK)
 
 ### 7.2 GarminContextSnapshot
+
+All field names match the Garmin Health API v1.2.3 spec exactly. The snapshot is built from Firestore documents in the collections defined in §7.1.
 
 ```swift
 /// A point-in-time snapshot of Garmin health data relevant to insulin sensitivity.
 /// Queried from Firestore at meal detection time.
-struct GarminContextSnapshot {
+/// All field names and types match the Garmin Health API v1.2.3 spec exactly.
+/// Firestore path: /users/{uid}/garminData/{summaryType}/{documents}
+struct GarminContextSnapshot: Codable {
     let queryTime: Date
 
-    // === Sleep (last night) ===
-    let sleepScore: Int?              // 0-100, Garmin's composite score
-    let totalSleepMinutes: Int?
-    let deepSleepMinutes: Int?
-    let remSleepMinutes: Int?
-    let awakeSleepMinutes: Int?
-    let averageSpO2: Double?
+    // === Daily Summary (from "dailies" collection) ===
+    // Source: Garmin Health API §7.1
+    let restingHeartRateInBeatsPerMinute: Int?
+    let averageHeartRateInBeatsPerMinute: Int?  // 7-day avg HR
+    let averageStressLevel: Int?                // 1-100, or -1 if insufficient data
+    let maxStressLevel: Int?
+    let stressDurationInSeconds: Int?
+    let restStressDurationInSeconds: Int?
+    let lowStressDurationInSeconds: Int?
+    let mediumStressDurationInSeconds: Int?
+    let highStressDurationInSeconds: Int?
+    let stressQualifier: String?                // "calm", "balanced", "stressful", "very_stressful"
+    let steps: Int?
+    let activeKilocalories: Int?
+    let moderateIntensityDurationInSeconds: Int?
+    let vigorousIntensityDurationInSeconds: Int?
+    let bodyBatteryChargedValue: Int?           // BB charged (moved to dailies in API v1.2.1)
+    let bodyBatteryDrainedValue: Int?           // BB drained during monitoring
 
-    // === Stress & Recovery (current) ===
-    let currentBodyBattery: Int?      // 0-100, queried at meal time
-    let bodyBatteryAtWake: Int?       // morning level (recovery quality)
-    let currentStress: Int?           // 0-100, current reading
-    let averageStressToday: Int?
+    // === Yesterday's Daily Summary (for delayed sensitivity effects) ===
+    let yesterdaySteps: Int?
+    let yesterdayActiveKilocalories: Int?
+    let yesterdayModerateIntensityDurationInSeconds: Int?
+    let yesterdayVigorousIntensityDurationInSeconds: Int?
 
-    // === Heart Rate / HRV ===
-    let restingHR: Int?
-    let restingHR7DayAvg: Int?        // for delta computation
-    let hrvLastNight: Double?         // ms
-    let hrvWeeklyAvg: Double?         // for delta computation
-    let hrvStatus: String?            // "balanced" / "low" / "unbalanced"
+    // === Sleep Summary (from "sleeps" collection) ===
+    // Source: Garmin Health API §7.3
+    let sleepDurationInSeconds: Int?
+    let deepSleepDurationInSeconds: Int?
+    let lightSleepDurationInSeconds: Int?
+    let remSleepInSeconds: Int?
+    let awakeDurationInSeconds: Int?
+    let sleepScoreValue: Int?                   // overallSleepScore.value (0-100)
+    let sleepScoreQualifier: String?            // EXCELLENT/GOOD/FAIR/POOR
+    let sleepValidation: String?                // AUTO_FINAL, ENHANCED_FINAL, etc.
 
-    // === Activity (today) ===
-    let stepsToday: Int?
-    let activeCaloriesToday: Int?
-    let intensityMinutesToday: Int?
-    let workoutsToday: [GarminWorkout]?
+    // === Stress Details (from "stressDetails" collection) ===
+    // Source: Garmin Health API §7.5
+    // Body Battery: extracted from timeOffsetBodyBatteryValues map
+    //   First entry (lowest offset) ≈ wake BB, last entry ≈ current BB
+    // Stress: extracted from timeOffsetStressLevelValues map
+    //   Values 1-100 are real stress. Negatives are special codes:
+    //   -1=off_wrist, -2=motion, -3=insufficient, -4=combined, -5=unknown
+    let currentBodyBattery: Int?                // latest BB from timeOffsetBodyBatteryValues
+    let bodyBatteryAtWake: Int?                 // earliest BB of the day (recovery proxy)
+    let currentStressLevel: Int?                // latest positive from timeOffsetStressLevelValues
 
-    // === Activity (yesterday -- for delayed sensitivity effects) ===
-    let stepsYesterday: Int?
-    let activeCaloriesYesterday: Int?
-    let workoutsYesterday: [GarminWorkout]?
+    // === HRV Summary (from "hrv" collection) ===
+    // Source: Garmin Health API §7.10
+    let lastNightAvg: Int?                      // lastNightAvg HRV (RMSSD ms)
+    let lastNight5MinHigh: Int?                 // max 5-min HRV window
 
-    // === Training ===
-    let trainingLoad: String?         // "low"/"optimal"/"high"/"very high"
-    let trainingStatus: String?       // "productive"/"recovery"/"overreaching"
-    let recoveryTimeHours: Int?
+    // === User Metrics (from "userMetrics" collection) ===
+    // Source: Garmin Health API §7.6
+    let vo2Max: Double?
+    let fitnessAge: Int?
+
+    // === 7-Day Averages (computed from historical documents) ===
+    // Calculated by averaging the last 7 dailies/HRV documents
+    let restingHR7DayAvg: Int?
+    let hrvWeeklyAvg: Int?
 
     // === Computed Deltas ===
+
+    /// Resting HR delta from 7-day average (positive = elevated = more resistant)
     var restingHRDelta: Int? {
-        guard let current = restingHR, let avg = restingHR7DayAvg else { return nil }
+        guard let current = restingHeartRateInBeatsPerMinute,
+              let avg = restingHR7DayAvg else { return nil }
         return current - avg
     }
 
+    /// HRV delta as percentage from weekly average (negative = suppressed = more resistant)
     var hrvDeltaPercent: Double? {
-        guard let current = hrvLastNight, let avg = hrvWeeklyAvg, avg > 0 else { return nil }
-        return ((current - avg) / avg) * 100
+        guard let current = lastNightAvg, let avg = hrvWeeklyAvg, avg > 0 else { return nil }
+        return (Double(current - avg) / Double(avg)) * 100
+    }
+
+    /// Total sleep in minutes (derived from sleepDurationInSeconds)
+    var totalSleepMinutes: Int? {
+        guard let seconds = sleepDurationInSeconds else { return nil }
+        return seconds / 60
+    }
+
+    /// Total intensity minutes today (moderate + vigorous)
+    var intensityMinutesToday: Int? {
+        let moderate = (moderateIntensityDurationInSeconds ?? 0) / 60
+        let vigorous = (vigorousIntensityDurationInSeconds ?? 0) / 60
+        let total = moderate + vigorous
+        return total > 0 ? total : nil
     }
 }
-
-struct GarminWorkout {
-    let startTime: Date
-    let durationMinutes: Int
-    let activityType: String      // "running", "cycling", "strength", etc.
-    let activeCalories: Int
-    let averageHR: Int
-    let trainingEffect: Double?   // 0-5 scale
-}
 ```
 
-### 7.3 Sensitivity Factor Calculation
+**Field source mapping (API collection → snapshot field):**
 
-The sensitivity factor is a multiplier applied to ALL entry amounts before they are stored:
+| API Collection | API Field | Snapshot Field |
+|----------------|-----------|----------------|
+| dailies | `restingHeartRateInBeatsPerMinute` | `restingHeartRateInBeatsPerMinute` |
+| dailies | `averageStressLevel` | `averageStressLevel` |
+| dailies | `activeKilocalories` | `activeKilocalories` |
+| dailies | `vigorousIntensityDurationInSeconds` | `vigorousIntensityDurationInSeconds` |
+| dailies | `bodyBatteryChargedValue` | `bodyBatteryChargedValue` |
+| sleeps | `durationInSeconds` | `sleepDurationInSeconds` |
+| sleeps | `overallSleepScore.value` | `sleepScoreValue` |
+| sleeps | `deepSleepDurationInSeconds` | `deepSleepDurationInSeconds` |
+| sleeps | `remSleepInSeconds` | `remSleepInSeconds` |
+| stressDetails | `timeOffsetBodyBatteryValues` (map, last) | `currentBodyBattery` |
+| stressDetails | `timeOffsetBodyBatteryValues` (map, first) | `bodyBatteryAtWake` |
+| stressDetails | `timeOffsetStressLevelValues` (map, last +) | `currentStressLevel` |
+| hrv | `lastNightAvg` | `lastNightAvg` |
+| hrv | `lastNight5MinHigh` | `lastNight5MinHigh` |
+| userMetrics | `vo2Max` | `vo2Max` |
+| userMetrics | `fitnessAge` | `fitnessAge` |
+
+### 7.3 Sensitivity Factor and Insulin Demand Factor
+
+The Garmin model computes a **sensitivity factor** (0.60-1.40), which is then converted to an **insulin demand factor** for use in entry generation. The demand factor is what the code actually uses — it makes the math self-documenting.
 
 ```
-sensitivityFactor: Double  (range 0.60 to 1.40)
+sensitivityFactor: Double  (range 0.60 to 1.40, computed by Garmin model)
 
   1.0  = baseline (normal day)
-  0.80 = 20% more resistant (entries scaled by 1/0.80 = 1.25x -> 25% more insulin)
-  1.20 = 20% more sensitive (entries scaled by 1/1.20 = 0.83x -> 17% less insulin)
+  0.80 = 20% more resistant
+  1.20 = 20% more sensitive
+
+insulinDemandFactor = 1.0 / sensitivityFactor  (range 0.71 to 1.67)
+
+  1.0  = baseline (normal day)
+  1.25 = 25% more insulin needed (bad sleep -> sensitivity 0.80)
+  0.83 = 17% less insulin needed (good recovery -> sensitivity 1.20)
 
 Usage (applied during entry generation):
-  entryCarbs = rawEntryCarbs / sensitivityFactor
+  entryCarbs = rawEntryCarbs * insulinDemandFactor
 
-  (Lower sensitivity -> higher entry amounts -> oref delivers more insulin)
-  (Higher sensitivity -> lower entry amounts -> oref delivers less insulin)
+  (Higher demand factor -> bigger entries -> more insulin. Self-documenting.)
 
 For the upfront bolus recommendation:
-  upfrontBolus = upfrontCarbs / CR
-  where upfrontCarbs is already sensitivity-adjusted
+  upfrontBolus = (upfrontCarbs * insulinDemandFactor) / CR
 ```
 
 ### 7.4 How Each Metric Affects Insulin Sensitivity
 
 Based on research literature:
 
-| Metric | Direction | Magnitude | Evidence |
-|--------|-----------|-----------|----------|
-| **Poor sleep** (score <50) | Decreases Sensitivity | 15-30% | Well-documented; Spiegel 1999, Donga 2010 |
-| **High stress** (>60) / Low Body Battery (<20) | Decreases Sensitivity | 10-20% | Cortisol -> hepatic glucose output + peripheral resistance |
-| **Elevated resting HR** (>8 bpm above baseline) | Decreases Sensitivity | 5-15% | Marker of illness, stress, poor recovery |
-| **Low HRV** (>15% below baseline) | Decreases Sensitivity | 5-10% | Sympathetic dominance -> catecholamines -> resistance |
-| **More activity yesterday** (>500 active cal) | Increases Sensitivity | 10-20% | GLUT4 upregulation; delayed 2-24h; Borghouts 2000 |
-| **Intense workout today** | Increases Sensitivity | 5-15% (after initial rise) | Acute: cortisol spike (resistant), then: GLUT4 (sensitive) |
-| **Training overreaching** | Decreases Sensitivity | 10-15% | Systemic stress response |
-| **Good sleep** (score >85) | Increases Sensitivity | 5-10% | Optimal recovery -> baseline or better |
-| **Low stress** / High Body Battery (>75) | Increases Sensitivity | 5-10% | Low cortisol, parasympathetic dominant |
+| Metric | Garmin API Source | Direction | Magnitude | Evidence |
+|--------|-------------------|-----------|-----------|----------|
+| **Poor sleep** (score <50) | `sleeps → overallSleepScore.value` | Decreases Sensitivity | 15-30% | Well-documented; Spiegel 1999, Donga 2010 |
+| **Short sleep** (<5-6h) | `sleeps → durationInSeconds` | Decreases Sensitivity | 5-10% | Independent of sleep quality score |
+| **High stress** (>60) | `stressDetails → timeOffsetStressLevelValues` | Decreases Sensitivity | 4-8% | Cortisol -> hepatic glucose output + peripheral resistance |
+| **Sustained high stress** (avg >60) | `dailies → averageStressLevel` | Decreases Sensitivity | 3-6% | Chronic stress more impactful than spikes |
+| **Low Body Battery** (<30) | `stressDetails → timeOffsetBodyBatteryValues` | Decreases Sensitivity | 5-18% | Integrates sleep + stress + activity recovery |
+| **Elevated resting HR** (>8 bpm above 7d avg) | `dailies → restingHeartRateInBeatsPerMinute` | Decreases Sensitivity | 7-12% | Marker of illness, stress, poor recovery |
+| **Low HRV** (>10% below 7d avg) | `hrv → lastNightAvg` | Decreases Sensitivity | 4-8% | Sympathetic dominance -> catecholamines -> resistance |
+| **More activity yesterday** (>250-600 active cal) | `dailies → activeKilocalories` (yesterday) | Increases Sensitivity | 5-15% | GLUT4 upregulation; delayed 2-24h; Borghouts 2000 |
+| **Vigorous exercise yesterday** (>20-45 min) | `dailies → vigorousIntensityDurationInSeconds` (yesterday) | Increases Sensitivity | 4-8% | Additional bonus for high-intensity exercise |
+| **Active today** (>200-400 cal) | `dailies → activeKilocalories` (today) | Increases Sensitivity | 4-8% | Smaller effect, still developing |
+| **Good sleep** (score >85) | `sleeps → overallSleepScore.value` | Increases Sensitivity | 5% | Optimal recovery -> baseline or better |
+| **Well recovered** (Body Battery >75) | `stressDetails → timeOffsetBodyBatteryValues` | Increases Sensitivity | 5% | Low cortisol, parasympathetic dominant |
+| **Low resting HR** (>5 bpm below 7d avg) | `dailies → restingHeartRateInBeatsPerMinute` | Increases Sensitivity | 3% | Well-rested marker |
+| **High HRV** (>15% above 7d avg) | `hrv → lastNightAvg` | Increases Sensitivity | 3% | Parasympathetic dominant |
 
 ### 7.5 Rule-Based Model (V1)
 
-The initial model uses research-calibrated rules. This runs immediately — no training data needed.
+The initial model uses research-calibrated rules. This runs immediately — no training data needed. All field references match the Garmin Health API v1.2.3 spec (see §7.1-7.2).
+
+The model outputs a `SensitivityResult` containing:
+- `sensitivityFactor` (0.60-1.40) — internal computation value
+- `insulinDemandFactor` (0.71-1.67) — the value used by the absorption engine
+- `contributions` — breakdown of what affected the result (for UI display)
 
 ```swift
 struct GarminSensitivityModel {
 
-    /// Compute sensitivity factor from Garmin context.
-    /// Returns 0.60 - 1.40 where 1.0 = normal baseline.
-    static func sensitivityFactor(from ctx: GarminContextSnapshot) -> Double {
+    static func computeDemandFactor(from ctx: GarminContextSnapshot?) -> SensitivityResult {
+        guard let ctx = ctx else {
+            return SensitivityResult(sensitivityFactor: 1.0, insulinDemandFactor: 1.0, ...)
+        }
+
         var factor = 1.0
 
-        // --- Sleep ---
+        // --- Sleep Score (overallSleepScore.value from sleeps collection) ---
         // Poor sleep is the strongest single predictor of next-day resistance.
         // Spiegel (1999): 4h sleep x 6 nights -> 40% reduced glucose clearance.
-        // We model a graded response.
-        if let sleep = ctx.sleepScore {
+        // Garmin: EXCELLENT 90-100, GOOD 80-89, FAIR 60-79, POOR <60
+        if let sleep = ctx.sleepScoreValue {
             switch sleep {
             case ..<40:  factor -= 0.22  // terrible sleep: 22% more resistant
             case ..<55:  factor -= 0.15  // poor sleep
             case ..<70:  factor -= 0.08  // fair sleep
             case 85...:  factor += 0.05  // great sleep: 5% more sensitive
-            default:     break           // 70-84: normal range, no adjustment
+            default:     break           // 70-84: normal range
             }
         }
 
-        // Duration matters independently of score
-        if let duration = ctx.totalSleepMinutes {
-            if duration < 300 { factor -= 0.10 }       // <5h: significant
-            else if duration < 360 { factor -= 0.05 }  // <6h: mild
+        // Sleep duration (sleepDurationInSeconds from sleeps collection)
+        if let totalSleep = ctx.totalSleepMinutes {
+            if totalSleep < 300 { factor -= 0.10 }       // <5h: significant
+            else if totalSleep < 360 { factor -= 0.05 }  // <6h: mild
         }
 
         // --- Stress & Recovery ---
-        // Body Battery integrates sleep quality, stress, and activity.
-        // Low BB at meal time = depleted recovery capacity = resistance.
+
+        // Body Battery (from stressDetails timeOffsetBodyBatteryValues, current reading)
         if let bb = ctx.currentBodyBattery {
             switch bb {
             case ..<15:  factor -= 0.18  // critically depleted
@@ -1489,21 +1634,30 @@ struct GarminSensitivityModel {
             }
         }
 
-        // Acute stress at meal time
-        if let stress = ctx.currentStress {
+        // Current stress level (from stressDetails timeOffsetStressLevelValues)
+        // Garmin: 1-25 rest, 26-50 low, 51-75 medium, 76-100 high
+        if let stress = ctx.currentStressLevel {
             if stress > 75 { factor -= 0.08 }       // high acute stress
             else if stress > 60 { factor -= 0.04 }  // moderate
         }
 
+        // Average stress today (from dailies averageStressLevel)
+        // Supplements the current reading — sustained stress matters more than a spike
+        if let avgStress = ctx.averageStressLevel, avgStress > 0 {  // -1 = insufficient data
+            if avgStress > 60 { factor -= 0.06 }       // sustained high stress
+            else if avgStress > 45 { factor -= 0.03 }  // elevated stress
+        }
+
         // --- Heart Rate / HRV ---
-        // Elevated resting HR signals illness, stress, or poor recovery.
+
+        // Resting HR delta (restingHeartRateInBeatsPerMinute from dailies vs 7-day avg)
         if let hrDelta = ctx.restingHRDelta {
             if hrDelta > 12 { factor -= 0.12 }      // significantly elevated
             else if hrDelta > 8 { factor -= 0.07 }   // mildly elevated
-            else if hrDelta < -5 { factor += 0.03 }  // unusually low (well-rested)
+            else if hrDelta < -5 { factor += 0.03 }  // well-rested
         }
 
-        // Low HRV = sympathetic dominance = cortisol/catecholamines
+        // HRV delta (lastNightAvg from hrv collection vs weekly average)
         if let hrvDelta = ctx.hrvDeltaPercent {
             if hrvDelta < -20 { factor -= 0.08 }     // HRV >20% below baseline
             else if hrvDelta < -10 { factor -= 0.04 } // >10% below
@@ -1511,49 +1665,71 @@ struct GarminSensitivityModel {
         }
 
         // --- Activity ---
-        // Yesterday's activity has the strongest delayed sensitivity effect.
-        // Exercise-induced GLUT4 upregulation lasts 24-48h.
-        if let yesterdayCal = ctx.activeCaloriesYesterday {
+
+        // Yesterday's activity (delayed sensitivity effect — most impactful)
+        // Uses activeKilocalories from yesterday's daily summary
+        if let yesterdayCal = ctx.yesterdayActiveKilocalories {
             if yesterdayCal > 600 { factor += 0.15 }      // very active day
             else if yesterdayCal > 400 { factor += 0.10 }  // active
             else if yesterdayCal > 250 { factor += 0.05 }  // moderately active
         }
 
         // Today's activity (smaller effect, still developing)
-        if let todayCal = ctx.activeCaloriesToday {
+        // Uses activeKilocalories from today's daily summary
+        if let todayCal = ctx.activeKilocalories {
             if todayCal > 400 { factor += 0.08 }
             else if todayCal > 200 { factor += 0.04 }
         }
 
-        // --- Training Status ---
-        // Overreaching = systemic stress = resistance
-        if let status = ctx.trainingStatus {
-            switch status {
-            case "overreaching": factor -= 0.10
-            case "detraining":   factor -= 0.05  // deconditioning
-            case "productive":   factor += 0.03  // optimal training
-            default: break
-            }
+        // Vigorous intensity yesterday (additional bonus for hard exercise)
+        // Uses yesterdayVigorousIntensityDurationInSeconds
+        if let vigorousYest = ctx.yesterdayVigorousIntensityDurationInSeconds, vigorousYest > 0 {
+            let vigorousMinutes = vigorousYest / 60
+            if vigorousMinutes > 45 { factor += 0.08 }      // heavy exercise
+            else if vigorousMinutes > 20 { factor += 0.04 }  // vigorous exercise
         }
 
-        // --- Clamp ---
-        return max(0.60, min(1.40, factor))
+        // --- Clamp & Convert ---
+        let clampedFactor = max(0.60, min(1.40, factor))
+        let demandFactor = 1.0 / clampedFactor
+
+        return SensitivityResult(
+            sensitivityFactor: clampedFactor,
+            insulinDemandFactor: demandFactor,
+            contributions: contributions
+        )
     }
 }
 ```
+
+**Sensitivity rules summary (10 metrics, max theoretical range ±0.71):**
+
+| Metric | API Source | Threshold | Impact | Direction |
+|--------|-----------|-----------|--------|-----------|
+| Sleep Score | `sleeps.overallSleepScore.value` | <40 / <55 / <70 / >85 | -0.22 / -0.15 / -0.08 / +0.05 | Sleep quality |
+| Sleep Duration | `sleeps.durationInSeconds` (computed) | <5h / <6h | -0.10 / -0.05 | Sleep quantity |
+| Body Battery | `stressDetails.timeOffsetBodyBatteryValues` | <15 / <30 / <50 / >75 | -0.18 / -0.12 / -0.05 / +0.05 | Recovery |
+| Current Stress | `stressDetails.timeOffsetStressLevelValues` | >75 / >60 | -0.08 / -0.04 | Acute stress |
+| Avg Stress Today | `dailies.averageStressLevel` | >60 / >45 | -0.06 / -0.03 | Sustained stress |
+| Resting HR Delta | `dailies.restingHeartRateInBeatsPerMinute` vs 7d avg | >12 / >8 / <-5 | -0.12 / -0.07 / +0.03 | HR recovery |
+| HRV Delta | `hrv.lastNightAvg` vs 7d avg | <-20% / <-10% / >+15% | -0.08 / -0.04 / +0.03 | ANS balance |
+| Yesterday Activity | `dailies.activeKilocalories` (yesterday) | >600 / >400 / >250 | +0.15 / +0.10 / +0.05 | GLUT4 effect |
+| Today Activity | `dailies.activeKilocalories` (today) | >400 / >200 | +0.08 / +0.04 | Current activity |
+| Vigorous Exercise | `dailies.vigorousIntensityDurationInSeconds` (yesterday) | >45min / >20min | +0.08 / +0.04 | Exercise intensity |
 
 ### 7.6 ML Model (V2, Future)
 
 Once we have 50-100 meals with both Garmin context and BG outcomes, we can train a personalized model:
 
-**Features (~20 inputs):**
+**Features (~20 inputs, all from Garmin Health API v1.2.3):**
 ```
-Sleep: sleepScore, deepSleepPct, duration, SpO2
-Stress: bodyBattery, currentStress, avgStress, restingHRDelta, hrvDelta
-Activity: todayActiveCal, yesterdayActiveCal, intensityMin, yesterdayWorkoutDuration
+Sleep:    sleepScoreValue, deepSleepDurationInSeconds, sleepDurationInSeconds, remSleepInSeconds
+Stress:   currentBodyBattery, currentStressLevel, averageStressLevel, restingHRDelta, hrvDeltaPercent
+Activity: activeKilocalories (today), yesterdayActiveKilocalories, intensityMinutesToday,
+          yesterdayVigorousIntensityDurationInSeconds
 Temporal: hourOfDay (encoded), dayOfWeek (encoded)
-Meal: totalCarbs, totalFat, totalProtein, mealSimilarityScore
-State: currentBG, currentIOB, currentCOB
+Meal:     totalCarbs, totalFat, totalProtein, mealSimilarityScore
+State:    currentBG, currentIOB, currentCOB
 ```
 
 **Target:** Effective ICR for this meal (derived from BG outcome)
@@ -1566,10 +1742,11 @@ State: currentBG, currentIOB, currentCOB
 **How it replaces the rule-based model:**
 ```swift
 // V1 (rule-based):
-let factor = GarminSensitivityModel.sensitivityFactor(from: garminContext)
+let result = GarminSensitivityModel.computeDemandFactor(from: garminContext)
+let demandFactor = result.insulinDemandFactor
 
 // V2 (ML, when ready):
-let factor = try coreMLModel.prediction(from: featureVector).sensitivityFactor
+let demandFactor = try coreMLModel.prediction(from: featureVector).insulinDemandFactor
 ```
 
 ### 7.7 Claude Periodic Recalibration
@@ -1763,6 +1940,16 @@ The slider ranges from 0% to 100%:
 - **0%:** No upfront bolus, everything via SMBs (maximum caution)
 - **Curve-suggested %:** The gamma curve's calculated safe amount (default)
 - **100%:** Full bolus upfront (like the current system, for low-fat meals the user trusts)
+
+**High-fat upfront warning:** When the user slides more than 50% above the curve-suggested percentage for a meal with >15g fat, a soft warning is shown:
+
+```
+"Curve suggests 28% for this meal (28g fat).
+ 100% upfront may cause a low as fat delays carb absorption.
+ [Keep 100%]  [Use Suggested 28%]"
+```
+
+The user can still override — this is informed consent, not a hard block. For meals with <=15g fat, no warning is shown since the absorption delay is minimal.
 
 The meal SMB multiplier slider ranges from 1.0x to 3.0x:
 - **1.0x:** Normal SMB behavior (no enhancement)
@@ -2075,15 +2262,21 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 ### 8. Curve-Driven Split Dosing (Not Full Upfront Bolus)
 
-**Decision:** Use the gamma absorption curve to calculate a safe upfront bolus amount, with remaining carbs delivered via SMBs along the curve.
+**Decision:** Use the gamma absorption curve to calculate a safe upfront bolus amount, with remaining carbs delivered via SMBs along the curve. No carb entries are created for the upfront portion — only the bolus recommendation. This prevents double-counting.
 
-**Reason:** For mixed meals with fat, a full upfront bolus creates a dangerous hypoglycemia window — insulin acts before fat-delayed carbs absorb. The gamma curve tells us exactly how much absorption occurs in the insulin action window, so we can match insulin delivery to actual absorption timing. This eliminates the "bolus-then-crash-then-rebound" pattern that plagues high-fat meals.
+**Reason:** For mixed meals with fat, a full upfront bolus creates a dangerous hypoglycemia window — insulin acts before fat-delayed carbs absorb. The gamma curve tells us exactly how much absorption occurs in the insulin action window, so we can match insulin delivery to actual absorption timing. The safe window default varies by insulin type (Fiasp/Lyumjev: 30 min, Humalog/Novolog: 45 min) since faster insulins need a shorter window to avoid outpacing carb absorption. A soft warning is shown when users override to >50% above the curve suggestion for high-fat meals.
 
-### 9. Sensitivity Factor Scales Entry Amounts (Not CR/ISF)
+### 9. Insulin Demand Factor (Not Sensitivity Factor) for Entry Scaling
 
-**Decision:** Apply the Garmin sensitivity factor by scaling all entry amounts rather than modifying CR/ISF values.
+**Decision:** Apply the Garmin model output as an `insulinDemandFactor` (multiply entries) rather than a `sensitivityFactor` (divide entries).
 
-**Reason:** oref reads CR/ISF from the pump profile, which we cannot easily change on the fly. Scaling entry amounts achieves the same insulin effect: a sensitivity factor of 0.78 causes 65g eaten to appear as 83g of entries, producing 28% more insulin delivery. Fat/protein entries are already "fake carbs," so scaling them is natural. The UI displays both values for transparency: "65g eaten -> 83g effective."
+**Reason:** Dividing by a "sensitivity factor" of 0.8 to get 25% more insulin is counter-intuitive — every developer touching the code needs to think carefully about direction. Instead, the Garmin model outputs a sensitivity factor (0.60-1.40), which is immediately converted to `insulinDemandFactor = 1.0 / sensitivityFactor` (0.71-1.67). Entries are then MULTIPLIED: `entry.carbs = rawCarbs * insulinDemandFactor`. A demand factor of 1.25 means "25% more insulin" — self-documenting. oref reads CR/ISF from the pump profile which we can't change on the fly, so scaling entries is the mechanism.
+
+### 9a. Fat Uses Simple Minimum Threshold (Not Ramp)
+
+**Decision:** Use a 5g minimum threshold for fat resistance, not a smooth ramp from 0-20g.
+
+**Reason:** The 0.69 coefficient is already a per-gram rate derived from Wolpert. Applying a dose-dependent ramp on top of a dose-dependent per-gram coefficient double-discounts moderate fat amounts. At 10g fat, the ramp produces 3.45g carb-equiv (10 x 0.69 x 0.5) when the correct value is 6.9g (10 x 0.69). A simple 5g minimum threshold achieves the goal (ignore negligible fat) without distorting the per-gram rate.
 
 ### 10. Meal-Mode SMB Enhancement with Safety Gates
 
@@ -2141,9 +2334,10 @@ We control the **inputs** to oref: the carb entries and the maxSMB parameter. Be
 | No SMB enhancement on falling BG | MealModeState trend gate |
 | No adaptation on stale CGM data (>15 min) | MacroAdaptiveService |
 | No SMB enhancement on stale CGM (>10 min) | MealModeState freshness gate |
-| Sensitivity factor clamped to 0.60-1.40 | GarminSensitivityModel |
+| Insulin demand factor clamped to 0.71-1.67 (sensitivity 0.60-1.40) | GarminSensitivityModel |
 | Protein effect smooth ramp (no cliff) | MacroAbsorptionEngine |
-| Fat coefficient normalized (prevents overdose) | MacroAbsorptionEngine |
+| Fat coefficient normalized (prevents overdose), 5g minimum threshold | MacroAbsorptionEngine |
+| High-fat upfront warning when user overrides >50% above curve suggestion | BolusAdjustSliderView |
 | Double-dose detection and warning | MacrosOnBoardTracker |
 | All entries tagged with unique mealID | MacroAbsorptionEngine |
 | All entries use standard CarbEntryStored format | Compatibility with existing safeguards |
