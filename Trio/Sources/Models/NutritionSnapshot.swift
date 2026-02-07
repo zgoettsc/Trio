@@ -356,11 +356,16 @@ final class NutritionSnapshotStore {
     /// Cronometer writes cumulative daily totals to Apple Health. Each snapshot captures
     /// the running total at the time the observer fired. Meals are inferred from deltas
     /// between consecutive snapshots.
+    ///
+    /// Individual food items entered within 15 minutes of each other are merged into
+    /// a single meal event. For example, entering bread, almond butter, blueberries,
+    /// and honey over 5 minutes produces one meal event with the combined macros.
     func inferredMealEvents(for date: Date) -> [InferredMealEvent] {
         let snapshots = snapshotsForDate(date).sorted { $0.timestamp < $1.timestamp }
         guard snapshots.count >= 2 else { return [] }
 
-        var events: [InferredMealEvent] = []
+        // First pass: compute raw deltas between consecutive snapshots
+        var rawEvents: [(detectedAt: Date, carbsDelta: Double, fatDelta: Double, proteinDelta: Double)] = []
 
         for i in 1 ..< snapshots.count {
             let prev = snapshots[i - 1]
@@ -369,9 +374,9 @@ final class NutritionSnapshotStore {
             let fatDelta = curr.cumulativeFat - prev.cumulativeFat
             let proteinDelta = curr.cumulativeProtein - prev.cumulativeProtein
 
-            // Only create an event if there's a meaningful change (> 1g of any macro)
+            // Only include meaningful changes (> 1g of any macro)
             if carbDelta > 1 || fatDelta > 1 || proteinDelta > 1 {
-                events.append(InferredMealEvent(
+                rawEvents.append((
                     detectedAt: curr.timestamp,
                     carbsDelta: max(0, carbDelta),
                     fatDelta: max(0, fatDelta),
@@ -379,13 +384,62 @@ final class NutritionSnapshotStore {
                 ))
             }
         }
-        return events
+
+        guard !rawEvents.isEmpty else { return [] }
+
+        // Second pass: merge events within 15 minutes of each other into single meals
+        var meals: [InferredMealEvent] = []
+        var currentCarbs = rawEvents[0].carbsDelta
+        var currentFat = rawEvents[0].fatDelta
+        var currentProtein = rawEvents[0].proteinDelta
+        var currentTime = rawEvents[0].detectedAt
+
+        for i in 1 ..< rawEvents.count {
+            let gap = rawEvents[i].detectedAt.timeIntervalSince(rawEvents[i - 1].detectedAt)
+
+            if gap <= Self.mealGroupingWindow {
+                // Same meal — accumulate macros
+                currentCarbs += rawEvents[i].carbsDelta
+                currentFat += rawEvents[i].fatDelta
+                currentProtein += rawEvents[i].proteinDelta
+                currentTime = rawEvents[i].detectedAt
+            } else {
+                // New meal — save the accumulated meal and start fresh
+                meals.append(InferredMealEvent(
+                    detectedAt: currentTime,
+                    carbsDelta: currentCarbs,
+                    fatDelta: currentFat,
+                    proteinDelta: currentProtein
+                ))
+                currentCarbs = rawEvents[i].carbsDelta
+                currentFat = rawEvents[i].fatDelta
+                currentProtein = rawEvents[i].proteinDelta
+                currentTime = rawEvents[i].detectedAt
+            }
+        }
+
+        // Don't forget the last accumulated meal
+        meals.append(InferredMealEvent(
+            detectedAt: currentTime,
+            carbsDelta: currentCarbs,
+            fatDelta: currentFat,
+            proteinDelta: currentProtein
+        ))
+
+        return meals
     }
 
-    /// Compute the meal delta between the most recent stored snapshot and new cumulative totals.
+    /// How close two snapshots must be (in seconds) to be considered part of the same meal.
+    /// Food items entered in Cronometer within this window are grouped together.
+    private static let mealGroupingWindow: TimeInterval = 15 * 60 // 15 minutes
+
+    /// Compute the meal delta between current HealthKit totals and the pre-meal baseline.
     /// Used when the Crono button is tapped: we query HealthKit for current totals and diff
-    /// against the last stored snapshot to get just the recently-logged food.
-    /// If no prior snapshot exists, uses the full cumulative values (first meal of the day).
+    /// against the baseline snapshot from BEFORE the current meal started.
+    ///
+    /// Cronometer fires a HealthKit update per food item, so entering bread, almond butter,
+    /// blueberries, and honey creates 4 separate snapshots. We group all snapshots within
+    /// 15 minutes of each other as a single meal and diff against the snapshot before that cluster.
     func recordAndComputeLatestMeal(
         currentCarbs: Double,
         currentFat: Double,
@@ -404,17 +458,37 @@ final class NutritionSnapshotStore {
         )
         saveSnapshot(freshSnapshot)
 
-        // Find the previous snapshot for today (the one right before this one)
-        let todaySnapshots = snapshotsForDate(today)
-            .filter { $0.id != freshSnapshot.id }
-            .sorted { $0.timestamp < $1.timestamp }
+        // Get all today's snapshots INCLUDING the fresh one, sorted ascending by time
+        var allSnapshots = snapshotsForDate(today).sorted { $0.timestamp < $1.timestamp }
 
+        // Deduplicate: if the fresh snapshot has the same cumulative values as the last one,
+        // it's already represented. Keep it anyway since it has the latest timestamp.
+        guard !allSnapshots.isEmpty else {
+            // Should not happen since we just saved one, but handle gracefully
+            return nil
+        }
+
+        // Walk backwards from the end, grouping snapshots within 15 minutes of each other.
+        // The "meal cluster" is all consecutive snapshots where each pair is within 15 min.
+        // The baseline is the snapshot just BEFORE this cluster.
+        var mealStartIndex = allSnapshots.count - 1
+        while mealStartIndex > 0 {
+            let gap = allSnapshots[mealStartIndex].timestamp.timeIntervalSince(
+                allSnapshots[mealStartIndex - 1].timestamp
+            )
+            if gap <= Self.mealGroupingWindow {
+                mealStartIndex -= 1
+            } else {
+                break
+            }
+        }
+
+        // The baseline is the snapshot just before the meal cluster
         let prev: NutritionSnapshot
-        if let lastSnapshot = todaySnapshots.last {
-            prev = lastSnapshot
+        if mealStartIndex > 0 {
+            prev = allSnapshots[mealStartIndex - 1]
         } else {
-            // No prior snapshot today — use midnight baseline (0g)
-            // This means the entire cumulative total IS the food logged today
+            // All snapshots are in one cluster (or only one exists) — use midnight baseline
             prev = NutritionSnapshot(
                 timestamp: today,
                 cumulativeCarbs: 0,
