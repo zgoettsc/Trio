@@ -328,10 +328,12 @@ extension Treatments {
             isFetchingCronometerMeal = true
             cronometerError = nil
 
-            // Get inferred meals from last 2 hours (recent enough to be the current meal)
-            let recentMeals = NutritionSnapshotStore.shared.inferredMealEvents(forLastHours: 2)
+            // Get inferred meals from today (all snapshots since midnight)
+            // Uses a wide window because the midnight baseline creates a single "meal" event
+            // from all food logged since midnight, detected at the time of the first observer snapshot.
+            let recentMeals = NutritionSnapshotStore.shared.inferredMealEvents(forLastHours: 24)
             guard let latestMeal = recentMeals.last else {
-                cronometerError = "No recent Cronometer meal detected. Log your food in Cronometer and wait for it to sync to Apple Health."
+                cronometerError = "No recent Cronometer meal detected. Make sure nutrition reading is enabled in Settings, then log food in Cronometer and wait for it to sync to Apple Health."
                 isFetchingCronometerMeal = false
                 return
             }

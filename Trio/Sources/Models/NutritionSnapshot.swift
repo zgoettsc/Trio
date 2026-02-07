@@ -352,15 +352,37 @@ final class NutritionSnapshotStore {
         return loadSnapshots().filter { $0.forDate >= dayStart && $0.forDate < dayEnd }
     }
 
-    /// Derive inferred meal events from snapshot deltas for a given day
+    /// Derive inferred meal events from snapshot deltas for a given day.
+    /// Cronometer writes cumulative daily totals to Apple Health. Each snapshot captures
+    /// the running total at the time the observer fired. Meals are inferred from deltas
+    /// between consecutive snapshots.
+    ///
+    /// Special case: if only 1 snapshot exists for a day, the baseline is implicitly
+    /// midnight with 0g across all macros (since Cronometer's daily totals start at zero).
+    /// This means the first snapshot's cumulative values ARE the food logged so far.
     func inferredMealEvents(for date: Date) -> [InferredMealEvent] {
         let snapshots = snapshotsForDate(date).sorted { $0.timestamp < $1.timestamp }
-        guard snapshots.count >= 2 else { return [] }
+        guard !snapshots.isEmpty else { return [] }
 
         var events: [InferredMealEvent] = []
-        for i in 1 ..< snapshots.count {
-            let prev = snapshots[i - 1]
-            let curr = snapshots[i]
+
+        // Create a synthetic midnight baseline — Cronometer daily totals start at 0
+        let calendar = Calendar.current
+        let midnight = calendar.startOfDay(for: date)
+        let baseline = NutritionSnapshot(
+            timestamp: midnight,
+            cumulativeCarbs: 0,
+            cumulativeFat: 0,
+            cumulativeProtein: 0,
+            forDate: midnight
+        )
+
+        // Prepend baseline so we can always diff against it
+        let allSnapshots = [baseline] + snapshots
+
+        for i in 1 ..< allSnapshots.count {
+            let prev = allSnapshots[i - 1]
+            let curr = allSnapshots[i]
             let carbDelta = curr.cumulativeCarbs - prev.cumulativeCarbs
             let fatDelta = curr.cumulativeFat - prev.cumulativeFat
             let proteinDelta = curr.cumulativeProtein - prev.cumulativeProtein
