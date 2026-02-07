@@ -25,8 +25,10 @@ struct CronometerMealRecommendationView: View {
     let minutesSinceMeal: Double
     let decayAdjustedCarbs: Double? // nil if fresh meal
 
+    let isFactorLocked: Bool
     let onApply: (Double, Double, Double) -> Void // (carbs, fat, protein) to populate
     let onAdjustFactor: (Double) -> Void
+    let onToggleFactorLock: () -> Void
     let onDismiss: () -> Void
 
     @State private var editedFactor: Double
@@ -57,8 +59,10 @@ struct CronometerMealRecommendationView: View {
         isLateMeal: Bool = false,
         minutesSinceMeal: Double = 0,
         decayAdjustedCarbs: Double? = nil,
+        isFactorLocked: Bool = false,
         onApply: @escaping (Double, Double, Double) -> Void,
         onAdjustFactor: @escaping (Double) -> Void,
+        onToggleFactorLock: @escaping () -> Void = {},
         onDismiss: @escaping () -> Void
     ) {
         self.meal = meal
@@ -79,8 +83,10 @@ struct CronometerMealRecommendationView: View {
         self.isLateMeal = isLateMeal
         self.minutesSinceMeal = minutesSinceMeal
         self.decayAdjustedCarbs = decayAdjustedCarbs
+        self.isFactorLocked = isFactorLocked
         self.onApply = onApply
         self.onAdjustFactor = onAdjustFactor
+        self.onToggleFactorLock = onToggleFactorLock
         self.onDismiss = onDismiss
         self._editedFactor = State(initialValue: adjustmentFactor)
     }
@@ -338,18 +344,20 @@ struct CronometerMealRecommendationView: View {
                 Spacer()
                 Button(action: { showFactorEditor.toggle() }) {
                     HStack(spacing: 4) {
-                        Image(systemName: "slider.horizontal.3")
+                        Image(systemName: isFactorLocked ? "lock.fill" : "slider.horizontal.3")
                         Text("Factor: \(String(format: "%.2f", adjustmentFactor))")
                     }
                     .font(.caption)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.blue.opacity(0.1))
+                    .background(isFactorLocked ? Color.orange.opacity(0.1) : Color.blue.opacity(0.1))
                     .cornerRadius(6)
                 }
             }
 
-            Text("Carbs, fat, and protein scaled from Cronometer using learned factors")
+            Text(isFactorLocked
+                ? "Carbs, fat, and protein scaled using locked factor (\(String(format: "%.2f", adjustmentFactor)))"
+                : "Carbs, fat, and protein scaled from Cronometer using learned factors")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -384,12 +392,33 @@ struct CronometerMealRecommendationView: View {
         VStack(spacing: 8) {
             Divider()
 
-            Text("Adjustment Factor")
-                .font(.subheadline.bold())
+            HStack {
+                Text("Adjustment Factor")
+                    .font(.subheadline.bold())
+                Spacer()
+                Button(action: { onToggleFactorLock() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isFactorLocked ? "lock.fill" : "lock.open")
+                        Text(isFactorLocked ? "Locked" : "Auto-learning")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(isFactorLocked ? .orange : .green)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(isFactorLocked ? Color.orange.opacity(0.1) : Color.green.opacity(0.1))
+                    .cornerRadius(6)
+                }
+            }
 
-            Text("Controls how much of the Cronometer carbs to enter. Lower = less insulin. Your settings are tuned around your current carb-counting habits.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if isFactorLocked {
+                Text("Factor is locked. Slider changes will stick. Auto-learning from meal outcomes is paused.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Controls how much of the Cronometer carbs to enter. Lower = less insulin. Factor auto-adjusts from meal outcomes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack {
                 Text("\(String(format: "%.2f", editedFactor))")
@@ -397,7 +426,7 @@ struct CronometerMealRecommendationView: View {
                     .frame(width: 60)
 
                 Slider(value: $editedFactor, in: 0.2 ... 1.5, step: 0.05)
-                    .tint(.blue)
+                    .tint(isFactorLocked ? .orange : .blue)
             }
 
             HStack {

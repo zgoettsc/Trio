@@ -586,12 +586,16 @@ extension Treatments {
                         isLateMeal: state.cronometerMealIsLate,
                         minutesSinceMeal: state.cronometerMealMinutesAgo,
                         decayAdjustedCarbs: state.cronometerDecayAdjustedCarbs,
+                        isFactorLocked: state.cronometerFactorLocked,
                         onApply: { carbs, fat, protein in
                             state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein)
                             handleDebouncedInput()
                         },
                         onAdjustFactor: { newFactor in
                             state.adjustCronometerFactor(newFactor)
+                        },
+                        onToggleFactorLock: {
+                            state.toggleCronometerFactorLock()
                         },
                         onDismiss: {
                             state.showCronometerSheet = false
