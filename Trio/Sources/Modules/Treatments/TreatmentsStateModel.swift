@@ -580,7 +580,7 @@ extension Treatments {
                 // Recalculate FPU with decay-adjusted values
                 let fatCal = cronometerRecommendedFat * 9
                 let proteinCal = cronometerRecommendedProtein * 4
-                let individualFactor = settingsManager.settings.individualAdjustmentFactor
+                let individualFactor = NSDecimalNumber(decimal: settingsManager.settings.individualAdjustmentFactor).doubleValue
                 cronometerFPUCarbEquivalents = ((fatCal + proteinCal) / 10) * individualFactor
             } else {
                 cronometerDecayAdjustedCarbs = nil
