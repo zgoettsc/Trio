@@ -216,7 +216,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                 let fatValue = Double(truncating: fat as NSDecimalNumber)
                 let proteinValue = Double(truncating: protein as NSDecimalNumber)
                 let adjustmentFactor = Double(truncating: trioSettings.individualAdjustmentFactor as NSDecimalNumber)
-                let insulinType: InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+                let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
 
                 let result = MacroAbsorptionEngine.generateEntries(
                     carbs: carbsValue,
