@@ -69,7 +69,6 @@ enum GarminFirebaseManager {
             options.apiKey = GarminFirebaseConstants.apiKey
             options.projectID = GarminFirebaseConstants.projectID
             options.storageBucket = GarminFirebaseConstants.storageBucket
-            options.clientID = GarminFirebaseConstants.clientID
 
             FirebaseApp.configure(name: appName, options: options)
             debug(.service, "Garmin Firebase: secondary app configured (project: \(GarminFirebaseConstants.projectID))")

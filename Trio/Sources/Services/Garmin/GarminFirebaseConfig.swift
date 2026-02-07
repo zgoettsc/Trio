@@ -11,7 +11,6 @@ import Foundation
 //   GARMIN_FIREBASE_GCM_SENDER_ID    - GCM Sender ID (number)
 //   GARMIN_FIREBASE_GOOGLE_APP_ID    - Google App ID (1:xxxxx:ios:xxxxx)
 //   GARMIN_FIREBASE_STORAGE_BUCKET   - Firebase Storage Bucket
-//   GARMIN_FIREBASE_CLIENT_ID        - iOS Client ID
 //   GARMIN_FIREBASE_USER_ID          - Your Firestore user UID
 //   GARMIN_FIREBASE_EMAIL            - Firebase Auth email
 //   GARMIN_FIREBASE_PASSWORD         - Firebase Auth password
@@ -26,7 +25,6 @@ enum GarminFirebaseConstants {
     static let gcmSenderID = "__GARMIN_FIREBASE_GCM_SENDER_ID__"
     static let googleAppID = "__GARMIN_FIREBASE_GOOGLE_APP_ID__"
     static let storageBucket = "__GARMIN_FIREBASE_STORAGE_BUCKET__"
-    static let clientID = "__GARMIN_FIREBASE_CLIENT_ID__"
 
     // Firestore user identity
     static let firestoreUserID = "__GARMIN_FIREBASE_USER_ID__"
