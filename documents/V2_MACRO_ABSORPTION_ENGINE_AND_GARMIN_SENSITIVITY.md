@@ -1,8 +1,8 @@
 # V2: Macro Absorption Engine & Garmin Sensitivity Model
 
-**Version:** 2.3
+**Version:** 2.4
 **Date:** February 7, 2026
-**Status:** Implementation in progress (Phases A-G coded, Firebase wired, CI secrets ready)
+**Status:** Implementation in progress (Phases A-G coded, Firebase wired, CI secrets ready, status UI added)
 **Prerequisite:** V1 Cronometer Integration (Phases 1-5b, implemented)
 
 ---
@@ -2085,6 +2085,7 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 - `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` — Firestore queries, `GarminFirebaseManager`
 - `Trio/Sources/Services/Garmin/GarminFirebaseConfig.swift` — Build-time config with placeholder values
 - `Trio/Sources/Models/GarminContextSnapshot.swift` — Data model (Garmin Health API v1.2.3 fields)
+- `Trio/Sources/Modules/Settings/View/Subviews/GarminFirestoreStatusView.swift` — Connection status & test UI
 
 **Dependencies (already in project):**
 - `firebase-ios-sdk` v11.11+ (already used for Crashlytics)
@@ -2116,19 +2117,52 @@ let db = Firestore.firestore(app: FirebaseApp.app(name: "garmin")!)
 
 The `GarminFirebaseConfig.swift` file contains placeholder values (`__GARMIN_FIREBASE_API_KEY__`, etc.) that are replaced by `sed` during the `build_trio.yml` workflow, before Xcode compilation.
 
-| GitHub Secret | Purpose | Example Value |
-|---------------|---------|---------------|
-| `GARMIN_FIREBASE_API_KEY` | Firebase Web API Key | `AIzaSy...` |
-| `GARMIN_FIREBASE_PROJECT_ID` | Firebase Project ID | `my-health-project` |
-| `GARMIN_FIREBASE_GCM_SENDER_ID` | GCM Sender ID | `123456789` |
-| `GARMIN_FIREBASE_GOOGLE_APP_ID` | Google App ID | `1:123456:ios:abc123` |
-| `GARMIN_FIREBASE_STORAGE_BUCKET` | Storage Bucket | `my-project.appspot.com` |
-| `GARMIN_FIREBASE_CLIENT_ID` | iOS Client ID | `123456-xxx.apps.googleusercontent.com` |
-| `GARMIN_FIREBASE_USER_ID` | Firestore user UID | `0Zp7LAT9bLMIEFWNyy694Gylf0n1` |
-| `GARMIN_FIREBASE_EMAIL` | Firebase Auth email | `user@example.com` |
-| `GARMIN_FIREBASE_PASSWORD` | Firebase Auth password | `(your password)` |
+| GitHub Secret | Purpose | Where to Find It |
+|---------------|---------|------------------|
+| `GARMIN_FIREBASE_API_KEY` | Firebase Web API Key | Firebase Console → Project Settings → Web API Key |
+| `GARMIN_FIREBASE_PROJECT_ID` | Firebase Project ID | Firebase Console → Project Settings → Project ID |
+| `GARMIN_FIREBASE_GCM_SENDER_ID` | GCM Sender ID | Firebase Console → Project Settings → Cloud Messaging → Sender ID |
+| `GARMIN_FIREBASE_GOOGLE_APP_ID` | iOS Google App ID | Firebase Console → Project Settings → Your Apps → iOS App → App ID |
+| `GARMIN_FIREBASE_STORAGE_BUCKET` | Storage Bucket | Firebase Console → Project Settings → Storage bucket |
+| `GARMIN_FIREBASE_USER_ID` | Firestore user UID | Your Firebase Auth UID (e.g. `0Zp7LAT9bLMIEFWNyy694Gylf0n1`) |
+| `GARMIN_FIREBASE_EMAIL` | Firebase Auth email | Your Firebase Auth email address |
+| `GARMIN_FIREBASE_PASSWORD` | Firebase Auth password | Your Firebase Auth password |
+
+**Note:** `GARMIN_FIREBASE_GOOGLE_APP_ID` requires an iOS app registered in the Firebase project. Go to Firebase Console → Project Settings → Add App → iOS, enter bundle ID `org.nightscout.trio`, and the generated App ID will be in the format `1:123456:ios:abc123`. The `CLIENT_ID` is not required (only needed for Google Sign-In, not email/password auth).
 
 **If secrets are not configured:** `GarminFirebaseConstants.isConfigured` returns `false`, `GarminFirebaseManager.configureAndSignIn()` is a no-op, all Firestore queries return `nil`, and the sensitivity model defaults to factor 1.0 (no adjustment). Zero impact on normal Trio operation.
+
+**Setup Guide (Step-by-Step)**
+
+1. **Register an iOS app in your Firebase project:**
+   - Firebase Console → Project Settings → Add App → iOS
+   - Bundle ID: `org.nightscout.trio`
+   - Download the generated config (you only need the `GOOGLE_APP_ID` from it)
+
+2. **Add GitHub secrets to your Trio repository:**
+   - Go to your GitHub repo → Settings → Secrets and variables → Actions
+   - Add all 8 `GARMIN_FIREBASE_*` secrets from the table above
+   - Values come from your Firebase Console project settings and the iOS app you just registered
+
+3. **Build and install via GitHub Actions:**
+   - The `build_trio.yml` workflow automatically detects and injects the secrets
+   - If `GARMIN_FIREBASE_API_KEY` is empty/missing, the injection step is skipped entirely
+
+4. **Verify in the app:**
+   - Open Trio → Settings → Services → **Garmin Health Data**
+   - Tap **"Test Connection"** to run a 3-step verification:
+     1. Configuration check (are secrets injected?)
+     2. Firebase Auth sign-in test
+     3. Firestore data fetch test
+   - Green checks = working. Red X = see error message for what to fix.
+   - On success, the view displays your latest Garmin data (sleep score, HR, HRV, Body Battery, etc.)
+
+**Connection Status Indicators (Settings → Services)**
+
+The Garmin Health Data row in the Services list shows an inline status icon:
+- Network icon + green check = configured and signed in
+- Network icon + orange question mark = configured but sign-in pending
+- Slashed network icon = secrets not configured (build without secrets)
 
 **Firestore security rules (user's Firebase project):**
 ```
@@ -2245,6 +2279,7 @@ The email/password account must have a UID matching the Firestore path user ID. 
 | `Trio/Sources/Modules/Treatments/View/MealDetectedBannerView.swift` | E | In-app recommendation banner with split dosing display |
 | `Trio/Sources/Modules/Treatments/View/BolusAdjustSliderView.swift` | E | Upfront % slider and meal SMB multiplier slider |
 | `Trio/Sources/Services/AI/SensitivityRecalibrationService.swift` | G | Claude weekly recalibration |
+| `Trio/Sources/Modules/Settings/View/Subviews/GarminFirestoreStatusView.swift` | C | Connection status test UI (config / auth / data checks) |
 
 ### Modified Files (V2)
 
@@ -2253,7 +2288,9 @@ The email/password account must have a UID matching the Firestore path user ID. 
 | `Trio/Sources/APS/Storage/CarbsStorage.swift` | A, B | `processFPU()` calls `MacroAbsorptionEngine`; method to update future entries by mealID |
 | `Trio/Sources/APS/OpenAPS/OpenAPS.swift` | B | Hook adaptive service BEFORE oref in loop cycle; pass effectiveMaxSMB |
 | `Trio/Sources/Application/AppDelegate.swift` | C | Call `GarminFirebaseManager.configureAndSignIn()` after default Firebase init |
-| `.github/workflows/build_trio.yml` | C | "Inject Garmin Firebase Config" step: `sed` replaces placeholders from 9 GitHub secrets |
+| `.github/workflows/build_trio.yml` | C | "Inject Garmin Firebase Config" step: `sed` replaces placeholders from 8 GitHub secrets |
+| `Trio/Sources/Router/Screen.swift` | C | Added `.garminFirestoreStatus` route |
+| `Trio/Sources/Modules/Settings/View/Subviews/ServicesView.swift` | C | Added Garmin Health Data row with connection status indicator |
 | `Trio/Sources/Models/TrioSettings.swift` | All | V2 settings: `useV2MacroAbsorption`, `insulinType`, `garminEnabled`, etc. |
 | `Trio/Sources/Modules/Treatments/TreatmentsStateModel.swift` | D, E | Query Garmin, wire MOB tracker, display sensitivity info |
 | `Trio/Sources/Services/HealthKit/NutritionHealthService.swift` | E | Trigger MOB on observer fire |
