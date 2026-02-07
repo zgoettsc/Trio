@@ -765,6 +765,16 @@
 		M3ALP3D1CT000002 /* MealOutcomePrediction.swift in Sources */ = {isa = PBXBuildFile; fileRef = M3ALP3D1CT000001 /* MealOutcomePrediction.swift */; };
 		NAS7C8D9E0F1A2B3C4D5E6F7 /* NutritionAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NAS8D9E0F1A2B3C4D5E6F7A8 /* NutritionAnalysisService.swift */; };
 		NAV9E0F1A2B3C4D5E6F7A8B9 /* NutritionAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NAV0F1A2B3C4D5E6F7A8B9C0 /* NutritionAnalysisView.swift */; };
+		V2B00100000000000000001 /* MacroAbsorptionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00100000000000000001 /* MacroAbsorptionEngine.swift */; };
+		V2B00200000000000000002 /* GarminContextSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00200000000000000002 /* GarminContextSnapshot.swift */; };
+		V2B00300000000000000003 /* GarminSensitivityModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00300000000000000003 /* GarminSensitivityModel.swift */; };
+		V2B00400000000000000004 /* MacrosOnBoardTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00400000000000000004 /* MacrosOnBoardTracker.swift */; };
+		V2B00500000000000000005 /* MacroAdaptiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00500000000000000005 /* MacroAdaptiveService.swift */; };
+		V2B00600000000000000006 /* GarminFirestoreService.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00600000000000000006 /* GarminFirestoreService.swift */; };
+		V2B00700000000000000007 /* V2CurveOutcomeLearning.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00700000000000000007 /* V2CurveOutcomeLearning.swift */; };
+		V2B00800000000000000008 /* SensitivityRecalibrationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00800000000000000008 /* SensitivityRecalibrationService.swift */; };
+		V2B00900000000000000009 /* MealDetectedBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00900000000000000009 /* MealDetectedBannerView.swift */; };
+		V2B00A0000000000000000A /* BolusAdjustSliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00A0000000000000000A /* BolusAdjustSliderView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1630,6 +1640,16 @@
 		M3ALP3D1CT000001 /* MealOutcomePrediction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealOutcomePrediction.swift; sourceTree = "<group>"; };
 		NAS8D9E0F1A2B3C4D5E6F7A8 /* NutritionAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAnalysisService.swift; sourceTree = "<group>"; };
 		NAV0F1A2B3C4D5E6F7A8B9C0 /* NutritionAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAnalysisView.swift; sourceTree = "<group>"; };
+		V2F00100000000000000001 /* MacroAbsorptionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroAbsorptionEngine.swift; sourceTree = "<group>"; };
+		V2F00200000000000000002 /* GarminContextSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminContextSnapshot.swift; sourceTree = "<group>"; };
+		V2F00300000000000000003 /* GarminSensitivityModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSensitivityModel.swift; sourceTree = "<group>"; };
+		V2F00400000000000000004 /* MacrosOnBoardTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacrosOnBoardTracker.swift; sourceTree = "<group>"; };
+		V2F00500000000000000005 /* MacroAdaptiveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroAdaptiveService.swift; sourceTree = "<group>"; };
+		V2F00600000000000000006 /* GarminFirestoreService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminFirestoreService.swift; sourceTree = "<group>"; };
+		V2F00700000000000000007 /* V2CurveOutcomeLearning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2CurveOutcomeLearning.swift; sourceTree = "<group>"; };
+		V2F00800000000000000008 /* SensitivityRecalibrationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitivityRecalibrationService.swift; sourceTree = "<group>"; };
+		V2F00900000000000000009 /* MealDetectedBannerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MealDetectedBannerView.swift; path = MealDetectedBannerView.swift; sourceTree = "<group>"; };
+		V2F00A0000000000000000A /* BolusAdjustSliderView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BolusAdjustSliderView.swift; path = BolusAdjustSliderView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -2159,8 +2179,20 @@
 				3811DEA525C9D88300A708ED /* UnlockManager */,
 				38E87406274F9AA500975559 /* UserNotifications */,
 				38E8754D275556E100975559 /* WatchManager */,
+				V2G00100000000000000001 /* Garmin */,
+				V2F00500000000000000005 /* MacroAdaptiveService.swift */,
+				V2F00700000000000000007 /* V2CurveOutcomeLearning.swift */,
+				V2F00800000000000000008 /* SensitivityRecalibrationService.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		V2G00100000000000000001 /* Garmin */ = {
+			isa = PBXGroup;
+			children = (
+				V2F00600000000000000006 /* GarminFirestoreService.swift */,
+			);
+			path = Garmin;
 			sourceTree = "<group>";
 		};
 		3811DE9225C9D88200A708ED /* Appearance */ = {
@@ -2528,6 +2560,10 @@
 				DD6B7CB32C7B71F700B75029 /* ForecastDisplayType.swift */,
 				DD9ECB692CA99F6C00AA7C45 /* CommandPayload.swift */,
 				DDD6D4D22CDE90720029439A /* EstimatedA1cDisplayUnit.swift */,
+				V2F00100000000000000001 /* MacroAbsorptionEngine.swift */,
+				V2F00200000000000000002 /* GarminContextSnapshot.swift */,
+				V2F00300000000000000003 /* GarminSensitivityModel.swift */,
+				V2F00400000000000000004 /* MacrosOnBoardTracker.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -3004,6 +3040,8 @@
 			children = (
 				E41F65D7FA7986001C975515 /* WeekdayPickerView.swift */,
 				E26FF508B6A5D8FB0D60275A /* ProfileSwitchBannerView.swift */,
+				V2F00900000000000000009 /* MealDetectedBannerView.swift */,
+				V2F00A0000000000000000A /* BolusAdjustSliderView.swift */,
 			);
 			path = Trio/Sources/Views;
 			sourceTree = SOURCE_ROOT;
@@ -4951,6 +4989,16 @@
 				B127455A880F4A29CE57DC8A /* TherapyProfileEditorProvider.swift in Sources */,
 				599C7B08152DD755FEAFE2CD /* TherapyProfileEditorStateModel.swift in Sources */,
 				8765F676F6F301C841FECF52 /* TherapyProfileEditorRootView.swift in Sources */,
+				V2B00100000000000000001 /* MacroAbsorptionEngine.swift in Sources */,
+				V2B00200000000000000002 /* GarminContextSnapshot.swift in Sources */,
+				V2B00300000000000000003 /* GarminSensitivityModel.swift in Sources */,
+				V2B00400000000000000004 /* MacrosOnBoardTracker.swift in Sources */,
+				V2B00500000000000000005 /* MacroAdaptiveService.swift in Sources */,
+				V2B00600000000000000006 /* GarminFirestoreService.swift in Sources */,
+				V2B00700000000000000007 /* V2CurveOutcomeLearning.swift in Sources */,
+				V2B00800000000000000008 /* SensitivityRecalibrationService.swift in Sources */,
+				V2B00900000000000000009 /* MealDetectedBannerView.swift in Sources */,
+				V2B00A0000000000000000A /* BolusAdjustSliderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

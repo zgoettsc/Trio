@@ -1,8 +1,8 @@
 # V2: Macro Absorption Engine & Garmin Sensitivity Model
 
-**Version:** 2.1
+**Version:** 2.2
 **Date:** February 7, 2026
-**Status:** Design complete, implementation not started
+**Status:** Implementation in progress (Phases A-G coded, wiring complete)
 **Prerequisite:** V1 Cronometer Integration (Phases 1-5b, implemented)
 
 ---
@@ -1310,147 +1310,230 @@ struct MealModeState {
 
 ### 7.1 Firestore Database Structure
 
-The user has an existing Firebase Firestore database that receives all Garmin Health API data whenever the watch syncs to Garmin Connect. The last 30 days of data are available.
+Data flows from the Garmin watch via **Garmin Health API v1.2.3** (server-to-server push) through a Cloud Function into Firestore. The Cloud Function receives webhook POST notifications containing summary data and stores each summary as a document keyed by `calendarDate`.
 
-**Expected Firestore collections:**
+**Firestore path:**
 
 ```
-firestore/
-|-- dailySummaries/
-|   +-- {date}/
+/users/{uid}/garminData/
+```
+
+Where `uid` is the Firebase user ID (e.g., `0Zp7LAT9bLMIEFWNyy694Gylf0n1`).
+
+**Collection structure (matching Garmin Health API summary types):**
+
+```
+/users/{uid}/garminData/
+|-- dailies/                          # §7.1 Daily Summaries
+|   +-- {yyyy-MM-dd}/                 # Document ID = calendarDate
+|       |-- summaryId: String
+|       |-- calendarDate: String      # "2026-02-07"
 |       |-- steps: Int
-|       |-- activeCalories: Int
-|       |-- intensityMinutes: Int
-|       |-- restingHeartRate: Int
-|       |-- maxHeartRate: Int
-|       |-- averageStress: Int
-|       |-- maxStress: Int
-|       |-- bodyBatteryHigh: Int
-|       |-- bodyBatteryLow: Int
-|       |-- bodyBatteryAtWake: Int
-|       +-- ...
-|-- sleepData/
-|   +-- {date}/
-|       |-- sleepScore: Int (0-100)
-|       |-- totalSleepMinutes: Int
-|       |-- deepSleepMinutes: Int
-|       |-- lightSleepMinutes: Int
-|       |-- remSleepMinutes: Int
-|       |-- awakeSleepMinutes: Int
-|       |-- averageSpO2: Double
-|       |-- lowestSpO2: Double
-|       |-- averageRespirationRate: Double
-|       +-- ...
-|-- stressData/
-|   +-- {date}/
-|       |-- samples: [{timestamp, stressLevel}]
-|       |-- averageStress: Int
-|       +-- ...
-|-- heartRateData/
-|   +-- {date}/
-|       |-- restingHR: Int
-|       |-- averageHR: Int
-|       |-- samples: [{timestamp, heartRate}]
-|       +-- ...
-|-- hrvData/
-|   +-- {date}/
-|       |-- weeklyAverage: Double
-|       |-- lastNightAverage: Double
-|       |-- status: String  // "balanced", "low", "unbalanced"
-|       +-- ...
-|-- activities/
-|   +-- {activityId}/
-|       |-- startTime: Timestamp
-|       |-- duration: Int (seconds)
-|       |-- activityType: String
-|       |-- activeCalories: Int
-|       |-- averageHR: Int
-|       |-- maxHR: Int
-|       |-- trainingEffect: Double
-|       +-- ...
-|-- bodyBattery/
-|   +-- {date}/
-|       |-- samples: [{timestamp, level}]  // continuous throughout day
-|       |-- highestLevel: Int
-|       |-- lowestLevel: Int
-|       +-- ...
-+-- trainingStatus/
-    +-- latest/
-        |-- trainingLoad: String  // "low"/"optimal"/"high"/"very high"
-        |-- trainingStatus: String  // "productive"/"recovery"/"overreaching"/"detraining"
-        |-- vo2Max: Double
-        |-- recoveryTimeHours: Int
-        +-- ...
+|       |-- activeKilocalories: Int   # Active kcal (excludes BMR)
+|       |-- bmrKilocalories: Int
+|       |-- restingHeartRateInBeatsPerMinute: Int
+|       |-- averageHeartRateInBeatsPerMinute: Int  # 7-day avg HR
+|       |-- minHeartRateInBeatsPerMinute: Int
+|       |-- maxHeartRateInBeatsPerMinute: Int
+|       |-- averageStressLevel: Int   # 1-100 (-1 = insufficient data)
+|       |-- maxStressLevel: Int
+|       |-- stressDurationInSeconds: Int      # Time in stress range (26-100)
+|       |-- restStressDurationInSeconds: Int   # Time in rest range (1-25)
+|       |-- lowStressDurationInSeconds: Int    # Stress 26-50
+|       |-- mediumStressDurationInSeconds: Int # Stress 51-75
+|       |-- highStressDurationInSeconds: Int   # Stress 76-100
+|       |-- stressQualifier: String   # "calm","balanced","stressful","very_stressful"
+|       |-- moderateIntensityDurationInSeconds: Int  # MET 3-6
+|       |-- vigorousIntensityDurationInSeconds: Int   # MET > 6
+|       |-- bodyBatteryChargedValue: Int  # BB charged (moved here in API v1.2.1)
+|       |-- bodyBatteryDrainedValue: Int  # BB drained
+|       |-- distanceInMeters: Double
+|       |-- floorsClimbed: Int
+|       +-- timeOffsetHeartRateSamples: Map  # {offsetSeconds: bpm}
+|
+|-- sleeps/                           # §7.3 Sleep Summaries
+|   +-- {yyyy-MM-dd}/
+|       |-- summaryId: String
+|       |-- calendarDate: String
+|       |-- durationInSeconds: Int    # Total sleep (excludes awake/unmeasurable)
+|       |-- deepSleepDurationInSeconds: Int
+|       |-- lightSleepDurationInSeconds: Int
+|       |-- remSleepInSeconds: Int    # Only on REM-capable devices
+|       |-- awakeDurationInSeconds: Int
+|       |-- unmeasurableSleepInSeconds: Int
+|       |-- validation: String        # AUTO_FINAL, ENHANCED_FINAL, etc.
+|       |-- overallSleepScore: Map    # {value: Int(0-100), qualifierKey: String}
+|       |   |-- value: Int            # 90-100=EXCELLENT, 80-89=GOOD, 60-79=FAIR, <60=POOR
+|       |   +-- qualifierKey: String  # "EXCELLENT"/"GOOD"/"FAIR"/"POOR"
+|       |-- sleepScores: Map          # Per-category: totalDuration, stress, awakeCount, etc.
+|       |-- sleepLevelsMap: Map       # {deep: [{start,end}], light: [...], rem: [...]}
+|       +-- timeOffsetSleepSpo2: Map  # {offsetSeconds: spo2Value}
+|
+|-- stressDetails/                    # §7.5 Stress Details
+|   +-- {yyyy-MM-dd}/
+|       |-- summaryId: String
+|       |-- calendarDate: String
+|       |-- timeOffsetStressLevelValues: Map   # {offsetSeconds: stressLevel}
+|       |   # Values: 1-25=rest, 26-50=low, 51-75=medium, 76-100=high
+|       |   # Special: -1=OFF_WRIST, -2=LARGE_MOTION, -3=NOT_ENOUGH_DATA
+|       |-- timeOffsetBodyBatteryValues: Map   # {offsetSeconds: bodyBatteryLevel}
+|       |   # Values: 0-100, sampled every ~3 minutes
+|       |   # First entry ≈ wake BB, last entry ≈ current BB
+|       |-- bodyBatteryDynamicFeedbackEvent: Map  # {eventStartTimeInSeconds, bodyBatteryLevel}
+|       +-- bodyBatteryActivityEvents: List    # [{eventType, duration, bodyBatteryImpact}]
+|
+|-- hrv/                              # §7.10 HRV Summaries
+|   +-- {yyyy-MM-dd}/
+|       |-- summaryId: String
+|       |-- calendarDate: String
+|       |-- lastNightAvg: Int         # Overnight RMSSD average (ms)
+|       |-- lastNight5MinHigh: Int    # Max 5-min HRV window (ms)
+|       +-- hrvValues: Map            # {offsetSeconds: rmssdValue}
+|
++-- userMetrics/                      # §7.6 User Metrics
+    +-- {yyyy-MM-dd}/
+        |-- summaryId: String
+        |-- calendarDate: String
+        |-- vo2Max: Double            # mL/min/kg
+        |-- fitnessAge: Int
+        +-- enhanced: Bool            # New algorithm for fitnessAge
 ```
 
-**Note:** The exact collection structure needs to be confirmed with the user's actual Firestore schema. The service will be configurable to map to the actual field paths.
+**Key Garmin Health API behaviors:**
+- All timestamps are Unix seconds (UTC). `startTimeOffsetInSeconds` gives local time offset.
+- Daily summaries update throughout the day as the user syncs. **Always replace old with new.**
+- Sleep summaries may arrive as `AUTO_TENTATIVE` and update to `AUTO_FINAL` or `ENHANCED_FINAL`.
+- Stress details contain per-3-minute samples. We extract the most recent valid reading (positive values only).
+- Body Battery is in the stress details `timeOffsetBodyBatteryValues` map. First entry = wake level, last entry = current level.
+- `bodyBatteryChargedValue` and `bodyBatteryDrainedValue` were moved from stressDetails to dailies in API v1.2.1 (Aug 2025).
+
+**Data pipeline:** Garmin Health API webhooks → Cloud Function → Firestore → Trio (via Firebase iOS SDK)
 
 ### 7.2 GarminContextSnapshot
+
+All field names match the Garmin Health API v1.2.3 spec exactly. The snapshot is built from Firestore documents in the collections defined in §7.1.
 
 ```swift
 /// A point-in-time snapshot of Garmin health data relevant to insulin sensitivity.
 /// Queried from Firestore at meal detection time.
-struct GarminContextSnapshot {
+/// All field names and types match the Garmin Health API v1.2.3 spec exactly.
+/// Firestore path: /users/{uid}/garminData/{summaryType}/{documents}
+struct GarminContextSnapshot: Codable {
     let queryTime: Date
 
-    // === Sleep (last night) ===
-    let sleepScore: Int?              // 0-100, Garmin's composite score
-    let totalSleepMinutes: Int?
-    let deepSleepMinutes: Int?
-    let remSleepMinutes: Int?
-    let awakeSleepMinutes: Int?
-    let averageSpO2: Double?
+    // === Daily Summary (from "dailies" collection) ===
+    // Source: Garmin Health API §7.1
+    let restingHeartRateInBeatsPerMinute: Int?
+    let averageHeartRateInBeatsPerMinute: Int?  // 7-day avg HR
+    let averageStressLevel: Int?                // 1-100, or -1 if insufficient data
+    let maxStressLevel: Int?
+    let stressDurationInSeconds: Int?
+    let restStressDurationInSeconds: Int?
+    let lowStressDurationInSeconds: Int?
+    let mediumStressDurationInSeconds: Int?
+    let highStressDurationInSeconds: Int?
+    let stressQualifier: String?                // "calm", "balanced", "stressful", "very_stressful"
+    let steps: Int?
+    let activeKilocalories: Int?
+    let moderateIntensityDurationInSeconds: Int?
+    let vigorousIntensityDurationInSeconds: Int?
+    let bodyBatteryChargedValue: Int?           // BB charged (moved to dailies in API v1.2.1)
+    let bodyBatteryDrainedValue: Int?           // BB drained during monitoring
 
-    // === Stress & Recovery (current) ===
-    let currentBodyBattery: Int?      // 0-100, queried at meal time
-    let bodyBatteryAtWake: Int?       // morning level (recovery quality)
-    let currentStress: Int?           // 0-100, current reading
-    let averageStressToday: Int?
+    // === Yesterday's Daily Summary (for delayed sensitivity effects) ===
+    let yesterdaySteps: Int?
+    let yesterdayActiveKilocalories: Int?
+    let yesterdayModerateIntensityDurationInSeconds: Int?
+    let yesterdayVigorousIntensityDurationInSeconds: Int?
 
-    // === Heart Rate / HRV ===
-    let restingHR: Int?
-    let restingHR7DayAvg: Int?        // for delta computation
-    let hrvLastNight: Double?         // ms
-    let hrvWeeklyAvg: Double?         // for delta computation
-    let hrvStatus: String?            // "balanced" / "low" / "unbalanced"
+    // === Sleep Summary (from "sleeps" collection) ===
+    // Source: Garmin Health API §7.3
+    let sleepDurationInSeconds: Int?
+    let deepSleepDurationInSeconds: Int?
+    let lightSleepDurationInSeconds: Int?
+    let remSleepInSeconds: Int?
+    let awakeDurationInSeconds: Int?
+    let sleepScoreValue: Int?                   // overallSleepScore.value (0-100)
+    let sleepScoreQualifier: String?            // EXCELLENT/GOOD/FAIR/POOR
+    let sleepValidation: String?                // AUTO_FINAL, ENHANCED_FINAL, etc.
 
-    // === Activity (today) ===
-    let stepsToday: Int?
-    let activeCaloriesToday: Int?
-    let intensityMinutesToday: Int?
-    let workoutsToday: [GarminWorkout]?
+    // === Stress Details (from "stressDetails" collection) ===
+    // Source: Garmin Health API §7.5
+    // Body Battery: extracted from timeOffsetBodyBatteryValues map
+    //   First entry (lowest offset) ≈ wake BB, last entry ≈ current BB
+    // Stress: extracted from timeOffsetStressLevelValues map
+    //   Values 1-100 are real stress. Negatives are special codes:
+    //   -1=off_wrist, -2=motion, -3=insufficient, -4=combined, -5=unknown
+    let currentBodyBattery: Int?                // latest BB from timeOffsetBodyBatteryValues
+    let bodyBatteryAtWake: Int?                 // earliest BB of the day (recovery proxy)
+    let currentStressLevel: Int?                // latest positive from timeOffsetStressLevelValues
 
-    // === Activity (yesterday -- for delayed sensitivity effects) ===
-    let stepsYesterday: Int?
-    let activeCaloriesYesterday: Int?
-    let workoutsYesterday: [GarminWorkout]?
+    // === HRV Summary (from "hrv" collection) ===
+    // Source: Garmin Health API §7.10
+    let lastNightAvg: Int?                      // lastNightAvg HRV (RMSSD ms)
+    let lastNight5MinHigh: Int?                 // max 5-min HRV window
 
-    // === Training ===
-    let trainingLoad: String?         // "low"/"optimal"/"high"/"very high"
-    let trainingStatus: String?       // "productive"/"recovery"/"overreaching"
-    let recoveryTimeHours: Int?
+    // === User Metrics (from "userMetrics" collection) ===
+    // Source: Garmin Health API §7.6
+    let vo2Max: Double?
+    let fitnessAge: Int?
+
+    // === 7-Day Averages (computed from historical documents) ===
+    // Calculated by averaging the last 7 dailies/HRV documents
+    let restingHR7DayAvg: Int?
+    let hrvWeeklyAvg: Int?
 
     // === Computed Deltas ===
+
+    /// Resting HR delta from 7-day average (positive = elevated = more resistant)
     var restingHRDelta: Int? {
-        guard let current = restingHR, let avg = restingHR7DayAvg else { return nil }
+        guard let current = restingHeartRateInBeatsPerMinute,
+              let avg = restingHR7DayAvg else { return nil }
         return current - avg
     }
 
+    /// HRV delta as percentage from weekly average (negative = suppressed = more resistant)
     var hrvDeltaPercent: Double? {
-        guard let current = hrvLastNight, let avg = hrvWeeklyAvg, avg > 0 else { return nil }
-        return ((current - avg) / avg) * 100
+        guard let current = lastNightAvg, let avg = hrvWeeklyAvg, avg > 0 else { return nil }
+        return (Double(current - avg) / Double(avg)) * 100
+    }
+
+    /// Total sleep in minutes (derived from sleepDurationInSeconds)
+    var totalSleepMinutes: Int? {
+        guard let seconds = sleepDurationInSeconds else { return nil }
+        return seconds / 60
+    }
+
+    /// Total intensity minutes today (moderate + vigorous)
+    var intensityMinutesToday: Int? {
+        let moderate = (moderateIntensityDurationInSeconds ?? 0) / 60
+        let vigorous = (vigorousIntensityDurationInSeconds ?? 0) / 60
+        let total = moderate + vigorous
+        return total > 0 ? total : nil
     }
 }
-
-struct GarminWorkout {
-    let startTime: Date
-    let durationMinutes: Int
-    let activityType: String      // "running", "cycling", "strength", etc.
-    let activeCalories: Int
-    let averageHR: Int
-    let trainingEffect: Double?   // 0-5 scale
-}
 ```
+
+**Field source mapping (API collection → snapshot field):**
+
+| API Collection | API Field | Snapshot Field |
+|----------------|-----------|----------------|
+| dailies | `restingHeartRateInBeatsPerMinute` | `restingHeartRateInBeatsPerMinute` |
+| dailies | `averageStressLevel` | `averageStressLevel` |
+| dailies | `activeKilocalories` | `activeKilocalories` |
+| dailies | `vigorousIntensityDurationInSeconds` | `vigorousIntensityDurationInSeconds` |
+| dailies | `bodyBatteryChargedValue` | `bodyBatteryChargedValue` |
+| sleeps | `durationInSeconds` | `sleepDurationInSeconds` |
+| sleeps | `overallSleepScore.value` | `sleepScoreValue` |
+| sleeps | `deepSleepDurationInSeconds` | `deepSleepDurationInSeconds` |
+| sleeps | `remSleepInSeconds` | `remSleepInSeconds` |
+| stressDetails | `timeOffsetBodyBatteryValues` (map, last) | `currentBodyBattery` |
+| stressDetails | `timeOffsetBodyBatteryValues` (map, first) | `bodyBatteryAtWake` |
+| stressDetails | `timeOffsetStressLevelValues` (map, last +) | `currentStressLevel` |
+| hrv | `lastNightAvg` | `lastNightAvg` |
+| hrv | `lastNight5MinHigh` | `lastNight5MinHigh` |
+| userMetrics | `vo2Max` | `vo2Max` |
+| userMetrics | `fitnessAge` | `fitnessAge` |
 
 ### 7.3 Sensitivity Factor and Insulin Demand Factor
 
@@ -1482,53 +1565,65 @@ For the upfront bolus recommendation:
 
 Based on research literature:
 
-| Metric | Direction | Magnitude | Evidence |
-|--------|-----------|-----------|----------|
-| **Poor sleep** (score <50) | Decreases Sensitivity | 15-30% | Well-documented; Spiegel 1999, Donga 2010 |
-| **High stress** (>60) / Low Body Battery (<20) | Decreases Sensitivity | 10-20% | Cortisol -> hepatic glucose output + peripheral resistance |
-| **Elevated resting HR** (>8 bpm above baseline) | Decreases Sensitivity | 5-15% | Marker of illness, stress, poor recovery |
-| **Low HRV** (>15% below baseline) | Decreases Sensitivity | 5-10% | Sympathetic dominance -> catecholamines -> resistance |
-| **More activity yesterday** (>500 active cal) | Increases Sensitivity | 10-20% | GLUT4 upregulation; delayed 2-24h; Borghouts 2000 |
-| **Intense workout today** | Increases Sensitivity | 5-15% (after initial rise) | Acute: cortisol spike (resistant), then: GLUT4 (sensitive) |
-| **Training overreaching** | Decreases Sensitivity | 10-15% | Systemic stress response |
-| **Good sleep** (score >85) | Increases Sensitivity | 5-10% | Optimal recovery -> baseline or better |
-| **Low stress** / High Body Battery (>75) | Increases Sensitivity | 5-10% | Low cortisol, parasympathetic dominant |
+| Metric | Garmin API Source | Direction | Magnitude | Evidence |
+|--------|-------------------|-----------|-----------|----------|
+| **Poor sleep** (score <50) | `sleeps → overallSleepScore.value` | Decreases Sensitivity | 15-30% | Well-documented; Spiegel 1999, Donga 2010 |
+| **Short sleep** (<5-6h) | `sleeps → durationInSeconds` | Decreases Sensitivity | 5-10% | Independent of sleep quality score |
+| **High stress** (>60) | `stressDetails → timeOffsetStressLevelValues` | Decreases Sensitivity | 4-8% | Cortisol -> hepatic glucose output + peripheral resistance |
+| **Sustained high stress** (avg >60) | `dailies → averageStressLevel` | Decreases Sensitivity | 3-6% | Chronic stress more impactful than spikes |
+| **Low Body Battery** (<30) | `stressDetails → timeOffsetBodyBatteryValues` | Decreases Sensitivity | 5-18% | Integrates sleep + stress + activity recovery |
+| **Elevated resting HR** (>8 bpm above 7d avg) | `dailies → restingHeartRateInBeatsPerMinute` | Decreases Sensitivity | 7-12% | Marker of illness, stress, poor recovery |
+| **Low HRV** (>10% below 7d avg) | `hrv → lastNightAvg` | Decreases Sensitivity | 4-8% | Sympathetic dominance -> catecholamines -> resistance |
+| **More activity yesterday** (>250-600 active cal) | `dailies → activeKilocalories` (yesterday) | Increases Sensitivity | 5-15% | GLUT4 upregulation; delayed 2-24h; Borghouts 2000 |
+| **Vigorous exercise yesterday** (>20-45 min) | `dailies → vigorousIntensityDurationInSeconds` (yesterday) | Increases Sensitivity | 4-8% | Additional bonus for high-intensity exercise |
+| **Active today** (>200-400 cal) | `dailies → activeKilocalories` (today) | Increases Sensitivity | 4-8% | Smaller effect, still developing |
+| **Good sleep** (score >85) | `sleeps → overallSleepScore.value` | Increases Sensitivity | 5% | Optimal recovery -> baseline or better |
+| **Well recovered** (Body Battery >75) | `stressDetails → timeOffsetBodyBatteryValues` | Increases Sensitivity | 5% | Low cortisol, parasympathetic dominant |
+| **Low resting HR** (>5 bpm below 7d avg) | `dailies → restingHeartRateInBeatsPerMinute` | Increases Sensitivity | 3% | Well-rested marker |
+| **High HRV** (>15% above 7d avg) | `hrv → lastNightAvg` | Increases Sensitivity | 3% | Parasympathetic dominant |
 
 ### 7.5 Rule-Based Model (V1)
 
-The initial model uses research-calibrated rules. This runs immediately — no training data needed.
+The initial model uses research-calibrated rules. This runs immediately — no training data needed. All field references match the Garmin Health API v1.2.3 spec (see §7.1-7.2).
+
+The model outputs a `SensitivityResult` containing:
+- `sensitivityFactor` (0.60-1.40) — internal computation value
+- `insulinDemandFactor` (0.71-1.67) — the value used by the absorption engine
+- `contributions` — breakdown of what affected the result (for UI display)
 
 ```swift
 struct GarminSensitivityModel {
 
-    /// Compute sensitivity factor from Garmin context.
-    /// Returns 0.60 - 1.40 where 1.0 = normal baseline.
-    static func sensitivityFactor(from ctx: GarminContextSnapshot) -> Double {
+    static func computeDemandFactor(from ctx: GarminContextSnapshot?) -> SensitivityResult {
+        guard let ctx = ctx else {
+            return SensitivityResult(sensitivityFactor: 1.0, insulinDemandFactor: 1.0, ...)
+        }
+
         var factor = 1.0
 
-        // --- Sleep ---
+        // --- Sleep Score (overallSleepScore.value from sleeps collection) ---
         // Poor sleep is the strongest single predictor of next-day resistance.
         // Spiegel (1999): 4h sleep x 6 nights -> 40% reduced glucose clearance.
-        // We model a graded response.
-        if let sleep = ctx.sleepScore {
+        // Garmin: EXCELLENT 90-100, GOOD 80-89, FAIR 60-79, POOR <60
+        if let sleep = ctx.sleepScoreValue {
             switch sleep {
             case ..<40:  factor -= 0.22  // terrible sleep: 22% more resistant
             case ..<55:  factor -= 0.15  // poor sleep
             case ..<70:  factor -= 0.08  // fair sleep
             case 85...:  factor += 0.05  // great sleep: 5% more sensitive
-            default:     break           // 70-84: normal range, no adjustment
+            default:     break           // 70-84: normal range
             }
         }
 
-        // Duration matters independently of score
-        if let duration = ctx.totalSleepMinutes {
-            if duration < 300 { factor -= 0.10 }       // <5h: significant
-            else if duration < 360 { factor -= 0.05 }  // <6h: mild
+        // Sleep duration (sleepDurationInSeconds from sleeps collection)
+        if let totalSleep = ctx.totalSleepMinutes {
+            if totalSleep < 300 { factor -= 0.10 }       // <5h: significant
+            else if totalSleep < 360 { factor -= 0.05 }  // <6h: mild
         }
 
         // --- Stress & Recovery ---
-        // Body Battery integrates sleep quality, stress, and activity.
-        // Low BB at meal time = depleted recovery capacity = resistance.
+
+        // Body Battery (from stressDetails timeOffsetBodyBatteryValues, current reading)
         if let bb = ctx.currentBodyBattery {
             switch bb {
             case ..<15:  factor -= 0.18  // critically depleted
@@ -1539,21 +1634,30 @@ struct GarminSensitivityModel {
             }
         }
 
-        // Acute stress at meal time
-        if let stress = ctx.currentStress {
+        // Current stress level (from stressDetails timeOffsetStressLevelValues)
+        // Garmin: 1-25 rest, 26-50 low, 51-75 medium, 76-100 high
+        if let stress = ctx.currentStressLevel {
             if stress > 75 { factor -= 0.08 }       // high acute stress
             else if stress > 60 { factor -= 0.04 }  // moderate
         }
 
+        // Average stress today (from dailies averageStressLevel)
+        // Supplements the current reading — sustained stress matters more than a spike
+        if let avgStress = ctx.averageStressLevel, avgStress > 0 {  // -1 = insufficient data
+            if avgStress > 60 { factor -= 0.06 }       // sustained high stress
+            else if avgStress > 45 { factor -= 0.03 }  // elevated stress
+        }
+
         // --- Heart Rate / HRV ---
-        // Elevated resting HR signals illness, stress, or poor recovery.
+
+        // Resting HR delta (restingHeartRateInBeatsPerMinute from dailies vs 7-day avg)
         if let hrDelta = ctx.restingHRDelta {
             if hrDelta > 12 { factor -= 0.12 }      // significantly elevated
             else if hrDelta > 8 { factor -= 0.07 }   // mildly elevated
-            else if hrDelta < -5 { factor += 0.03 }  // unusually low (well-rested)
+            else if hrDelta < -5 { factor += 0.03 }  // well-rested
         }
 
-        // Low HRV = sympathetic dominance = cortisol/catecholamines
+        // HRV delta (lastNightAvg from hrv collection vs weekly average)
         if let hrvDelta = ctx.hrvDeltaPercent {
             if hrvDelta < -20 { factor -= 0.08 }     // HRV >20% below baseline
             else if hrvDelta < -10 { factor -= 0.04 } // >10% below
@@ -1561,49 +1665,71 @@ struct GarminSensitivityModel {
         }
 
         // --- Activity ---
-        // Yesterday's activity has the strongest delayed sensitivity effect.
-        // Exercise-induced GLUT4 upregulation lasts 24-48h.
-        if let yesterdayCal = ctx.activeCaloriesYesterday {
+
+        // Yesterday's activity (delayed sensitivity effect — most impactful)
+        // Uses activeKilocalories from yesterday's daily summary
+        if let yesterdayCal = ctx.yesterdayActiveKilocalories {
             if yesterdayCal > 600 { factor += 0.15 }      // very active day
             else if yesterdayCal > 400 { factor += 0.10 }  // active
             else if yesterdayCal > 250 { factor += 0.05 }  // moderately active
         }
 
         // Today's activity (smaller effect, still developing)
-        if let todayCal = ctx.activeCaloriesToday {
+        // Uses activeKilocalories from today's daily summary
+        if let todayCal = ctx.activeKilocalories {
             if todayCal > 400 { factor += 0.08 }
             else if todayCal > 200 { factor += 0.04 }
         }
 
-        // --- Training Status ---
-        // Overreaching = systemic stress = resistance
-        if let status = ctx.trainingStatus {
-            switch status {
-            case "overreaching": factor -= 0.10
-            case "detraining":   factor -= 0.05  // deconditioning
-            case "productive":   factor += 0.03  // optimal training
-            default: break
-            }
+        // Vigorous intensity yesterday (additional bonus for hard exercise)
+        // Uses yesterdayVigorousIntensityDurationInSeconds
+        if let vigorousYest = ctx.yesterdayVigorousIntensityDurationInSeconds, vigorousYest > 0 {
+            let vigorousMinutes = vigorousYest / 60
+            if vigorousMinutes > 45 { factor += 0.08 }      // heavy exercise
+            else if vigorousMinutes > 20 { factor += 0.04 }  // vigorous exercise
         }
 
-        // --- Clamp ---
-        return max(0.60, min(1.40, factor))
+        // --- Clamp & Convert ---
+        let clampedFactor = max(0.60, min(1.40, factor))
+        let demandFactor = 1.0 / clampedFactor
+
+        return SensitivityResult(
+            sensitivityFactor: clampedFactor,
+            insulinDemandFactor: demandFactor,
+            contributions: contributions
+        )
     }
 }
 ```
+
+**Sensitivity rules summary (10 metrics, max theoretical range ±0.71):**
+
+| Metric | API Source | Threshold | Impact | Direction |
+|--------|-----------|-----------|--------|-----------|
+| Sleep Score | `sleeps.overallSleepScore.value` | <40 / <55 / <70 / >85 | -0.22 / -0.15 / -0.08 / +0.05 | Sleep quality |
+| Sleep Duration | `sleeps.durationInSeconds` (computed) | <5h / <6h | -0.10 / -0.05 | Sleep quantity |
+| Body Battery | `stressDetails.timeOffsetBodyBatteryValues` | <15 / <30 / <50 / >75 | -0.18 / -0.12 / -0.05 / +0.05 | Recovery |
+| Current Stress | `stressDetails.timeOffsetStressLevelValues` | >75 / >60 | -0.08 / -0.04 | Acute stress |
+| Avg Stress Today | `dailies.averageStressLevel` | >60 / >45 | -0.06 / -0.03 | Sustained stress |
+| Resting HR Delta | `dailies.restingHeartRateInBeatsPerMinute` vs 7d avg | >12 / >8 / <-5 | -0.12 / -0.07 / +0.03 | HR recovery |
+| HRV Delta | `hrv.lastNightAvg` vs 7d avg | <-20% / <-10% / >+15% | -0.08 / -0.04 / +0.03 | ANS balance |
+| Yesterday Activity | `dailies.activeKilocalories` (yesterday) | >600 / >400 / >250 | +0.15 / +0.10 / +0.05 | GLUT4 effect |
+| Today Activity | `dailies.activeKilocalories` (today) | >400 / >200 | +0.08 / +0.04 | Current activity |
+| Vigorous Exercise | `dailies.vigorousIntensityDurationInSeconds` (yesterday) | >45min / >20min | +0.08 / +0.04 | Exercise intensity |
 
 ### 7.6 ML Model (V2, Future)
 
 Once we have 50-100 meals with both Garmin context and BG outcomes, we can train a personalized model:
 
-**Features (~20 inputs):**
+**Features (~20 inputs, all from Garmin Health API v1.2.3):**
 ```
-Sleep: sleepScore, deepSleepPct, duration, SpO2
-Stress: bodyBattery, currentStress, avgStress, restingHRDelta, hrvDelta
-Activity: todayActiveCal, yesterdayActiveCal, intensityMin, yesterdayWorkoutDuration
+Sleep:    sleepScoreValue, deepSleepDurationInSeconds, sleepDurationInSeconds, remSleepInSeconds
+Stress:   currentBodyBattery, currentStressLevel, averageStressLevel, restingHRDelta, hrvDeltaPercent
+Activity: activeKilocalories (today), yesterdayActiveKilocalories, intensityMinutesToday,
+          yesterdayVigorousIntensityDurationInSeconds
 Temporal: hourOfDay (encoded), dayOfWeek (encoded)
-Meal: totalCarbs, totalFat, totalProtein, mealSimilarityScore
-State: currentBG, currentIOB, currentCOB
+Meal:     totalCarbs, totalFat, totalProtein, mealSimilarityScore
+State:    currentBG, currentIOB, currentCOB
 ```
 
 **Target:** Effective ICR for this meal (derived from BG outcome)
@@ -1616,10 +1742,11 @@ State: currentBG, currentIOB, currentCOB
 **How it replaces the rule-based model:**
 ```swift
 // V1 (rule-based):
-let factor = GarminSensitivityModel.sensitivityFactor(from: garminContext)
+let result = GarminSensitivityModel.computeDemandFactor(from: garminContext)
+let demandFactor = result.insulinDemandFactor
 
 // V2 (ML, when ready):
-let factor = try coreMLModel.prediction(from: featureVector).sensitivityFactor
+let demandFactor = try coreMLModel.prediction(from: featureVector).insulinDemandFactor
 ```
 
 ### 7.7 Claude Periodic Recalibration

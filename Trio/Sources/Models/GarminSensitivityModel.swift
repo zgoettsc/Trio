@@ -3,6 +3,8 @@ import Foundation
 // MARK: - Phase D: Garmin Sensitivity Model
 //
 // Rule-based model that computes insulin sensitivity from Garmin health data.
+// All field references match the Garmin Health API v1.2.3 spec.
+//
 // Outputs an insulinDemandFactor: multiply entries by this value.
 //   1.0  = normal day
 //   1.25 = 25% more insulin needed (bad sleep, high stress)
@@ -45,10 +47,11 @@ struct GarminSensitivityModel {
         var factor = 1.0
         var contributions: [SensitivityResult.Contribution] = []
 
-        // --- Sleep ---
+        // --- Sleep Score (overallSleepScore.value from sleeps collection) ---
         // Poor sleep is the strongest single predictor of next-day resistance.
         // Spiegel (1999): 4h sleep x 6 nights -> 40% reduced glucose clearance.
-        if let sleep = ctx.sleepScore {
+        // Garmin: EXCELLENT 90-100, GOOD 80-89, FAIR 60-79, POOR <60
+        if let sleep = ctx.sleepScoreValue {
             let impact: Double
             let desc: String
             switch sleep {
@@ -72,14 +75,14 @@ struct GarminSensitivityModel {
             contributions.append(.init(metric: "Sleep Score", value: "\(sleep)/100", impact: impact, description: desc))
         }
 
-        // Duration matters independently of score
-        if let duration = ctx.totalSleepMinutes {
+        // Sleep duration (sleepDurationInSeconds from sleeps collection)
+        if let totalSleep = ctx.totalSleepMinutes {
             let impact: Double
             let desc: String
-            if duration < 300 {
+            if totalSleep < 300 {
                 impact = -0.10
                 desc = "Less than 5h sleep: 10% more resistant"
-            } else if duration < 360 {
+            } else if totalSleep < 360 {
                 impact = -0.05
                 desc = "Less than 6h sleep: 5% more resistant"
             } else {
@@ -88,8 +91,8 @@ struct GarminSensitivityModel {
             }
             if impact != 0 {
                 factor += impact
-                let hours = duration / 60
-                let mins = duration % 60
+                let hours = totalSleep / 60
+                let mins = totalSleep % 60
                 contributions.append(.init(
                     metric: "Sleep Duration",
                     value: "\(hours)h \(mins)m",
@@ -100,6 +103,8 @@ struct GarminSensitivityModel {
         }
 
         // --- Stress & Recovery ---
+
+        // Body Battery (from stressDetails timeOffsetBodyBatteryValues, current reading)
         if let bb = ctx.currentBodyBattery {
             let impact: Double
             let desc: String
@@ -126,8 +131,9 @@ struct GarminSensitivityModel {
             }
         }
 
-        // Acute stress at meal time
-        if let stress = ctx.currentStress {
+        // Current stress level (from stressDetails timeOffsetStressLevelValues, most recent positive reading)
+        // Garmin: 1-25 rest, 26-50 low, 51-75 medium, 76-100 high
+        if let stress = ctx.currentStressLevel {
             let impact: Double
             let desc: String
             if stress > 75 {
@@ -146,7 +152,35 @@ struct GarminSensitivityModel {
             }
         }
 
+        // Average stress today (from dailies averageStressLevel)
+        // Supplements the current reading — sustained stress matters more than a spike
+        if let avgStress = ctx.averageStressLevel, avgStress > 0 { // -1 means insufficient data
+            let impact: Double
+            let desc: String
+            if avgStress > 60 {
+                impact = -0.06
+                desc = "Sustained high stress today: 6% more resistant"
+            } else if avgStress > 45 {
+                impact = -0.03
+                desc = "Elevated stress today: 3% more resistant"
+            } else {
+                impact = 0
+                desc = "Normal average stress"
+            }
+            if impact != 0 {
+                factor += impact
+                contributions.append(.init(
+                    metric: "Avg Stress Today",
+                    value: "\(avgStress)/100",
+                    impact: impact,
+                    description: desc
+                ))
+            }
+        }
+
         // --- Heart Rate / HRV ---
+
+        // Resting HR delta (restingHeartRateInBeatsPerMinute from dailies vs 7-day avg)
         if let hrDelta = ctx.restingHRDelta {
             let impact: Double
             let desc: String
@@ -174,6 +208,7 @@ struct GarminSensitivityModel {
             }
         }
 
+        // HRV delta (lastNightAvg from hrv collection vs weekly average)
         if let hrvDelta = ctx.hrvDeltaPercent {
             let impact: Double
             let desc: String
@@ -202,8 +237,10 @@ struct GarminSensitivityModel {
         }
 
         // --- Activity ---
-        // Yesterday's activity has the strongest delayed sensitivity effect.
-        if let yesterdayCal = ctx.activeCaloriesYesterday {
+
+        // Yesterday's activity (delayed sensitivity effect — most impactful)
+        // Uses activeKilocalories from yesterday's daily summary
+        if let yesterdayCal = ctx.yesterdayActiveKilocalories {
             let impact: Double
             let desc: String
             if yesterdayCal > 600 {
@@ -231,7 +268,8 @@ struct GarminSensitivityModel {
         }
 
         // Today's activity (smaller effect, still developing)
-        if let todayCal = ctx.activeCaloriesToday {
+        // Uses activeKilocalories from today's daily summary
+        if let todayCal = ctx.activeKilocalories {
             let impact: Double
             let desc: String
             if todayCal > 400 {
@@ -255,27 +293,29 @@ struct GarminSensitivityModel {
             }
         }
 
-        // --- Training Status ---
-        if let status = ctx.trainingStatus {
+        // Vigorous intensity yesterday (additional bonus for hard exercise)
+        if let vigorousYest = ctx.yesterdayVigorousIntensityDurationInSeconds, vigorousYest > 0 {
+            let vigorousMinutes = vigorousYest / 60
             let impact: Double
             let desc: String
-            switch status {
-            case "overreaching":
-                impact = -0.10
-                desc = "Overreaching: 10% more resistant"
-            case "detraining":
-                impact = -0.05
-                desc = "Detraining: 5% more resistant"
-            case "productive":
-                impact = 0.03
-                desc = "Productive training: 3% more sensitive"
-            default:
+            if vigorousMinutes > 45 {
+                impact = 0.08
+                desc = "Heavy exercise yesterday: 8% more sensitive"
+            } else if vigorousMinutes > 20 {
+                impact = 0.04
+                desc = "Vigorous exercise yesterday: 4% more sensitive"
+            } else {
                 impact = 0
-                desc = "Normal training status"
+                desc = "Light exercise yesterday"
             }
             if impact != 0 {
                 factor += impact
-                contributions.append(.init(metric: "Training Status", value: status, impact: impact, description: desc))
+                contributions.append(.init(
+                    metric: "Vigorous Exercise",
+                    value: "\(vigorousMinutes) min yesterday",
+                    impact: impact,
+                    description: desc
+                ))
             }
         }
 
