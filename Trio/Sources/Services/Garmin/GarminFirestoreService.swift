@@ -8,8 +8,16 @@ import Foundation
 // Queries Garmin health data from the user's Firestore database.
 // Garmin Health API webhooks → Cloud Function → Firestore.
 //
-// Firestore path: /users/{uid}/garminData/{summaryType}/{documents}
-// Summary types: dailies, sleeps, stressDetails, hrv, userMetrics
+// Firestore tree (all date-keyed documents under /dates/ subcollection):
+//   users/{uid}/garminData/
+//     dailySummaries/dates/{YYYY-MM-DD}
+//     sleep/dates/{YYYY-MM-DD}
+//     stressDetails/dates/{YYYY-MM-DD}
+//     hrv/dates/{YYYY-MM-DD}
+//     userMetrics/dates/{YYYY-MM-DD}
+//
+// The Cloud Function transforms raw Garmin field names to shorter Firestore field names
+// (e.g. "restingHeartRateInBeatsPerMinute" → "restingHeartRate", durations in minutes not seconds).
 //
 // Firebase project configuration is injected at build time from GitHub secrets
 // via GarminFirebaseConfig.swift. If secrets are not configured, the service
@@ -31,13 +39,17 @@ struct GarminFirestoreConfig: Codable {
     /// Base path: /users/{userID}/garminData
     var basePath: String { "users/\(userID)/garminData" }
 
-    /// Collection names under garminData/ — these match the Garmin Health API push summary types.
-    /// The cloud function stores each push notification's payload as a document keyed by calendarDate.
-    var dailiesCollection: String = "dailies"
-    var sleepsCollection: String = "sleeps"
-    var stressDetailsCollection: String = "stressDetails"
-    var hrvCollection: String = "hrv"
-    var userMetricsCollection: String = "userMetrics"
+    /// Data type document names under garminData/.
+    /// These match the Cloud Function's Firestore storage structure.
+    var dailySummariesType: String = "dailySummaries"
+    var sleepType: String = "sleep"
+    var stressDetailsType: String = "stressDetails"
+    var hrvType: String = "hrv"
+    var userMetricsType: String = "userMetrics"
+
+    /// Subcollection name under each data type document.
+    /// Documents within are keyed by calendarDate (YYYY-MM-DD).
+    var dateSubcollection: String = "dates"
 
     /// Cache duration — don't re-query within this interval (seconds)
     var cacheDurationSeconds: TimeInterval = 5 * 60 // 5 minutes
@@ -156,21 +168,22 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
     // MARK: - Build Snapshot
 
     /// Queries all relevant Firestore collections and builds a GarminContextSnapshot.
+    /// Field names are mapped from the Cloud Function's Firestore schema to our internal model.
     private func buildSnapshot() async -> GarminContextSnapshot? {
         let today = calendarDateString(for: Date())
         let yesterday = calendarDateString(for: Date().addingTimeInterval(-86400))
 
         // Fetch documents in parallel
-        async let dailyToday = fetchDocument(collection: config.dailiesCollection, documentID: today)
-        async let dailyYesterday = fetchDocument(collection: config.dailiesCollection, documentID: yesterday)
-        async let sleepToday = fetchMostRecentDocument(collection: config.sleepsCollection, onOrBefore: today)
-        async let stressToday = fetchDocument(collection: config.stressDetailsCollection, documentID: today)
-        async let hrvToday = fetchMostRecentDocument(collection: config.hrvCollection, onOrBefore: today)
-        async let userMetrics = fetchMostRecentDocument(collection: config.userMetricsCollection, onOrBefore: today)
+        async let dailyToday = fetchDocument(dataType: config.dailySummariesType, documentID: today)
+        async let dailyYesterday = fetchDocument(dataType: config.dailySummariesType, documentID: yesterday)
+        async let sleepToday = fetchMostRecentDocument(dataType: config.sleepType, onOrBefore: today)
+        async let stressToday = fetchDocument(dataType: config.stressDetailsType, documentID: today)
+        async let hrvToday = fetchMostRecentDocument(dataType: config.hrvType, onOrBefore: today)
+        async let userMetrics = fetchMostRecentDocument(dataType: config.userMetricsType, onOrBefore: today)
 
         // Also fetch last 7 days of dailies and HRV for computing averages
-        async let dailies7Day = fetchDocuments(collection: config.dailiesCollection, lastDays: 7)
-        async let hrv7Day = fetchDocuments(collection: config.hrvCollection, lastDays: 7)
+        async let dailies7Day = fetchDocuments(dataType: config.dailySummariesType, lastDays: 7)
+        async let hrv7Day = fetchDocuments(dataType: config.hrvType, lastDays: 7)
 
         let (daily, yDaily, sleep, stress, hrv, metrics, recentDailies, recentHRV) = await (
             dailyToday, dailyYesterday, sleepToday, stressToday, hrvToday, userMetrics, dailies7Day, hrv7Day
@@ -179,7 +192,7 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
         // If we got no data at all, return nil
         guard daily != nil || sleep != nil || stress != nil || hrv != nil else { return nil }
 
-        // Extract body battery from stress details (timeOffsetBodyBatteryValues map)
+        // Extract body battery and stress from stressDetails timelines
         let (currentBB, wakeBB) = extractBodyBattery(from: stress)
         let currentStress = extractCurrentStress(from: stress)
 
@@ -189,38 +202,38 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
 
         return GarminContextSnapshot(
             queryTime: Date(),
-            // Daily
-            restingHeartRateInBeatsPerMinute: daily?["restingHeartRateInBeatsPerMinute"] as? Int,
-            averageHeartRateInBeatsPerMinute: daily?["averageHeartRateInBeatsPerMinute"] as? Int,
-            averageStressLevel: daily?["averageStressLevel"] as? Int,
-            maxStressLevel: daily?["maxStressLevel"] as? Int,
-            stressDurationInSeconds: daily?["stressDurationInSeconds"] as? Int,
-            restStressDurationInSeconds: daily?["restStressDurationInSeconds"] as? Int,
-            lowStressDurationInSeconds: daily?["lowStressDurationInSeconds"] as? Int,
-            mediumStressDurationInSeconds: daily?["mediumStressDurationInSeconds"] as? Int,
-            highStressDurationInSeconds: daily?["highStressDurationInSeconds"] as? Int,
+            // Daily Summary — Firestore fields mapped to internal model
+            restingHeartRateInBeatsPerMinute: daily?["restingHeartRate"] as? Int,
+            averageHeartRateInBeatsPerMinute: daily?["averageHeartRate"] as? Int,
+            averageStressLevel: daily?["stressAverage"] as? Int,
+            maxStressLevel: daily?["stressMax"] as? Int,
+            stressDurationInSeconds: daily?["stressDurationSeconds"] as? Int,
+            restStressDurationInSeconds: daily?["restStressDurationSeconds"] as? Int,
+            lowStressDurationInSeconds: daily?["lowStressDurationSeconds"] as? Int,
+            mediumStressDurationInSeconds: daily?["mediumStressDurationSeconds"] as? Int,
+            highStressDurationInSeconds: daily?["highStressDurationSeconds"] as? Int,
             stressQualifier: daily?["stressQualifier"] as? String,
             steps: daily?["steps"] as? Int,
-            activeKilocalories: daily?["activeKilocalories"] as? Int,
-            moderateIntensityDurationInSeconds: daily?["moderateIntensityDurationInSeconds"] as? Int,
-            vigorousIntensityDurationInSeconds: daily?["vigorousIntensityDurationInSeconds"] as? Int,
-            bodyBatteryChargedValue: daily?["bodyBatteryChargedValue"] as? Int,
-            bodyBatteryDrainedValue: daily?["bodyBatteryDrainedValue"] as? Int,
-            // Yesterday
+            activeKilocalories: daily?["activeCalories"] as? Int,
+            moderateIntensityDurationInSeconds: daily?["moderateIntensitySeconds"] as? Int,
+            vigorousIntensityDurationInSeconds: daily?["vigorousIntensitySeconds"] as? Int,
+            bodyBatteryChargedValue: daily?["bodyBatteryCharged"] as? Int,
+            bodyBatteryDrainedValue: daily?["bodyBatteryDrained"] as? Int,
+            // Yesterday's Daily
             yesterdaySteps: yDaily?["steps"] as? Int,
-            yesterdayActiveKilocalories: yDaily?["activeKilocalories"] as? Int,
-            yesterdayModerateIntensityDurationInSeconds: yDaily?["moderateIntensityDurationInSeconds"] as? Int,
-            yesterdayVigorousIntensityDurationInSeconds: yDaily?["vigorousIntensityDurationInSeconds"] as? Int,
-            // Sleep
-            sleepDurationInSeconds: sleep?["durationInSeconds"] as? Int,
-            deepSleepDurationInSeconds: sleep?["deepSleepDurationInSeconds"] as? Int,
-            lightSleepDurationInSeconds: sleep?["lightSleepDurationInSeconds"] as? Int,
-            remSleepInSeconds: sleep?["remSleepInSeconds"] as? Int,
-            awakeDurationInSeconds: sleep?["awakeDurationInSeconds"] as? Int,
-            sleepScoreValue: (sleep?["overallSleepScore"] as? [String: Any])?["value"] as? Int,
-            sleepScoreQualifier: (sleep?["overallSleepScore"] as? [String: Any])?["qualifierKey"] as? String,
+            yesterdayActiveKilocalories: yDaily?["activeCalories"] as? Int,
+            yesterdayModerateIntensityDurationInSeconds: yDaily?["moderateIntensitySeconds"] as? Int,
+            yesterdayVigorousIntensityDurationInSeconds: yDaily?["vigorousIntensitySeconds"] as? Int,
+            // Sleep — Firestore stores durations in minutes; convert to seconds for internal model
+            sleepDurationInSeconds: minutesToSeconds(sleep?["totalMinutes"] as? Int),
+            deepSleepDurationInSeconds: minutesToSeconds(sleep?["deepSleepMinutes"] as? Int),
+            lightSleepDurationInSeconds: minutesToSeconds(sleep?["lightSleepMinutes"] as? Int),
+            remSleepInSeconds: minutesToSeconds(sleep?["remSleepMinutes"] as? Int),
+            awakeDurationInSeconds: minutesToSeconds(sleep?["awakeMinutes"] as? Int),
+            sleepScoreValue: sleep?["garminSleepScore"] as? Int,
+            sleepScoreQualifier: nil, // Cloud Function does not store qualifier key
             sleepValidation: sleep?["validation"] as? String,
-            // Stress Details (extracted)
+            // Stress Details (extracted from timelines)
             currentBodyBattery: currentBB,
             bodyBatteryAtWake: wakeBB,
             currentStressLevel: currentStress,
@@ -238,17 +251,19 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
 
     // MARK: - Body Battery & Stress Extraction
 
-    /// Extract current and wake body battery from stressDetails timeOffsetBodyBatteryValues.
-    /// The map has keys = offset in seconds from startTime, values = body battery reading.
+    /// Extract current and wake body battery from stressDetails bodyBatteryTimeline.
+    /// The Cloud Function stores an array of { offsetSeconds, value } objects.
     /// First entry ≈ wake BB, last entry ≈ current BB.
     private func extractBodyBattery(from stressDoc: [String: Any]?) -> (current: Int?, wake: Int?) {
         guard let doc = stressDoc,
-              let bbMap = doc["timeOffsetBodyBatteryValues"] as? [String: Any]
+              let timeline = doc["bodyBatteryTimeline"] as? [[String: Any]]
         else { return (nil, nil) }
 
-        let sorted = bbMap.compactMap { (key, value) -> (Int, Int)? in
-            guard let offset = Int(key), let bb = value as? Int else { return nil }
-            return (offset, bb)
+        let sorted = timeline.compactMap { entry -> (Int, Int)? in
+            guard let offset = entry["offsetSeconds"] as? Int,
+                  let value = entry["value"] as? Int
+            else { return nil }
+            return (offset, value)
         }.sorted { $0.0 < $1.0 }
 
         let wake = sorted.first?.1
@@ -256,16 +271,19 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
         return (current, wake)
     }
 
-    /// Extract the most recent stress level from timeOffsetStressLevelValues.
+    /// Extract the most recent stress level from stressDetails stressTimeline.
+    /// The Cloud Function stores an array of { offsetSeconds, level } objects.
     /// Values: 1-100 are real stress. Negative values are special (-1=off_wrist, -2=motion, etc).
     private func extractCurrentStress(from stressDoc: [String: Any]?) -> Int? {
         guard let doc = stressDoc,
-              let stressMap = doc["timeOffsetStressLevelValues"] as? [String: Any]
+              let timeline = doc["stressTimeline"] as? [[String: Any]]
         else { return nil }
 
-        let sorted = stressMap.compactMap { (key, value) -> (Int, Int)? in
-            guard let offset = Int(key), let stress = value as? Int else { return nil }
-            return (offset, stress)
+        let sorted = timeline.compactMap { entry -> (Int, Int)? in
+            guard let offset = entry["offsetSeconds"] as? Int,
+                  let level = entry["level"] as? Int
+            else { return nil }
+            return (offset, level)
         }.sorted { $0.0 > $1.0 } // newest first
 
         // Find the most recent valid stress reading (positive values only)
@@ -275,7 +293,7 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
     // MARK: - 7-Day Averages
 
     private func compute7DayAvgRHR(from dailies: [[String: Any]]) -> Int? {
-        let rhrValues = dailies.compactMap { $0["restingHeartRateInBeatsPerMinute"] as? Int }
+        let rhrValues = dailies.compactMap { $0["restingHeartRate"] as? Int }
         guard !rhrValues.isEmpty else { return nil }
         return rhrValues.reduce(0, +) / rhrValues.count
     }
@@ -288,62 +306,68 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
 
     // MARK: - Firestore Document Access
 
-    /// Fetch a single document by collection and calendar date.
-    /// Path: /users/{uid}/garminData/{collection}/{calendarDate}
-    private func fetchDocument(collection: String, documentID: String) async -> [String: Any]? {
+    /// Get the collection reference for date-keyed documents.
+    /// Path: /users/{uid}/garminData/{dataType}/dates  (5 segments — valid collection path)
+    private func datesCollection(for dataType: String) -> CollectionReference? {
         guard let db = GarminFirebaseManager.firestore else { return nil }
+        return db.collection(config.basePath)
+                 .document(dataType)
+                 .collection(config.dateSubcollection)
+    }
+
+    /// Fetch a single document by data type and calendar date.
+    /// Path: /users/{uid}/garminData/{dataType}/dates/{calendarDate}  (6 segments — valid document path)
+    private func fetchDocument(dataType: String, documentID: String) async -> [String: Any]? {
+        guard let ref = datesCollection(for: dataType) else { return nil }
 
         do {
-            let docRef = db.document("\(config.basePath)/\(collection)/\(documentID)")
-            let snapshot = try await docRef.getDocument()
+            let snapshot = try await ref.document(documentID).getDocument()
             return snapshot.data()
         } catch {
-            debug(.service, "Garmin Firestore: fetchDocument(\(collection)/\(documentID)) failed — \(error.localizedDescription)")
+            debug(.service, "Garmin Firestore: fetch(\(dataType)/\(documentID)) failed — \(error.localizedDescription)")
             return nil
         }
     }
 
     /// Fetch the most recent document on or before a given date.
     /// Documents are keyed by calendarDate (yyyy-MM-dd), so lexicographic ordering works.
-    private func fetchMostRecentDocument(collection: String, onOrBefore dateString: String) async -> [String: Any]? {
-        guard let db = GarminFirebaseManager.firestore else { return nil }
+    private func fetchMostRecentDocument(dataType: String, onOrBefore dateString: String) async -> [String: Any]? {
+        guard let ref = datesCollection(for: dataType) else { return nil }
 
         do {
             // First try the exact date (most common case)
-            let exactDoc = try await db.document("\(config.basePath)/\(collection)/\(dateString)").getDocument()
+            let exactDoc = try await ref.document(dateString).getDocument()
             if exactDoc.exists, let data = exactDoc.data() {
                 return data
             }
 
             // Fall back to querying by document ID (lexicographic order on calendarDate keys)
-            let collectionRef = db.collection("\(config.basePath)/\(collection)")
-            let snapshot = try await collectionRef
+            let snapshot = try await ref
                 .whereField(FieldPath.documentID(), isLessThanOrEqualTo: dateString)
                 .order(by: FieldPath.documentID(), descending: true)
                 .limit(to: 1)
                 .getDocuments()
             return snapshot.documents.first?.data()
         } catch {
-            debug(.service, "Garmin Firestore: fetchMostRecent(\(collection), ≤\(dateString)) failed — \(error.localizedDescription)")
+            debug(.service, "Garmin Firestore: fetchMostRecent(\(dataType), ≤\(dateString)) failed — \(error.localizedDescription)")
             return nil
         }
     }
 
     /// Fetch documents for the last N days (for computing averages).
-    private func fetchDocuments(collection: String, lastDays: Int) async -> [[String: Any]] {
-        guard let db = GarminFirebaseManager.firestore else { return [] }
+    private func fetchDocuments(dataType: String, lastDays: Int) async -> [[String: Any]] {
+        guard let ref = datesCollection(for: dataType) else { return [] }
 
         let cutoff = calendarDateString(for: Date().addingTimeInterval(-Double(lastDays) * 86400))
 
         do {
-            let collectionRef = db.collection("\(config.basePath)/\(collection)")
-            let snapshot = try await collectionRef
+            let snapshot = try await ref
                 .whereField(FieldPath.documentID(), isGreaterThanOrEqualTo: cutoff)
                 .order(by: FieldPath.documentID(), descending: true)
                 .getDocuments()
             return snapshot.documents.map { $0.data() }
         } catch {
-            debug(.service, "Garmin Firestore: fetchDocuments(\(collection), \(lastDays)d) failed — \(error.localizedDescription)")
+            debug(.service, "Garmin Firestore: fetchDocuments(\(dataType), \(lastDays)d) failed — \(error.localizedDescription)")
             return []
         }
     }
@@ -356,5 +380,11 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = TimeZone.current
         return formatter.string(from: date)
+    }
+
+    /// Convert minutes to seconds (Firestore stores sleep durations in minutes).
+    private func minutesToSeconds(_ minutes: Int?) -> Int? {
+        guard let m = minutes else { return nil }
+        return m * 60
     }
 }
