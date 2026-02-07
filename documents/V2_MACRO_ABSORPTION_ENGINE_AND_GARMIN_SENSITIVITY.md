@@ -93,7 +93,7 @@ V2 replaces the core absorption model with something physiologically accurate, a
 
 2. **Meal-mode SMB enhancement:** During active meal absorption, the maxSMB ceiling is temporarily raised (configurable multiplier, default 2.0x) with strict safety gates, so SMBs can keep pace with the curve-predicted absorption.
 
-3. **Sensitivity-adjusted entries:** The Garmin sensitivity factor scales ALL entry amounts (carbs + fat + protein). COB displays "insulin-equivalent carbs" with a UI annotation showing both eaten and effective amounts.
+3. **Insulin-demand-adjusted entries:** The Garmin model produces an `insulinDemandFactor` (multiply, not divide — self-documenting code). All entry amounts are scaled by this factor. COB displays "insulin-equivalent carbs" with a UI annotation showing both eaten and effective amounts.
 
 4. **Zero double-dosing:** Every meal entry is tagged with a unique mealID. The system tracks dosing state per meal and warns the user if they attempt to dose the same meal twice. Entries are never duplicated.
 
@@ -540,7 +540,7 @@ Cronometer App
                -> Remaining carbs become future entries along the curve
             -> Curve 2: Protein (slow sigmoid, smooth ramp 15-40g)
             -> Curve 3: Fat resistance (normalized Gaussian, 0.69 total coeff)
-            -> Sensitivity factor scales ALL entry amounts
+            -> Insulin demand factor scales ALL entry amounts
             -> All entries -> CarbEntryStored records tagged with mealID
             -> oref sees: shaped future carb entries (not flat/linear)
 
@@ -839,24 +839,23 @@ For 35g fat with default adjustment factor 1.0:
 - Peak at 6h (360 min), sigma = 90 min
 - Matches Wolpert's measured 40% more insulin (24g at CR 10 = 2.4U additional = 40% of base 6U)
 
-#### Fat Ramp (Not Hard Cutoff)
+#### Fat Minimum Threshold (Not Ramp)
 
-Instead of a hard 10g cutoff, fat resistance uses a smooth ramp:
+Instead of a hard 10g cutoff or a ramp, fat resistance uses a simple minimum threshold:
 
 ```
-fatEffectiveFraction(fatGrams):
-  if fatGrams <= 0:    0.0
-  if fatGrams >= 20:   1.0
-  else: fatGrams / 20  (linear ramp)
-
-totalFatEquiv = fatGrams x 0.69 x fatEffectiveFraction(fatGrams) x individualAdjustmentFactor
+if fatGrams < 5:  no fat resistance entries (negligible effect)
+if fatGrams >= 5: totalFatEquiv = fatGrams x 0.69 x individualAdjustmentFactor
 ```
+
+**Why a threshold instead of a ramp:** The 0.69 coefficient is already a per-gram rate derived from Wolpert's data. Applying a dose-dependent ramp ON TOP of a dose-dependent per-gram coefficient double-discounts moderate fat amounts. The ramp was intended to replace the hard cutoff, but it inadvertently reduced the per-gram rate at moderate fat levels. A simple 5g minimum threshold achieves the goal (ignore negligible fat) without distorting the per-gram coefficient.
 
 This means:
-- 5g fat -> 5 x 0.69 x 0.25 = 0.86g carb-equiv (tiny)
-- 10g fat -> 10 x 0.69 x 0.50 = 3.45g carb-equiv (small)
-- 20g fat -> 20 x 0.69 x 1.0 = 13.8g carb-equiv (full coefficient)
-- 35g fat -> 35 x 0.69 x 1.0 = 24.15g carb-equiv (matches Wolpert)
+- 3g fat -> no entries (below threshold)
+- 5g fat -> 5 x 0.69 = 3.45g carb-equiv
+- 10g fat -> 10 x 0.69 = 6.9g carb-equiv
+- 20g fat -> 20 x 0.69 = 13.8g carb-equiv
+- 35g fat -> 35 x 0.69 = 24.15g carb-equiv (matches Wolpert)
 
 #### Gaussian Parameters
 
@@ -943,34 +942,55 @@ Replace `processFPU()` with `MacroAbsorptionEngine.generateEntries()`:
 ```swift
 struct MacroAbsorptionEngine {
 
-    /// Generate all carb entries for a mixed meal using the three-curve model.
-    /// Returns: (upfrontCarbs: Double, futureEntries: [CarbsEntry])
-    /// - upfrontCarbs: the amount to recommend for immediate bolus
-    /// - futureEntries: curve-shaped entries for oref to cover via SMBs
+    /// Generate future carb entries for a mixed meal using the three-curve model.
+    ///
+    /// CRITICAL: Carb entries are ONLY generated for the portion AFTER the safe window.
+    /// The upfront portion (0 to safeWindow) is returned as `upfrontCarbs` for the bolus
+    /// recommendation — NO entries are created for it. This prevents double-counting:
+    /// the bolus covers the upfront carbs, and oref sees only the future entries.
+    ///
+    /// Returns: MacroAbsorptionResult with:
+    /// - upfrontCarbs: the amount to recommend for immediate bolus (NOT stored as entries)
+    /// - futureEntries: curve-shaped entries for oref to cover via SMBs (stored to Core Data)
     static func generateEntries(
         carbs: Double,
         fat: Double,
         protein: Double,
         mealTime: Date,
-        sensitivityFactor: Double,     // from Garmin layer (0.60-1.40)
+        insulinDemandFactor: Double,    // from Garmin layer (0.71-1.67, where 1.0 = normal)
         upfrontPercent: Double? = nil,  // user override; nil = curve-calculated
+        insulinType: InsulinType = .rapidActing,  // affects safe window default
         settings: FPUSettings           // individualAdjustmentFactor, etc.
     ) -> MacroAbsorptionResult {
 
         let mealID = UUID().uuidString
-        var allEntries: [CarbsEntry] = []
+
+        // --- Determine safe window based on insulin type ---
+        let safeWindowMinutes = settings.upfrontWindowMinutes
+            ?? insulinType.defaultSafeWindowMinutes  // Fiasp=30, Humalog=45
 
         // --- Curve 1: Carbohydrate absorption (gamma-shaped) ---
+        // Only generate entries AFTER the safe window. The upfront portion
+        // is covered by the bolus — creating entries for it would double-count.
         let tauCarb = carbTau(baseTau: 35, fatGrams: fat)
+        let curveSuggestedPercent = gammaCDFPercent(
+            tau: tauCarb, windowMinutes: safeWindowMinutes
+        )
+        let effectivePercent = upfrontPercent ?? curveSuggestedPercent
+        let remainingCarbGrams = carbs * (1.0 - effectivePercent)
+
         let carbEntries = generateGammaCurveEntries(
-            totalAmount: carbs,
+            totalAmount: remainingCarbGrams,
             tau: tauCarb,
             mealTime: mealTime,
+            startAfterMinutes: safeWindowMinutes,  // entries start AFTER safe window
             intervalMinutes: 10,
             mealID: mealID,
             note: "carb-absorption"
         )
-        allEntries.append(contentsOf: carbEntries)
+
+        var futureEntries: [CarbsEntry] = []
+        futureEntries.append(contentsOf: carbEntries)
 
         // --- Curve 2: Protein gluconeogenesis (delayed sigmoid, smooth ramp) ---
         let proteinFactor = proteinGlucoFactor(proteinGrams: protein)
@@ -983,58 +1003,53 @@ struct MacroAbsorptionEngine {
                 intervalMinutes: 15,
                 mealID: mealID
             )
-            allEntries.append(contentsOf: proteinEntries)
+            futureEntries.append(contentsOf: proteinEntries)
         }
 
         // --- Curve 3: Fat insulin resistance (normalized gaussian) ---
-        let fatFraction = fatEffectiveFraction(fatGrams: fat)
-        if fatFraction > 0 {
-            let totalFatEquiv = fat * 0.69 * fatFraction
-                * settings.individualAdjustmentFactor
+        // Fat coefficient 0.69 is the total carb-equivalent per gram of fat.
+        // Minimum threshold: below 5g fat, effect is negligible — skip entirely.
+        let fatTotalEquiv: Double
+        if fat >= 5 {
+            fatTotalEquiv = fat * 0.69 * settings.individualAdjustmentFactor
             let fatEntries = generateNormalizedFatResistanceEntries(
-                totalEquiv: totalFatEquiv,
+                totalEquiv: fatTotalEquiv,
                 mealTime: mealTime,
                 intervalMinutes: 15,
                 mealID: mealID
             )
-            allEntries.append(contentsOf: fatEntries)
+            futureEntries.append(contentsOf: fatEntries)
+        } else {
+            fatTotalEquiv = 0
         }
 
-        // --- Apply sensitivity factor to ALL entries ---
-        let adjustedEntries = allEntries.map { entry in
+        // --- Apply insulin demand factor to ALL future entries ---
+        // insulinDemandFactor > 1.0 means more resistant (e.g., 1.25 = bad sleep)
+        // Multiply entries to increase insulin demand. Self-documenting: bigger
+        // factor = bigger entries = more insulin.
+        let adjustedEntries = futureEntries.map { entry in
             var adjusted = entry
-            adjusted.carbs = Decimal(Double(entry.carbs) / sensitivityFactor)
+            adjusted.carbs = Decimal(Double(entry.carbs) * insulinDemandFactor)
             return adjusted
         }
 
-        // --- Split into upfront and future ---
-        let safeWindowMinutes = settings.upfrontWindowMinutes  // default 45
-        let curveSuggestedPercent = gammaCDFPercent(
-            tau: tauCarb, windowMinutes: safeWindowMinutes
-        )
-        let effectivePercent = upfrontPercent ?? curveSuggestedPercent
-
-        let upfrontCarbs = carbs * effectivePercent / sensitivityFactor
-        let futureEntries = adjustedEntries.filter {
-            $0.actualDate > mealTime.addingTimeInterval(
-                Double(safeWindowMinutes) * 60
-            )
-        }
+        // --- Upfront carbs (for bolus recommendation, NOT stored as entries) ---
+        let upfrontCarbs = carbs * effectivePercent * insulinDemandFactor
 
         return MacroAbsorptionResult(
             mealID: mealID,
             upfrontCarbs: upfrontCarbs,
             upfrontPercent: effectivePercent,
             curveSuggestedPercent: curveSuggestedPercent,
-            futureEntries: futureEntries,
-            allEntries: adjustedEntries,
-            sensitivityFactor: sensitivityFactor,
+            futureEntries: adjustedEntries,  // only entries AFTER safe window
+            insulinDemandFactor: insulinDemandFactor,
             originalCarbs: carbs,
             originalFat: fat,
             originalProtein: protein,
             tauCarb: tauCarb,
             proteinFactor: proteinFactor,
-            fatTotalEquiv: fat > 0 ? fat * 0.69 * fatFraction : 0
+            fatTotalEquiv: fatTotalEquiv,
+            safeWindowMinutes: safeWindowMinutes
         )
     }
 
@@ -1045,11 +1060,17 @@ struct MacroAbsorptionEngine {
         return (proteinGrams - 15) / (40 - 15) * 0.35
     }
 
-    /// Smooth fat ramp: linear 0->1 over 0-20g
-    static func fatEffectiveFraction(fatGrams: Double) -> Double {
-        if fatGrams <= 0 { return 0.0 }
-        if fatGrams >= 20 { return 1.0 }
-        return fatGrams / 20.0
+    /// Insulin type affects default safe window for split dosing
+    enum InsulinType {
+        case ultraRapid    // Fiasp, Lyumjev — peaks at 30-45 min
+        case rapidActing   // Humalog, Novolog — peaks at 60-90 min
+
+        var defaultSafeWindowMinutes: Int {
+            switch self {
+            case .ultraRapid: return 30
+            case .rapidActing: return 45
+            }
+        }
     }
 }
 ```
@@ -1076,10 +1097,17 @@ Higher fat content automatically reduces the upfront percentage because the gamm
 
 #### Safe Window Configuration
 
-The safe window duration is configurable (default 45 min, range 30-60 min):
+The safe window duration depends on the user's insulin type and is configurable (range 20-60 min):
 
-- **Shorter (30 min):** More conservative initial dose. Better for users who experience fast insulin onset or have high fat meals. More reliance on SMBs.
-- **Longer (60 min):** Larger initial dose. Better for users with slower insulin action or low-fat meals. Less reliance on SMBs.
+| Insulin Type | Default Safe Window | Rationale |
+|-------------|-------------------|-----------|
+| Ultra-rapid (Fiasp, Lyumjev) | 30 min | Insulin peaks at 30-45 min; shorter window prevents insulin outpacing carbs |
+| Rapid-acting (Humalog, Novolog) | 45 min | Insulin peaks at 60-90 min; slightly wider window is safe |
+
+The safe window represents the overlap period where insulin action and carb absorption are temporally aligned. A user on Fiasp with a 45-min window might front-load too much because their insulin peaks faster than the carbs arrive — hence the shorter default.
+
+- **Shorter (20-30 min):** More conservative initial dose. Better for ultra-rapid insulins and high-fat meals. More reliance on SMBs.
+- **Longer (45-60 min):** Larger initial dose. Better for standard rapid-acting insulins and low-fat meals. Less reliance on SMBs.
 
 #### Examples Across Meal Types
 
@@ -1093,21 +1121,32 @@ The safe window duration is configurable (default 45 min, range 30-60 min):
 
 ---
 
-### 5.7 Sensitivity-Adjusted Entries
+### 5.7 Insulin-Demand-Adjusted Entries
 
-The Garmin sensitivity factor is applied to ALL entry amounts (carbs + protein + fat). This means oref sees "insulin-equivalent carbs" rather than grams eaten.
+The Garmin **insulin demand factor** is applied to ALL entry amounts (carbs + protein + fat). This means oref sees "insulin-equivalent carbs" rather than grams eaten.
+
+**Insulin demand factor vs sensitivity factor:** Internally we use `insulinDemandFactor` rather than `sensitivityFactor` to make the code self-documenting. A demand factor of 1.25 means "25% more insulin needed" — entries are MULTIPLIED by this value. No counter-intuitive division. The mapping:
+
+```
+Bad sleep + high stress:  insulinDemandFactor = 1.25  (entries x 1.25 = 25% more insulin)
+Normal day:               insulinDemandFactor = 1.00  (no adjustment)
+Good sleep + post-workout: insulinDemandFactor = 0.83  (entries x 0.83 = 17% less insulin)
+
+Conversion: insulinDemandFactor = 1.0 / sensitivityFactor
+Range: 0.71 (very sensitive) to 1.67 (very resistant)
+```
 
 **Why scale entries instead of CR/ISF:**
 
 1. oref reads ISF/CR from the pump profile — we cannot easily change those on the fly
 2. Fat/protein entries are already "fake carbs" (carb-equivalents), so scaling them is natural
 3. If entries stay at real grams but the user is 20% resistant, oref will under-deliver SMBs for the remaining carbs -> late hyperglycemia (the exact problem we're solving)
-4. The upfront bolus recommendation also uses the sensitivity factor: `upfrontCarbs / (CR x sensitivityFactor)` equivalent to `(upfrontCarbs / sensitivityFactor) / CR`
+4. The upfront bolus recommendation also uses the demand factor: `upfrontCarbs * insulinDemandFactor / CR`
 
 **COB display concern:** COB has never shown "grams eaten" — it already includes FPU entries (fat/protein "fake carbs"). The display should show:
 
 ```
-COB: 83g (65g eaten, sensitivity-adjusted)
+COB: 83g (65g eaten, demand-adjusted)
 ```
 
 This is transparent to the user: "I ate 65g carbs, but because of poor sleep my body treats it like 83g from an insulin perspective."
@@ -1123,10 +1162,17 @@ Every 5 minutes (each loop cycle), the adaptive layer runs **BEFORE oref** so th
 1. **Computes predicted BG** from the three curves and insulin delivered:
 ```
 predictedBG(t) = mealTimeBG
-    + SUM carbCurve.glucoseImpact(0..t) / ISF_adjusted
-    + SUM proteinCurve.glucoseImpact(0..t) / ISF_adjusted
-    + SUM fatResistanceEquiv.glucoseImpact(0..t) / ISF_adjusted
-    - SUM insulinDelivered(0..t) x ISF_adjusted
+    + (carbsAbsorbed(0..t) / CR) x ISF       -- carbs -> insulin equiv -> BG rise
+    + (proteinGlucose(0..t) / CR) x ISF      -- protein glucose equiv -> BG rise
+    + (fatResistanceEquiv(0..t) / CR) x ISF   -- fat resistance equiv -> BG rise
+    - insulinDelivered(0..t) x ISF             -- insulin -> BG drop
+
+where:
+  carbsAbsorbed(0..t) = integral of gamma curve from 0 to t (grams)
+  CR = carb ratio (grams per unit)
+  ISF = insulin sensitivity factor (mg/dL per unit)
+  (grams / CR) x ISF = (grams / (grams/unit)) x (mg_dL/unit) = mg/dL  [dimensionally correct]
+  insulinDelivered x ISF = units x (mg_dL/unit) = mg/dL               [dimensionally correct]
 ```
 
 2. **Reads actual CGM value**
@@ -1406,26 +1452,30 @@ struct GarminWorkout {
 }
 ```
 
-### 7.3 Sensitivity Factor Calculation
+### 7.3 Sensitivity Factor and Insulin Demand Factor
 
-The sensitivity factor is a multiplier applied to ALL entry amounts before they are stored:
+The Garmin model computes a **sensitivity factor** (0.60-1.40), which is then converted to an **insulin demand factor** for use in entry generation. The demand factor is what the code actually uses — it makes the math self-documenting.
 
 ```
-sensitivityFactor: Double  (range 0.60 to 1.40)
+sensitivityFactor: Double  (range 0.60 to 1.40, computed by Garmin model)
 
   1.0  = baseline (normal day)
-  0.80 = 20% more resistant (entries scaled by 1/0.80 = 1.25x -> 25% more insulin)
-  1.20 = 20% more sensitive (entries scaled by 1/1.20 = 0.83x -> 17% less insulin)
+  0.80 = 20% more resistant
+  1.20 = 20% more sensitive
+
+insulinDemandFactor = 1.0 / sensitivityFactor  (range 0.71 to 1.67)
+
+  1.0  = baseline (normal day)
+  1.25 = 25% more insulin needed (bad sleep -> sensitivity 0.80)
+  0.83 = 17% less insulin needed (good recovery -> sensitivity 1.20)
 
 Usage (applied during entry generation):
-  entryCarbs = rawEntryCarbs / sensitivityFactor
+  entryCarbs = rawEntryCarbs * insulinDemandFactor
 
-  (Lower sensitivity -> higher entry amounts -> oref delivers more insulin)
-  (Higher sensitivity -> lower entry amounts -> oref delivers less insulin)
+  (Higher demand factor -> bigger entries -> more insulin. Self-documenting.)
 
 For the upfront bolus recommendation:
-  upfrontBolus = upfrontCarbs / CR
-  where upfrontCarbs is already sensitivity-adjusted
+  upfrontBolus = (upfrontCarbs * insulinDemandFactor) / CR
 ```
 
 ### 7.4 How Each Metric Affects Insulin Sensitivity
@@ -1764,6 +1814,16 @@ The slider ranges from 0% to 100%:
 - **Curve-suggested %:** The gamma curve's calculated safe amount (default)
 - **100%:** Full bolus upfront (like the current system, for low-fat meals the user trusts)
 
+**High-fat upfront warning:** When the user slides more than 50% above the curve-suggested percentage for a meal with >15g fat, a soft warning is shown:
+
+```
+"Curve suggests 28% for this meal (28g fat).
+ 100% upfront may cause a low as fat delays carb absorption.
+ [Keep 100%]  [Use Suggested 28%]"
+```
+
+The user can still override — this is informed consent, not a hard block. For meals with <=15g fat, no warning is shown since the absorption delay is minimal.
+
 The meal SMB multiplier slider ranges from 1.0x to 3.0x:
 - **1.0x:** Normal SMB behavior (no enhancement)
 - **2.0x:** Default, doubles maxSMB during meal absorption
@@ -2075,15 +2135,21 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 ### 8. Curve-Driven Split Dosing (Not Full Upfront Bolus)
 
-**Decision:** Use the gamma absorption curve to calculate a safe upfront bolus amount, with remaining carbs delivered via SMBs along the curve.
+**Decision:** Use the gamma absorption curve to calculate a safe upfront bolus amount, with remaining carbs delivered via SMBs along the curve. No carb entries are created for the upfront portion — only the bolus recommendation. This prevents double-counting.
 
-**Reason:** For mixed meals with fat, a full upfront bolus creates a dangerous hypoglycemia window — insulin acts before fat-delayed carbs absorb. The gamma curve tells us exactly how much absorption occurs in the insulin action window, so we can match insulin delivery to actual absorption timing. This eliminates the "bolus-then-crash-then-rebound" pattern that plagues high-fat meals.
+**Reason:** For mixed meals with fat, a full upfront bolus creates a dangerous hypoglycemia window — insulin acts before fat-delayed carbs absorb. The gamma curve tells us exactly how much absorption occurs in the insulin action window, so we can match insulin delivery to actual absorption timing. The safe window default varies by insulin type (Fiasp/Lyumjev: 30 min, Humalog/Novolog: 45 min) since faster insulins need a shorter window to avoid outpacing carb absorption. A soft warning is shown when users override to >50% above the curve suggestion for high-fat meals.
 
-### 9. Sensitivity Factor Scales Entry Amounts (Not CR/ISF)
+### 9. Insulin Demand Factor (Not Sensitivity Factor) for Entry Scaling
 
-**Decision:** Apply the Garmin sensitivity factor by scaling all entry amounts rather than modifying CR/ISF values.
+**Decision:** Apply the Garmin model output as an `insulinDemandFactor` (multiply entries) rather than a `sensitivityFactor` (divide entries).
 
-**Reason:** oref reads CR/ISF from the pump profile, which we cannot easily change on the fly. Scaling entry amounts achieves the same insulin effect: a sensitivity factor of 0.78 causes 65g eaten to appear as 83g of entries, producing 28% more insulin delivery. Fat/protein entries are already "fake carbs," so scaling them is natural. The UI displays both values for transparency: "65g eaten -> 83g effective."
+**Reason:** Dividing by a "sensitivity factor" of 0.8 to get 25% more insulin is counter-intuitive — every developer touching the code needs to think carefully about direction. Instead, the Garmin model outputs a sensitivity factor (0.60-1.40), which is immediately converted to `insulinDemandFactor = 1.0 / sensitivityFactor` (0.71-1.67). Entries are then MULTIPLIED: `entry.carbs = rawCarbs * insulinDemandFactor`. A demand factor of 1.25 means "25% more insulin" — self-documenting. oref reads CR/ISF from the pump profile which we can't change on the fly, so scaling entries is the mechanism.
+
+### 9a. Fat Uses Simple Minimum Threshold (Not Ramp)
+
+**Decision:** Use a 5g minimum threshold for fat resistance, not a smooth ramp from 0-20g.
+
+**Reason:** The 0.69 coefficient is already a per-gram rate derived from Wolpert. Applying a dose-dependent ramp on top of a dose-dependent per-gram coefficient double-discounts moderate fat amounts. At 10g fat, the ramp produces 3.45g carb-equiv (10 x 0.69 x 0.5) when the correct value is 6.9g (10 x 0.69). A simple 5g minimum threshold achieves the goal (ignore negligible fat) without distorting the per-gram rate.
 
 ### 10. Meal-Mode SMB Enhancement with Safety Gates
 
@@ -2141,9 +2207,10 @@ We control the **inputs** to oref: the carb entries and the maxSMB parameter. Be
 | No SMB enhancement on falling BG | MealModeState trend gate |
 | No adaptation on stale CGM data (>15 min) | MacroAdaptiveService |
 | No SMB enhancement on stale CGM (>10 min) | MealModeState freshness gate |
-| Sensitivity factor clamped to 0.60-1.40 | GarminSensitivityModel |
+| Insulin demand factor clamped to 0.71-1.67 (sensitivity 0.60-1.40) | GarminSensitivityModel |
 | Protein effect smooth ramp (no cliff) | MacroAbsorptionEngine |
-| Fat coefficient normalized (prevents overdose) | MacroAbsorptionEngine |
+| Fat coefficient normalized (prevents overdose), 5g minimum threshold | MacroAbsorptionEngine |
+| High-fat upfront warning when user overrides >50% above curve suggestion | BolusAdjustSliderView |
 | Double-dose detection and warning | MacrosOnBoardTracker |
 | All entries tagged with unique mealID | MacroAbsorptionEngine |
 | All entries use standard CarbEntryStored format | Compatibility with existing safeguards |
