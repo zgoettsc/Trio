@@ -316,6 +316,36 @@ jobs:
           # Several patches may be added per submodule.
           # Adding comments (#) is strongly recommended to easily tell the individual patches apart.
 
+      # Inject Garmin Firebase configuration from GitHub secrets
+      - name: Inject Garmin Firebase Config
+        if: env.GARMIN_FIREBASE_API_KEY != ''
+        env:
+          GARMIN_FIREBASE_API_KEY: ${{ secrets.GARMIN_FIREBASE_API_KEY }}
+          GARMIN_FIREBASE_PROJECT_ID: ${{ secrets.GARMIN_FIREBASE_PROJECT_ID }}
+          GARMIN_FIREBASE_GCM_SENDER_ID: ${{ secrets.GARMIN_FIREBASE_GCM_SENDER_ID }}
+          GARMIN_FIREBASE_GOOGLE_APP_ID: ${{ secrets.GARMIN_FIREBASE_GOOGLE_APP_ID }}
+          GARMIN_FIREBASE_STORAGE_BUCKET: ${{ secrets.GARMIN_FIREBASE_STORAGE_BUCKET }}
+          GARMIN_FIREBASE_CLIENT_ID: ${{ secrets.GARMIN_FIREBASE_CLIENT_ID }}
+          GARMIN_FIREBASE_USER_ID: ${{ secrets.GARMIN_FIREBASE_USER_ID }}
+          GARMIN_FIREBASE_EMAIL: ${{ secrets.GARMIN_FIREBASE_EMAIL }}
+          GARMIN_FIREBASE_PASSWORD: ${{ secrets.GARMIN_FIREBASE_PASSWORD }}
+        run: |
+          CONFIG_FILE="Trio/Sources/Services/Garmin/GarminFirebaseConfig.swift"
+          if [ -f "$CONFIG_FILE" ]; then
+            sed -i '' "s|__GARMIN_FIREBASE_API_KEY__|${GARMIN_FIREBASE_API_KEY}|g" "$CONFIG_FILE"
+            sed -i '' "s|__GARMIN_FIREBASE_PROJECT_ID__|${GARMIN_FIREBASE_PROJECT_ID}|g" "$CONFIG_FILE"
+            sed -i '' "s|__GARMIN_FIREBASE_GCM_SENDER_ID__|${GARMIN_FIREBASE_GCM_SENDER_ID}|g" "$CONFIG_FILE"
+            sed -i '' "s|__GARMIN_FIREBASE_GOOGLE_APP_ID__|${GARMIN_FIREBASE_GOOGLE_APP_ID}|g" "$CONFIG_FILE"
+            sed -i '' "s|__GARMIN_FIREBASE_STORAGE_BUCKET__|${GARMIN_FIREBASE_STORAGE_BUCKET}|g" "$CONFIG_FILE"
+            sed -i '' "s|__GARMIN_FIREBASE_CLIENT_ID__|${GARMIN_FIREBASE_CLIENT_ID}|g" "$CONFIG_FILE"
+            sed -i '' "s|__GARMIN_FIREBASE_USER_ID__|${GARMIN_FIREBASE_USER_ID}|g" "$CONFIG_FILE"
+            sed -i '' "s|__GARMIN_FIREBASE_EMAIL__|${GARMIN_FIREBASE_EMAIL}|g" "$CONFIG_FILE"
+            sed -i '' "s|__GARMIN_FIREBASE_PASSWORD__|${GARMIN_FIREBASE_PASSWORD}|g" "$CONFIG_FILE"
+            echo "Garmin Firebase config injected successfully"
+          else
+            echo "Garmin Firebase config file not found — skipping"
+          fi
+
       # Patch Fastlane Match to not print tables
       - name: Patch Match Tables
         run: |

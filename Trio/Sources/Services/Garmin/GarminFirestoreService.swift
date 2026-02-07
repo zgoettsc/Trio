@@ -1,3 +1,6 @@
+import FirebaseAuth
+import FirebaseCore
+import FirebaseFirestore
 import Foundation
 
 // MARK: - Phase C: Garmin Firestore Service
@@ -8,10 +11,9 @@ import Foundation
 // Firestore path: /users/{uid}/garminData/{summaryType}/{documents}
 // Summary types: dailies, sleeps, stressDetails, hrv, userMetrics
 //
-// NOTE: This service requires the Firebase iOS SDK (FirebaseFirestore).
-// Until the dependency is added, the stub returns nil (graceful fallback to no adjustment).
-// The real implementation is fully structured — just needs `import FirebaseFirestore`
-// and Firestore SDK calls to replace the placeholder fetch methods.
+// Firebase project configuration is injected at build time from GitHub secrets
+// via GarminFirebaseConfig.swift. If secrets are not configured, the service
+// returns nil (graceful fallback to no Garmin adjustment).
 
 // MARK: - Protocol
 
@@ -41,20 +43,93 @@ struct GarminFirestoreConfig: Codable {
     var cacheDurationSeconds: TimeInterval = 5 * 60 // 5 minutes
 }
 
+// MARK: - Garmin Firebase App Manager
+
+/// Manages the secondary Firebase app instance for the user's Garmin Firestore project.
+/// The default FirebaseApp is used by Trio for Crashlytics. This creates a separate
+/// named app ("garmin") for accessing the user's personal Firestore.
+enum GarminFirebaseManager {
+    private static let appName = "garmin"
+    private(set) static var isSignedIn = false
+
+    /// Configure the secondary Firebase app and sign in.
+    /// Safe to call multiple times — skips if already configured.
+    static func configureAndSignIn() async {
+        guard GarminFirebaseConstants.isConfigured else {
+            debug(.service, "Garmin Firebase: not configured (secrets not injected)")
+            return
+        }
+
+        // Configure the secondary Firebase app if not already done
+        if FirebaseApp.app(name: appName) == nil {
+            let options = FirebaseOptions(
+                googleAppID: GarminFirebaseConstants.googleAppID,
+                gcmSenderID: GarminFirebaseConstants.gcmSenderID
+            )
+            options.apiKey = GarminFirebaseConstants.apiKey
+            options.projectID = GarminFirebaseConstants.projectID
+            options.storageBucket = GarminFirebaseConstants.storageBucket
+            options.clientID = GarminFirebaseConstants.clientID
+
+            FirebaseApp.configure(name: appName, options: options)
+            debug(.service, "Garmin Firebase: secondary app configured (project: \(GarminFirebaseConstants.projectID))")
+        }
+
+        // Sign in if not already authenticated
+        guard let app = FirebaseApp.app(name: appName) else { return }
+        let auth = Auth.auth(app: app)
+
+        if auth.currentUser != nil {
+            isSignedIn = true
+            debug(.service, "Garmin Firebase: already signed in as \(auth.currentUser?.uid ?? "unknown")")
+            return
+        }
+
+        do {
+            let result = try await auth.signIn(
+                withEmail: GarminFirebaseConstants.authEmail,
+                password: GarminFirebaseConstants.authPassword
+            )
+            isSignedIn = true
+            debug(.service, "Garmin Firebase: signed in as \(result.user.uid)")
+        } catch {
+            isSignedIn = false
+            debug(.service, "Garmin Firebase: sign-in failed — \(error.localizedDescription)")
+        }
+    }
+
+    /// Get the Firestore instance for the Garmin Firebase app.
+    /// Returns nil if not configured or not signed in.
+    static var firestore: Firestore? {
+        guard isSignedIn, let app = FirebaseApp.app(name: appName) else { return nil }
+        return Firestore.firestore(app: app)
+    }
+}
+
 // MARK: - Garmin Firestore Service
 
 /// Service that queries Garmin health data from Firestore and builds a GarminContextSnapshot.
-/// Currently uses dictionary-based document access that's ready for Firebase SDK integration.
 final class GarminFirestoreService: GarminFirestoreServiceProtocol {
 
     private var cachedSnapshot: GarminContextSnapshot?
     private var cacheTimestamp: Date?
     private let config: GarminFirestoreConfig
 
-    var isConfigured: Bool { config.isEnabled && !config.userID.isEmpty }
+    var isConfigured: Bool {
+        config.isEnabled && !config.userID.isEmpty && GarminFirebaseManager.isSignedIn
+    }
 
     init(config: GarminFirestoreConfig = GarminFirestoreConfig()) {
         self.config = config
+    }
+
+    /// Convenience initializer that builds config from GarminFirebaseConstants.
+    convenience init() {
+        let config = GarminFirestoreConfig(
+            isEnabled: GarminFirebaseConstants.isConfigured,
+            userID: GarminFirebaseConstants.firestoreUserID
+        )
+        self.init(config: config)
     }
 
     /// Fetch the latest Garmin context snapshot from Firestore.
@@ -82,17 +157,6 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
     // MARK: - Build Snapshot
 
     /// Queries all relevant Firestore collections and builds a GarminContextSnapshot.
-    ///
-    /// When Firebase SDK is added, replace the `fetchDocument()` calls with real Firestore queries:
-    /// ```
-    /// let doc = try await Firestore.firestore()
-    ///     .collection(config.basePath)
-    ///     .document(config.dailiesCollection)
-    ///     .collection("documents")
-    ///     .document(dateString)
-    ///     .getDocument()
-    /// let data = doc.data()
-    /// ```
     private func buildSnapshot() async -> GarminContextSnapshot? {
         let today = calendarDateString(for: Date())
         let yesterday = calendarDateString(for: Date().addingTimeInterval(-86400))
@@ -223,63 +287,66 @@ final class GarminFirestoreService: GarminFirestoreServiceProtocol {
         return hrvValues.reduce(0, +) / hrvValues.count
     }
 
-    // MARK: - Firestore Document Access (Stub)
-    //
-    // These methods define the exact queries needed. Replace the body of each
-    // with real Firestore SDK calls when the dependency is added.
-    //
-    // Firestore path structure:
-    //   /users/{uid}/garminData/dailies/{calendarDate}
-    //   /users/{uid}/garminData/sleeps/{calendarDate}
-    //   /users/{uid}/garminData/stressDetails/{calendarDate}
-    //   /users/{uid}/garminData/hrv/{calendarDate}
-    //   /users/{uid}/garminData/userMetrics/{calendarDate}
-    //
-    // Document IDs are calendarDate strings: "yyyy-MM-dd"
+    // MARK: - Firestore Document Access
 
-    /// Fetch a single document by collection and date.
-    /// Real implementation:
-    /// ```
-    /// let ref = Firestore.firestore()
-    ///     .document("\(config.basePath)/\(collection)/\(documentID)")
-    /// let snapshot = try await ref.getDocument()
-    /// return snapshot.data()
-    /// ```
+    /// Fetch a single document by collection and calendar date.
+    /// Path: /users/{uid}/garminData/{collection}/{calendarDate}
     private func fetchDocument(collection: String, documentID: String) async -> [String: Any]? {
-        // STUB: Return nil until Firebase SDK is integrated
-        return nil
+        guard let db = GarminFirebaseManager.firestore else { return nil }
+
+        do {
+            let docRef = db.document("\(config.basePath)/\(collection)/\(documentID)")
+            let snapshot = try await docRef.getDocument()
+            return snapshot.data()
+        } catch {
+            debug(.service, "Garmin Firestore: fetchDocument(\(collection)/\(documentID)) failed — \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Fetch the most recent document on or before a given date.
-    /// Real implementation: query with orderBy calendarDate descending, limit 1.
-    /// ```
-    /// let ref = Firestore.firestore()
-    ///     .collection("\(config.basePath)/\(collection)")
-    ///     .whereField("calendarDate", isLessThanOrEqualTo: dateString)
-    ///     .order(by: "calendarDate", descending: true)
-    ///     .limit(to: 1)
-    /// let snapshot = try await ref.getDocuments()
-    /// return snapshot.documents.first?.data()
-    /// ```
+    /// Documents are keyed by calendarDate (yyyy-MM-dd), so lexicographic ordering works.
     private func fetchMostRecentDocument(collection: String, onOrBefore dateString: String) async -> [String: Any]? {
-        // STUB: Return nil until Firebase SDK is integrated
-        return nil
+        guard let db = GarminFirebaseManager.firestore else { return nil }
+
+        do {
+            // First try the exact date (most common case)
+            let exactDoc = try await db.document("\(config.basePath)/\(collection)/\(dateString)").getDocument()
+            if exactDoc.exists, let data = exactDoc.data() {
+                return data
+            }
+
+            // Fall back to querying by document ID (lexicographic order on calendarDate keys)
+            let collectionRef = db.collection("\(config.basePath)/\(collection)")
+            let snapshot = try await collectionRef
+                .whereField(FieldPath.documentID(), isLessThanOrEqualTo: dateString)
+                .order(by: FieldPath.documentID(), descending: true)
+                .limit(to: 1)
+                .getDocuments()
+            return snapshot.documents.first?.data()
+        } catch {
+            debug(.service, "Garmin Firestore: fetchMostRecent(\(collection), ≤\(dateString)) failed — \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Fetch documents for the last N days (for computing averages).
-    /// Real implementation: query with calendarDate >= (today - N days).
-    /// ```
-    /// let cutoff = calendarDateString(for: Date().addingTimeInterval(-Double(lastDays) * 86400))
-    /// let ref = Firestore.firestore()
-    ///     .collection("\(config.basePath)/\(collection)")
-    ///     .whereField("calendarDate", isGreaterThanOrEqualTo: cutoff)
-    ///     .order(by: "calendarDate", descending: true)
-    /// let snapshot = try await ref.getDocuments()
-    /// return snapshot.documents.map { $0.data() }
-    /// ```
     private func fetchDocuments(collection: String, lastDays: Int) async -> [[String: Any]] {
-        // STUB: Return empty until Firebase SDK is integrated
-        return []
+        guard let db = GarminFirebaseManager.firestore else { return [] }
+
+        let cutoff = calendarDateString(for: Date().addingTimeInterval(-Double(lastDays) * 86400))
+
+        do {
+            let collectionRef = db.collection("\(config.basePath)/\(collection)")
+            let snapshot = try await collectionRef
+                .whereField(FieldPath.documentID(), isGreaterThanOrEqualTo: cutoff)
+                .order(by: FieldPath.documentID(), descending: true)
+                .getDocuments()
+            return snapshot.documents.map { $0.data() }
+        } catch {
+            debug(.service, "Garmin Firestore: fetchDocuments(\(collection), \(lastDays)d) failed — \(error.localizedDescription)")
+            return []
+        }
     }
 
     // MARK: - Helpers

@@ -9,6 +9,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, ObservableObject, UNUserNoti
         _: UIApplication,
         didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        // Configure default Firebase app (Crashlytics)
         FirebaseApp.configure()
 
         // Default to `true` if the key doesn't exist
@@ -19,6 +20,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, ObservableObject, UNUserNoti
         // to boot after a crash
         Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(crashReportingEnabled)
         Crashlytics.crashlytics().setCustomValue(Bundle.main.appDevVersion ?? "unknown", forKey: "app_dev_version")
+
+        // Configure and sign into the Garmin Firestore project (secondary Firebase app).
+        // This is a no-op if GARMIN_FIREBASE_* secrets were not injected at build time.
+        Task {
+            await GarminFirebaseManager.configureAndSignIn()
+        }
 
         return true
     }
