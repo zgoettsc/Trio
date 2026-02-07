@@ -583,6 +583,9 @@ extension Treatments {
                         predictionCurve: state.cronometerPredictionCurve,
                         outcomeStats: state.cronometerOutcomeStats,
                         mealPrediction: state.cronometerMealPrediction,
+                        isLateMeal: state.cronometerMealIsLate,
+                        minutesSinceMeal: state.cronometerMealMinutesAgo,
+                        decayAdjustedCarbs: state.cronometerDecayAdjustedCarbs,
                         onApply: { carbs, fat, protein in
                             state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein)
                             handleDebouncedInput()
@@ -595,6 +598,20 @@ extension Treatments {
                         }
                     )
                 }
+            }
+            .sheet(isPresented: $state.showMealPickerSheet) {
+                CronometerMealPickerView(
+                    meals: state.cronometerAvailableMeals,
+                    alreadyDosedMealDates: state.cronometerAlreadyDosedDates,
+                    onSelect: { meal in
+                        Task {
+                            await state.selectCronometerMeal(meal)
+                        }
+                    },
+                    onDismiss: {
+                        state.showMealPickerSheet = false
+                    }
+                )
             }
             .alert("Cronometer", isPresented: Binding(
                 get: { state.cronometerError != nil },

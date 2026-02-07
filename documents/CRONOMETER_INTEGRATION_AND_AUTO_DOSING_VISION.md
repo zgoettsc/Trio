@@ -284,6 +284,104 @@ When food is logged for a low treatment (e.g., juice) without dosing (user doesn
 
 ---
 
+## Phase 5b: Late Dosing with Meal Picker
+
+**Status: COMPLETE**
+
+### The Problem
+
+User eats lunch at noon, logs it in Cronometer, but gets distracted and forgets to dose. At 12:45 they realize. They tap Crono, but the live delta shows nothing new (no food logged in the last 15 minutes). Previously this showed an error — now the system searches further back and lets them pick which meal to dose for, with a decay-adjusted recommendation.
+
+### The Flow
+
+```
+User taps Crono at 12:45
+  → fetchLatestMealDelta() → no new delta → nil
+  → Search today's grouped meals from snapshot history
+  → Found: [Breakfast 8:00 — 45g C, 12g F, 8g P]
+           [Lunch 12:02 — 62g C, 18g F, 25g P]
+  → Present meal picker: "Select meal to dose for"
+  → User selects Lunch (12:02)
+  → System calculates: meal is 43 minutes old
+  → Apply carb decay model (hybrid: time-based + BG-informed)
+  → Show adjusted recommendation:
+      "This meal was 43 min ago.
+       ~28g carbs remaining of 62g (55% absorbed).
+       Fat/protein: unchanged (FPU delay hasn't started yet).
+       Current BG: 165↑, IOB: 0.8U"
+```
+
+### Carb Decay Model (Hybrid Approach)
+
+**Time-based decay (primary estimate):**
+
+Uses an exponential decay curve calibrated to typical carb absorption:
+```
+remainingFraction = exp(-0.025 * minutesSinceMeal)
+```
+- T+0:   100% remaining
+- T+15:  ~69% remaining
+- T+30:  ~47% remaining
+- T+45:  ~32% remaining
+- T+60:  ~22% remaining
+- T+90:  ~11% remaining
+- T+120: ~5% remaining
+
+**BG-informed cross-check:**
+
+The actual BG rise tells us how much has already absorbed:
+```
+bgRise = currentBG - bgAtMealTime (approximated from glucose history)
+estimatedCarbsAbsorbed = bgRise / ISF * CR
+bgInformedRemaining = totalCarbs - estimatedCarbsAbsorbed
+```
+
+**Hybrid blend:** Take the MINIMUM of the two estimates (more conservative = safer):
+```
+remainingCarbs = min(timeBasedRemaining, bgInformedRemaining)
+```
+
+If BG hasn't risen much (slow-absorbing meal, or insulin already on board), the time-based estimate is used. If BG has risen a lot (fast-absorbing meal), the BG-informed estimate captures that more carbs are already absorbed.
+
+### Fat/Protein Handling for Late Doses
+
+FPU absorption has a built-in 60-minute delay before it starts. This means:
+- **0-60 min late:** Fat/protein recommendation is UNCHANGED — the delay hasn't elapsed
+- **60-120 min late:** Reduce fat/protein proportionally (FPU absorption has started)
+- **>120 min late:** Further reduction, but the loop's SMBs are already handling it
+
+```swift
+fpuRemainingFraction:
+  minutesSinceMeal < 60:  1.0  (full — delay period hasn't started)
+  minutesSinceMeal < 120: 1.0 - ((minutesSinceMeal - 60) / fpuDuration * 60)
+  otherwise:              max(0, 1.0 - ((minutesSinceMeal - 60) / (fpuDuration * 60)))
+```
+
+### Already-Dosed Detection
+
+The meal picker cross-references each meal against:
+1. `CronometerRecommendationStore` — was a recommendation already applied for this meal?
+2. Time proximity — is there a `CronometerMealRecommendation` within 30 minutes of the meal?
+
+Meals that were already dosed show a warning badge and are still selectable (in case the user wants to dose again for a different reason), but the UI makes it clear.
+
+### Safety Guardrails
+
+- Meals >3 hours old show a warning: "Most carbs likely absorbed. Late dosing may cause a low."
+- Meals >4 hours old are greyed out with: "Too old for carb dosing. The loop has already compensated."
+- The decay model never recommends MORE insulin than a fresh dose would — only less.
+- The oref simulation runs with the decay-adjusted values, accounting for current BG, IOB, and trend.
+
+### Key Files
+
+- `NutritionSnapshot.swift` — `CarbDecayModel` with hybrid time+BG decay calculation
+- `CronometerMealPickerView.swift` — Meal selection UI with age, remaining carbs, already-dosed badges
+- `TreatmentsStateModel.swift` — `cronometerAvailableMeals`, `selectCronometerMeal()`, decay-adjusted recommendation
+- `CronometerMealRecommendationView.swift` — Late meal banner showing elapsed time and decay info
+- `TreatmentsRootView.swift` — Meal picker sheet wiring
+
+---
+
 ## Phase 6: Background Auto-Detection & Notification Dosing
 
 **Status: PLANNED — NOT YET IMPLEMENTED**

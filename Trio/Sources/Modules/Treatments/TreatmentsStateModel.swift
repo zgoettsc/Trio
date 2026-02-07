@@ -123,6 +123,14 @@ extension Treatments {
         )
         var isFetchingCronometerMeal: Bool = false
         var cronometerError: String?
+
+        // Late dosing / meal picker
+        var showMealPickerSheet: Bool = false
+        var cronometerAvailableMeals: [InferredMealEvent] = []
+        var cronometerAlreadyDosedDates: Set<Date> = []
+        var cronometerMealIsLate: Bool = false
+        var cronometerMealMinutesAgo: Double = 0
+        var cronometerDecayAdjustedCarbs: Double?
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
         var preprocessedData: [(id: UUID, forecast: Forecast, forecastValue: ForecastValue)] = []
@@ -336,15 +344,29 @@ extension Treatments {
 
             if let liveDelta = await nutritionHealthService.fetchLatestMealDelta() {
                 latestMeal = liveDelta
+                cronometerMealIsLate = false
+                cronometerMealMinutesAgo = 0
+                cronometerDecayAdjustedCarbs = nil
             } else {
-                // Fallback: check stored snapshot deltas from the observer
+                // No recent delta — check if there are older meals today the user can pick from
                 let storedMeals = NutritionSnapshotStore.shared.inferredMealEvents(forLastHours: 24)
-                guard let fallbackMeal = storedMeals.last else {
-                    cronometerError = "No recent Cronometer meal detected. Make sure nutrition reading is enabled in Settings, then log food in Cronometer and wait for it to sync to Apple Health."
+                    .filter { $0.carbsDelta > 1 || $0.fatDelta > 1 || $0.proteinDelta > 1 }
+
+                if storedMeals.isEmpty {
+                    cronometerError = "No Cronometer meals detected today. Make sure nutrition reading is enabled in Settings, then log food in Cronometer and wait for it to sync to Apple Health."
                     isFetchingCronometerMeal = false
                     return
                 }
-                latestMeal = fallbackMeal
+
+                // Build already-dosed dates from recommendation store
+                let store = CronometerRecommendationStore.shared
+                cronometerAlreadyDosedDates = Set(store.loadAll().map(\.date))
+                cronometerAvailableMeals = storedMeals
+
+                // Show the meal picker instead of an error
+                isFetchingCronometerMeal = false
+                showMealPickerSheet = true
+                return
             }
 
             cronometerMeal = latestMeal
@@ -477,6 +499,118 @@ extension Treatments {
         /// Called before opening Cronometer so the next Crono tap only shows food logged AFTER this point.
         @MainActor func recordCronometerBaseline() async {
             let _ = await nutritionHealthService.fetchLatestMealDelta()
+        }
+
+        /// Called when user selects a meal from the picker (late dosing flow).
+        /// Applies carb decay model to adjust the recommendation for elapsed time.
+        @MainActor func selectCronometerMeal(_ meal: InferredMealEvent) async {
+            showMealPickerSheet = false
+            isFetchingCronometerMeal = true
+
+            let minutesAgo = meal.minutesAgo
+            cronometerMealIsLate = minutesAgo > 15
+            cronometerMealMinutesAgo = minutesAgo
+
+            // Set the meal (original macros preserved for display)
+            cronometerMeal = meal
+
+            // Get personal adjustment factor
+            let store = CronometerRecommendationStore.shared
+            cronometerAdjustmentFactor = store.personalAdjustmentFactor()
+            cronometerOutcomeStats = store.outcomeStats()
+
+            // Build prediction from similar meals
+            let predictionContext = CoreDataStack.shared.newTaskContext()
+            let predictionService = MealOutcomePredictionService.shared
+            let history = await predictionService.buildHistoricalOutcomes(context: predictionContext)
+            cronometerMealPrediction = predictionService.predictOutcome(
+                forCarbs: meal.carbsDelta,
+                fat: meal.fatDelta,
+                protein: meal.proteinDelta,
+                currentBG: Int(NSDecimalNumber(decimal: currentBG).intValue),
+                currentIOB: NSDecimalNumber(decimal: iob).doubleValue,
+                history: history
+            )
+
+            // Apply learned factors (same as normal flow)
+            if let prediction = cronometerMealPrediction {
+                if let suggestedCarbFactor = prediction.suggestedCarbFactor {
+                    cronometerAdjustmentFactor = max(0.2, min(1.5,
+                        suggestedCarbFactor * 0.6 + cronometerAdjustmentFactor * 0.4))
+                } else if let suggestedICR = prediction.suggestedEffectiveICR,
+                          suggestedICR > 0, currentCarbRatio > 0
+                {
+                    let pumpCR = NSDecimalNumber(decimal: currentCarbRatio).doubleValue
+                    let predictedFactor = pumpCR / suggestedICR
+                    cronometerAdjustmentFactor = max(0.2, min(1.5,
+                        predictedFactor * 0.6 + cronometerAdjustmentFactor * 0.4))
+                }
+            }
+
+            // Calculate recommendation, then apply decay adjustment to carbs
+            calculateCronometerRecommendation()
+
+            if cronometerMealIsLate {
+                // Apply hybrid carb decay: time-based cross-checked with BG rise
+                let bgAtMealTime = approximateBGAtTime(meal.detectedAt)
+                let currentBGValue = Int(NSDecimalNumber(decimal: currentBG).intValue)
+                let bgRise: Double? = bgAtMealTime.map { Double(currentBGValue - $0) }
+
+                let isfValue = NSDecimalNumber(decimal: isf).doubleValue
+                let crValue = NSDecimalNumber(decimal: currentCarbRatio).doubleValue
+
+                let remainingCarbs = CarbDecayModel.remainingCarbs(
+                    originalCarbs: cronometerRecommendedCarbs,
+                    minutesSinceMeal: minutesAgo,
+                    bgRise: bgRise,
+                    isf: isfValue,
+                    carbRatio: crValue
+                )
+                cronometerDecayAdjustedCarbs = remainingCarbs
+                cronometerRecommendedCarbs = remainingCarbs
+
+                // Apply FPU decay for fat/protein
+                let fpuRemaining = CarbDecayModel.fpuRemainingFraction(
+                    minutesSinceMeal: minutesAgo,
+                    fpuDurationHours: cronometerFPUDurationHours
+                )
+                cronometerRecommendedFat *= fpuRemaining
+                cronometerRecommendedProtein *= fpuRemaining
+
+                // Recalculate FPU with decay-adjusted values
+                let fatCal = cronometerRecommendedFat * 9
+                let proteinCal = cronometerRecommendedProtein * 4
+                let individualFactor = settingsManager.settings.individualAdjustmentFactor
+                cronometerFPUCarbEquivalents = ((fatCal + proteinCal) / 10) * individualFactor
+            } else {
+                cronometerDecayAdjustedCarbs = nil
+            }
+
+            // Run simulation with the (possibly decay-adjusted) values
+            await runCronometerSimulation()
+
+            // Background outcome backfill
+            Task {
+                await store.backfillOutcomes(context: CoreDataStack.shared.newTaskContext())
+                let _ = store.recalculateFactorFromOutcomes()
+            }
+
+            isFetchingCronometerMeal = false
+            showCronometerSheet = true
+        }
+
+        /// Approximate the user's BG at a past time by searching glucose history.
+        /// Returns nil if no reading is close enough.
+        @MainActor private func approximateBGAtTime(_ targetTime: Date) -> Int? {
+            let tolerance: TimeInterval = 10 * 60 // 10 minutes
+            let closest = glucoseFromPersistence
+                .compactMap { g -> (date: Date, value: Int)? in
+                    guard let date = g.date else { return nil }
+                    return (date: date, value: Int(g.glucose))
+                }
+                .filter { abs($0.date.timeIntervalSince(targetTime)) < tolerance }
+                .min(by: { abs($0.date.timeIntervalSince(targetTime)) < abs($1.date.timeIntervalSince(targetTime)) })
+            return closest?.value
         }
 
         /// Called when user taps Apply — populates carb/fat/protein fields and logs the recommendation

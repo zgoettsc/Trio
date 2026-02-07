@@ -20,6 +20,11 @@ struct CronometerMealRecommendationView: View {
     let outcomeStats: CronometerOutcomeStats
     let mealPrediction: MealOutcomePrediction?
 
+    // Late dosing context (nil/false if this is a fresh meal)
+    let isLateMeal: Bool
+    let minutesSinceMeal: Double
+    let decayAdjustedCarbs: Double? // nil if fresh meal
+
     let onApply: (Double, Double, Double) -> Void // (carbs, fat, protein) to populate
     let onAdjustFactor: (Double) -> Void
     let onDismiss: () -> Void
@@ -49,6 +54,9 @@ struct CronometerMealRecommendationView: View {
         predictionCurve: [Int]?,
         outcomeStats: CronometerOutcomeStats,
         mealPrediction: MealOutcomePrediction?,
+        isLateMeal: Bool = false,
+        minutesSinceMeal: Double = 0,
+        decayAdjustedCarbs: Double? = nil,
         onApply: @escaping (Double, Double, Double) -> Void,
         onAdjustFactor: @escaping (Double) -> Void,
         onDismiss: @escaping () -> Void
@@ -68,6 +76,9 @@ struct CronometerMealRecommendationView: View {
         self.predictionCurve = predictionCurve
         self.outcomeStats = outcomeStats
         self.mealPrediction = mealPrediction
+        self.isLateMeal = isLateMeal
+        self.minutesSinceMeal = minutesSinceMeal
+        self.decayAdjustedCarbs = decayAdjustedCarbs
         self.onApply = onApply
         self.onAdjustFactor = onAdjustFactor
         self.onDismiss = onDismiss
@@ -78,6 +89,11 @@ struct CronometerMealRecommendationView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 16) {
+                    // Late meal warning banner
+                    if isLateMeal {
+                        lateMealBanner
+                    }
+
                     // BG Prediction Chart
                     predictionChartSection
 
@@ -114,6 +130,77 @@ struct CronometerMealRecommendationView: View {
                     Button("Cancel") { onDismiss() }
                 }
             }
+        }
+    }
+
+    // MARK: - Late Meal Banner
+
+    private var lateMealBanner: some View {
+        let warning = CarbDecayModel.warningLevel(minutesSinceMeal: minutesSinceMeal)
+        let carbFraction = CarbDecayModel.carbsRemainingFraction(minutesSinceMeal: minutesSinceMeal)
+        let absorbedPercent = Int((1.0 - carbFraction) * 100)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: warning == .severe ? "exclamationmark.triangle.fill" : "clock.badge")
+                    .font(.headline)
+                Text("Late Dose — \(meal.timeAgoString)")
+                    .font(.headline)
+                Spacer()
+            }
+            .foregroundStyle(warningBannerColor(warning))
+
+            Text(warning.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 16) {
+                VStack(spacing: 2) {
+                    Text("\(absorbedPercent)%")
+                        .font(.title3.bold().monospacedDigit())
+                        .foregroundStyle(.orange)
+                    Text("absorbed")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(spacing: 2) {
+                    Text("\(Int(recommendedCarbs))g")
+                        .font(.title3.bold().monospacedDigit())
+                        .foregroundStyle(.blue)
+                    Text("carbs remaining")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                if minutesSinceMeal < 60 {
+                    VStack(spacing: 2) {
+                        Text("100%")
+                            .font(.title3.bold().monospacedDigit())
+                            .foregroundStyle(.purple)
+                        Text("fat/protein")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding()
+        .background(warningBannerColor(warning).opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(warningBannerColor(warning).opacity(0.3), lineWidth: 1)
+        )
+        .cornerRadius(12)
+    }
+
+    private func warningBannerColor(_ warning: CarbDecayModel.LateDoseWarning) -> Color {
+        switch warning {
+        case .none: return .green
+        case .mild: return .yellow
+        case .moderate: return .orange
+        case .severe: return .red
         }
     }
 

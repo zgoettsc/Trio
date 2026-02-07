@@ -57,6 +57,128 @@ struct InferredMealEvent: Identifiable, Equatable {
     var totalCalories: Double {
         (carbsDelta * 4) + (fatDelta * 9) + (proteinDelta * 4)
     }
+
+    /// Minutes since this meal was detected
+    var minutesAgo: Double {
+        Date().timeIntervalSince(detectedAt) / 60
+    }
+
+    /// Human-readable time-ago string
+    var timeAgoString: String {
+        let mins = Int(minutesAgo)
+        if mins < 60 {
+            return "\(mins) min ago"
+        } else {
+            let hours = mins / 60
+            let remainingMins = mins % 60
+            if remainingMins == 0 {
+                return "\(hours)h ago"
+            }
+            return "\(hours)h \(remainingMins)m ago"
+        }
+    }
+}
+
+// MARK: - Carb Decay Model
+
+/// Estimates how much of a meal's macros remain un-absorbed based on elapsed time.
+/// Uses a hybrid approach: time-based exponential decay cross-checked against
+/// actual BG rise (if available) to adapt to fast/slow absorbing meals.
+enum CarbDecayModel {
+    /// Exponential decay rate for carb absorption.
+    /// Calibrated so ~50% absorbed at ~30 min, ~80% at ~60 min.
+    private static let carbDecayRate: Double = 0.025
+
+    /// FPU delay before fat/protein absorption starts (minutes)
+    private static let fpuDelayMinutes: Double = 60
+
+    /// Fraction of original carbs remaining after `minutes` since the meal.
+    static func carbsRemainingFraction(minutesSinceMeal: Double) -> Double {
+        guard minutesSinceMeal > 0 else { return 1.0 }
+        return max(0, exp(-carbDecayRate * minutesSinceMeal))
+    }
+
+    /// Fraction of fat/protein remaining, accounting for the 60-min FPU delay.
+    /// Fat/protein don't start absorbing until the delay elapses, then absorb
+    /// over the FPU duration (3-8 hours depending on FPU count).
+    static func fpuRemainingFraction(minutesSinceMeal: Double, fpuDurationHours: Double) -> Double {
+        guard minutesSinceMeal > fpuDelayMinutes else { return 1.0 }
+        let fpuDurationMinutes = fpuDurationHours * 60
+        guard fpuDurationMinutes > 0 else { return 0 }
+        let minutesIntoAbsorption = minutesSinceMeal - fpuDelayMinutes
+        return max(0, 1.0 - (minutesIntoAbsorption / fpuDurationMinutes))
+    }
+
+    /// BG-informed estimate of carbs already absorbed.
+    /// Uses the BG rise since meal time and the user's ISF/CR to back-calculate.
+    static func bgInformedCarbsAbsorbed(
+        bgRise: Double,
+        isf: Double,
+        carbRatio: Double
+    ) -> Double? {
+        guard isf > 0, carbRatio > 0, bgRise > 0 else { return nil }
+        // bgRise = carbsAbsorbed / CR * ISF → carbsAbsorbed = bgRise * CR / ISF
+        return bgRise * carbRatio / isf
+    }
+
+    /// Hybrid remaining carbs: takes the minimum of time-based and BG-informed estimates.
+    /// More conservative = safer (won't over-dose).
+    static func remainingCarbs(
+        originalCarbs: Double,
+        minutesSinceMeal: Double,
+        bgRise: Double?,
+        isf: Double,
+        carbRatio: Double
+    ) -> Double {
+        let timeBased = originalCarbs * carbsRemainingFraction(minutesSinceMeal: minutesSinceMeal)
+
+        if let rise = bgRise,
+           let absorbed = bgInformedCarbsAbsorbed(bgRise: rise, isf: isf, carbRatio: carbRatio)
+        {
+            let bgBased = max(0, originalCarbs - absorbed)
+            return min(timeBased, bgBased) // More conservative
+        }
+
+        return timeBased
+    }
+
+    /// Warning level for late dosing based on meal age
+    static func warningLevel(minutesSinceMeal: Double) -> LateDoseWarning {
+        if minutesSinceMeal <= 15 {
+            return .none
+        } else if minutesSinceMeal <= 60 {
+            return .mild
+        } else if minutesSinceMeal <= 180 {
+            return .moderate
+        } else {
+            return .severe
+        }
+    }
+
+    enum LateDoseWarning {
+        case none      // Fresh meal, no warning
+        case mild      // 15-60 min: "dosing slightly late"
+        case moderate  // 1-3 hours: "significant absorption, reduced dose"
+        case severe    // >3 hours: "most carbs absorbed, dosing may cause low"
+
+        var message: String {
+            switch self {
+            case .none: return ""
+            case .mild: return "Dosing slightly late. Carb recommendation reduced for absorption."
+            case .moderate: return "Significant time has passed. Most fast carbs absorbed. Reduced dose recommended."
+            case .severe: return "Most carbs likely absorbed. Late dosing may cause a low. Consider skipping."
+            }
+        }
+
+        var color: String {
+            switch self {
+            case .none: return "green"
+            case .mild: return "yellow"
+            case .moderate: return "orange"
+            case .severe: return "red"
+            }
+        }
+    }
 }
 
 // MARK: - Low Episode Classification
