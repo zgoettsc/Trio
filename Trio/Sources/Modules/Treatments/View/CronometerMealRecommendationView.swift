@@ -262,14 +262,24 @@ struct CronometerMealRecommendationView: View {
                 }
             }
 
-            Text("Scaled from Cronometer using your personal factor")
+            Text("Carbs, fat, and protein scaled from Cronometer using learned factors")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 16) {
-                macroCard("Carbs", value: Int(recommendedCarbs), unit: "g", color: .blue)
-                macroCard("Fat", value: Int(recommendedFat), unit: "g", color: .yellow)
-                macroCard("Protein", value: Int(recommendedProtein), unit: "g", color: .red)
+                macroCardWithDelta("Carbs", value: Int(recommendedCarbs), original: Int(meal.carbsDelta), unit: "g", color: .blue)
+                macroCardWithDelta("Fat", value: Int(recommendedFat), original: Int(meal.fatDelta), unit: "g", color: .yellow)
+                macroCardWithDelta("Protein", value: Int(recommendedProtein), original: Int(meal.proteinDelta), unit: "g", color: .red)
+            }
+
+            if recommendedFat < meal.fatDelta || recommendedProtein < meal.proteinDelta {
+                HStack(spacing: 4) {
+                    Image(systemName: "info.circle")
+                        .font(.caption2)
+                    Text("Fat/protein reduced based on past meal outcomes. The loop handles the rest via FPU-driven SMBs over \(String(format: "%.0f", fpuDurationHours))h.")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
             }
 
             if showFactorEditor {
@@ -327,12 +337,12 @@ struct CronometerMealRecommendationView: View {
 
     private var fpuSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Fat/Protein Units", systemImage: "clock.arrow.circlepath")
+            Label("Fat/Protein Units (Delayed Insulin)", systemImage: "clock.arrow.circlepath")
                 .font(.headline)
                 .foregroundStyle(.purple)
 
             Text(
-                "The app's FPU system will convert fat+protein into \(Int(fpuCarbEquivalents))g of delayed carb-equivalents, absorbed over \(String(format: "%.1f", fpuDurationHours)) hours starting 1h after the meal."
+                "The entered fat+protein will generate \(Int(fpuCarbEquivalents))g of delayed carb-equivalents. The loop will deliver extra insulin via SMBs over \(String(format: "%.0f", fpuDurationHours)) hours (starting 1h after the meal). This reduces the need for a large upfront carb bolus."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -340,12 +350,22 @@ struct CronometerMealRecommendationView: View {
             HStack {
                 Image(systemName: "arrow.right")
                     .foregroundStyle(.purple)
-                Text("\(Int(meal.fatDelta))g fat + \(Int(meal.proteinDelta))g protein")
+                Text("\(Int(recommendedFat))g fat + \(Int(recommendedProtein))g protein")
                 Image(systemName: "equal")
                 Text("\(Int(fpuCarbEquivalents))g carb-equiv over \(String(format: "%.0f", fpuDurationHours))h")
                     .bold()
             }
             .font(.caption)
+
+            // Show the total insulin picture
+            let totalCarbEquiv = recommendedCarbs + fpuCarbEquivalents
+            HStack(spacing: 4) {
+                Image(systemName: "sum")
+                    .foregroundStyle(.purple)
+                Text("Total coverage: \(Int(recommendedCarbs))g upfront + \(Int(fpuCarbEquivalents))g delayed = \(Int(totalCarbEquiv))g equivalent")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding()
         .background(Color.purple.opacity(0.05))
@@ -463,16 +483,44 @@ struct CronometerMealRecommendationView: View {
             }
 
             // Suggested dosing
-            if let suggestedICR = prediction.suggestedEffectiveICR {
+            if prediction.suggestedEffectiveICR != nil || prediction.suggestedCarbFactor != nil {
                 Divider()
-                HStack {
-                    Image(systemName: "syringe")
-                        .foregroundStyle(.teal)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Effective ICR from similar meals: 1:\(String(format: "%.1f", suggestedICR))")
-                            .font(.caption.bold())
-                        if let suggestedBolus = prediction.suggestedBolus {
-                            Text("Suggested bolus: \(String(format: "%.1f", suggestedBolus)) U")
+                VStack(alignment: .leading, spacing: 4) {
+                    if let suggestedICR = prediction.suggestedEffectiveICR {
+                        HStack {
+                            Image(systemName: "syringe")
+                                .foregroundStyle(.teal)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Effective ICR from similar meals: 1:\(String(format: "%.1f", suggestedICR))")
+                                    .font(.caption.bold())
+                                if let suggestedBolus = prediction.suggestedBolus {
+                                    Text("Suggested bolus: \(String(format: "%.1f", suggestedBolus)) U")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    // Show learned macro entry factors
+                    if let carbF = prediction.suggestedCarbFactor,
+                       let fatF = prediction.suggestedFatFactor,
+                       let protF = prediction.suggestedProteinFactor
+                    {
+                        HStack {
+                            Image(systemName: "tuningfork")
+                                .foregroundStyle(.teal)
+                            Text("Learned factors: carb \(String(format: "%.0f", carbF * 100))%, fat \(String(format: "%.0f", fatF * 100))%, protein \(String(format: "%.0f", protF * 100))%")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let fpuEquiv = prediction.estimatedFPUCarbEquivalents, fpuEquiv > 1 {
+                        HStack {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .foregroundStyle(.teal)
+                            Text("FPU from suggested entry: ~\(Int(fpuEquiv))g delayed carb-equiv via SMBs")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -561,7 +609,7 @@ struct CronometerMealRecommendationView: View {
                 .cornerRadius(12)
             }
 
-            Text("This will fill in carbs, fat, and protein. Review the bolus recommendation before confirming.")
+            Text("Carbs: \(Int(meal.carbsDelta * editedFactor))g (bolus), Fat: \(Int(recommendedFat))g + Protein: \(Int(recommendedProtein))g (FPU → loop SMBs over \(String(format: "%.0f", fpuDurationHours))h)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -575,6 +623,23 @@ struct CronometerMealRecommendationView: View {
             Text("\(value)")
                 .font(.title3.bold().monospacedDigit())
                 .foregroundStyle(color)
+            Text("\(unit) \(title.lowercased())")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func macroCardWithDelta(_ title: String, value: Int, original: Int, unit: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)")
+                .font(.title3.bold().monospacedDigit())
+                .foregroundStyle(color)
+            if value != original {
+                Text("of \(original)\(unit)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Text("\(unit) \(title.lowercased())")
                 .font(.caption2)
                 .foregroundStyle(.secondary)

@@ -356,16 +356,23 @@ extension Treatments {
                 history: history
             )
 
-            // If we have a predicted effective ICR, use it to inform the adjustment factor
-            if let suggestedICR = cronometerMealPrediction?.suggestedEffectiveICR,
-               suggestedICR > 0, currentCarbRatio > 0
-            {
-                // Factor = pump CR / effective ICR (how much to scale carbs given current settings)
-                let pumpCR = NSDecimalNumber(decimal: currentCarbRatio).doubleValue
-                let predictedFactor = pumpCR / suggestedICR
-                // Blend with stored factor: 60% predicted, 40% historical
-                let blendedFactor = max(0.2, min(1.5, predictedFactor * 0.6 + cronometerAdjustmentFactor * 0.4))
-                cronometerAdjustmentFactor = blendedFactor
+            // If we have predicted entry factors from similar meals, use them
+            // The prediction model learns coupled carb/fat/protein factors as a system:
+            // more fat/protein entry → more FPU → more loop SMBs → less upfront carb bolus needed
+            if let prediction = cronometerMealPrediction {
+                if let suggestedCarbFactor = prediction.suggestedCarbFactor {
+                    // Blend predicted carb factor with stored factor: 60% predicted, 40% historical
+                    cronometerAdjustmentFactor = max(0.2, min(1.5,
+                        suggestedCarbFactor * 0.6 + cronometerAdjustmentFactor * 0.4))
+                } else if let suggestedICR = prediction.suggestedEffectiveICR,
+                          suggestedICR > 0, currentCarbRatio > 0
+                {
+                    // Fallback: derive carb factor from effective ICR
+                    let pumpCR = NSDecimalNumber(decimal: currentCarbRatio).doubleValue
+                    let predictedFactor = pumpCR / suggestedICR
+                    cronometerAdjustmentFactor = max(0.2, min(1.5,
+                        predictedFactor * 0.6 + cronometerAdjustmentFactor * 0.4))
+                }
             }
 
             // Calculate recommended entry
@@ -384,22 +391,36 @@ extension Treatments {
             isFetchingCronometerMeal = false
         }
 
-        /// Calculate recommended carbs/fat/protein from Cronometer meal using personal factor
+        /// Calculate recommended carbs/fat/protein from Cronometer meal.
+        /// Fat/protein interact with carbs through FPU: entering more fat/protein → more FPU carb-equivalents
+        /// → loop delivers more insulin via SMBs → less upfront carb bolus needed.
+        /// The prediction model learns this as a coupled system from past meals.
         @MainActor private func calculateCronometerRecommendation() {
             guard let meal = cronometerMeal else { return }
 
-            // Carbs are scaled by the personal factor
-            // Fat and protein are passed through fully (for FPU calculation)
-            cronometerRecommendedCarbs = meal.carbsDelta * cronometerAdjustmentFactor
-            cronometerRecommendedFat = meal.fatDelta
-            cronometerRecommendedProtein = meal.proteinDelta
+            // Use prediction-informed factors if available, otherwise use defaults
+            if let prediction = cronometerMealPrediction,
+               prediction.suggestedFatFactor != nil || prediction.suggestedProteinFactor != nil
+            {
+                // Prediction has learned coupled entry factors from similar meals
+                cronometerRecommendedCarbs = meal.carbsDelta * cronometerAdjustmentFactor
+                cronometerRecommendedFat = meal.fatDelta * (prediction.suggestedFatFactor ?? 1.0)
+                cronometerRecommendedProtein = meal.proteinDelta * (prediction.suggestedProteinFactor ?? 1.0)
+            } else {
+                // No prediction data yet — use learned factors from outcome store
+                let store = CronometerRecommendationStore.shared
+                cronometerRecommendedCarbs = meal.carbsDelta * cronometerAdjustmentFactor
+                cronometerRecommendedFat = meal.fatDelta * store.personalFatFactor()
+                cronometerRecommendedProtein = meal.proteinDelta * store.personalProteinFactor()
+            }
 
-            // Calculate FPU carb equivalents (Warsaw Method)
+            // Calculate FPU carb equivalents from the RECOMMENDED fat/protein (not raw Cronometer values)
+            // This shows the user how much extra insulin the loop will deliver via SMBs
             let trioSettings = settingsManager.settings
             let adjustment = NSDecimalNumber(decimal: trioSettings.individualAdjustmentFactor).doubleValue
             let timeCap = NSDecimalNumber(decimal: trioSettings.timeCap).doubleValue
 
-            let kcal = meal.proteinDelta * 4 + meal.fatDelta * 9
+            let kcal = cronometerRecommendedProtein * 4 + cronometerRecommendedFat * 9
             let carbEquivalents = (kcal / 10) * adjustment
             let fpus = carbEquivalents / 10
 
@@ -432,12 +453,12 @@ extension Treatments {
             }
         }
 
-        /// Called when the user adjusts the personal factor in the recommendation view
+        /// Called when the user adjusts the personal factor in the recommendation view.
+        /// Adjusting the carb factor also triggers recalculation of fat/protein recommendations.
         @MainActor func adjustCronometerFactor(_ newFactor: Double) {
             cronometerAdjustmentFactor = max(0.2, min(1.5, newFactor))
             CronometerRecommendationStore.shared.savePersonalFactor(cronometerAdjustmentFactor)
             calculateCronometerRecommendation()
-            // Re-run simulation with new values
             Task { await runCronometerSimulation() }
         }
 

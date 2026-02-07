@@ -153,6 +153,8 @@ final class CronometerRecommendationStore {
 
     private let storageKey = "CronometerRecommendations"
     private let factorKey = "CronometerPersonalFactor"
+    private let fatFactorKey = "CronometerFatFactor"
+    private let proteinFactorKey = "CronometerProteinFactor"
     private let retentionDays = 90
 
     private init() {}
@@ -228,78 +230,124 @@ final class CronometerRecommendationStore {
         return calculateFactorFromHistory() ?? 0.5
     }
 
-    /// Save a manually adjusted factor
+    /// Save a manually adjusted carb factor
     func savePersonalFactor(_ factor: Double) {
         let clamped = max(0.2, min(1.5, factor))
         UserDefaults.standard.set(clamped, forKey: factorKey)
     }
 
-    /// Recalculate the personal factor from recommendation outcomes
-    /// This is the learning algorithm.
+    /// Get the personal fat entry factor (how much of Cronometer fat to enter)
+    /// Returns 0-1.5. Default 1.0 (enter full Cronometer fat) until learned.
+    func personalFatFactor() -> Double {
+        if UserDefaults.standard.object(forKey: fatFactorKey) != nil {
+            return UserDefaults.standard.double(forKey: fatFactorKey)
+        }
+        return 1.0
+    }
+
+    /// Get the personal protein entry factor
+    func personalProteinFactor() -> Double {
+        if UserDefaults.standard.object(forKey: proteinFactorKey) != nil {
+            return UserDefaults.standard.double(forKey: proteinFactorKey)
+        }
+        return 1.0
+    }
+
+    func saveFatFactor(_ factor: Double) {
+        UserDefaults.standard.set(max(0.0, min(1.5, factor)), forKey: fatFactorKey)
+    }
+
+    func saveProteinFactor(_ factor: Double) {
+        UserDefaults.standard.set(max(0.0, min(1.5, factor)), forKey: proteinFactorKey)
+    }
+
+    /// Recalculate personal factors from recommendation outcomes.
+    /// Carb factor: learned from early BG (1-4h) — covers acute carb spike.
+    /// Fat/protein factors: learned from late BG (4-10h) — covers delayed FPU absorption.
+    /// More fat/protein entry → more FPU → more loop SMBs → more insulin over hours.
     func recalculateFactorFromOutcomes(targetLow: Int = 70, targetHigh: Int = 180) -> Double {
         let completed = completedRecommendations()
         guard !completed.isEmpty else { return personalAdjustmentFactor() }
 
-        var currentFactor = personalAdjustmentFactor()
+        var currentCarbFactor = personalAdjustmentFactor()
+        var currentFatFactor = personalFatFactor()
+        var currentProteinFactor = personalProteinFactor()
 
-        // Process each completed recommendation, weighted by recency
         let now = Date()
-        var totalWeight = 0.0
-        var totalAdjustment = 0.0
+        var carbTotalWeight = 0.0
+        var carbTotalAdjustment = 0.0
+        var fpuTotalWeight = 0.0
+        var fpuTotalAdjustment = 0.0
+
+        // Early checkpoints (2h, 4h) → carb factor learning
+        let earlyCheckpointWeights: [Int: Double] = [2: 1.0, 4: 0.8]
+        // Late checkpoints (6h, 8h, 10h) → fat/protein factor learning
+        let lateCheckpointWeights: [Int: Double] = [6: 1.0, 8: 0.7, 10: 0.4]
 
         for rec in completed {
-            // Only learn from recommendations with clean early windows
             guard rec.hasCleanEarlyWindow else { continue }
 
-            // Recency weight: more recent = more weight
             let ageInDays = now.timeIntervalSince(rec.date) / 86400
             let recencyWeight = max(0.1, 1.0 - (ageInDays / Double(retentionDays)))
 
-            // Analyze clean checkpoints to determine needed adjustment
             let cleanCheckpoints = rec.checkpoints.filter { $0.isClean && $0.bgValue != nil }
             guard !cleanCheckpoints.isEmpty else { continue }
 
-            // Weight checkpoints: earlier ones are more reliable (less confounding)
-            let checkpointWeights: [Int: Double] = [2: 1.0, 4: 1.0, 6: 0.7, 8: 0.4, 10: 0.2]
-
-            var checkpointAdjustment = 0.0
-            var checkpointTotalWeight = 0.0
-
+            // Learn carb factor from early checkpoints
             for cp in cleanCheckpoints {
-                guard let bg = cp.bgValue, let cpWeight = checkpointWeights[cp.hoursAfterMeal] else { continue }
+                guard let bg = cp.bgValue else { continue }
 
-                let adjustment: Double
-                if bg > targetHigh {
-                    // BG too high → need more insulin → increase factor
-                    let overshoot = Double(bg - targetHigh)
-                    adjustment = 0.02 * (overshoot / 100.0)
-                } else if bg < targetLow {
-                    // BG too low → need less insulin → decrease factor
-                    let undershoot = Double(targetLow - bg)
-                    adjustment = -0.02 * (undershoot / 100.0)
-                } else {
-                    adjustment = 0 // In range, no adjustment needed
+                if let cpWeight = earlyCheckpointWeights[cp.hoursAfterMeal] {
+                    let adjustment: Double
+                    if bg > targetHigh {
+                        adjustment = 0.02 * (Double(bg - targetHigh) / 100.0)
+                    } else if bg < targetLow {
+                        adjustment = -0.02 * (Double(targetLow - bg) / 100.0)
+                    } else {
+                        adjustment = 0
+                    }
+                    carbTotalAdjustment += adjustment * cpWeight * recencyWeight
+                    carbTotalWeight += cpWeight * recencyWeight
                 }
 
-                checkpointAdjustment += adjustment * cpWeight
-                checkpointTotalWeight += cpWeight
-            }
-
-            if checkpointTotalWeight > 0 {
-                let weightedAdj = checkpointAdjustment / checkpointTotalWeight
-                totalAdjustment += weightedAdj * recencyWeight
-                totalWeight += recencyWeight
+                // Learn fat/protein factor from late checkpoints
+                // Only if this rec actually entered fat or protein
+                if let cpWeight = lateCheckpointWeights[cp.hoursAfterMeal],
+                   rec.appliedFat > 0 || rec.appliedProtein > 0
+                {
+                    let adjustment: Double
+                    if bg > targetHigh {
+                        // Late high → fat/protein under-covered → increase fat/protein entry
+                        adjustment = 0.03 * (Double(bg - targetHigh) / 100.0)
+                    } else if bg < targetLow {
+                        // Late low → too much FPU insulin → decrease fat/protein entry
+                        adjustment = -0.03 * (Double(targetLow - bg) / 100.0)
+                    } else {
+                        adjustment = 0
+                    }
+                    fpuTotalAdjustment += adjustment * cpWeight * recencyWeight
+                    fpuTotalWeight += cpWeight * recencyWeight
+                }
             }
         }
 
-        if totalWeight > 0 {
-            let avgAdjustment = totalAdjustment / totalWeight
-            currentFactor += avgAdjustment
-            currentFactor = max(0.2, min(1.5, currentFactor))
-            savePersonalFactor(currentFactor)
+        // Apply carb factor adjustment
+        if carbTotalWeight > 0 {
+            let avgAdj = carbTotalAdjustment / carbTotalWeight
+            currentCarbFactor = max(0.2, min(1.5, currentCarbFactor + avgAdj))
+            savePersonalFactor(currentCarbFactor)
         }
 
-        return currentFactor
+        // Apply fat/protein factor adjustment (same direction for both since FPU treats them together)
+        if fpuTotalWeight > 0 {
+            let avgAdj = fpuTotalAdjustment / fpuTotalWeight
+            currentFatFactor = max(0.0, min(1.5, currentFatFactor + avgAdj))
+            currentProteinFactor = max(0.0, min(1.5, currentProteinFactor + avgAdj))
+            saveFatFactor(currentFatFactor)
+            saveProteinFactor(currentProteinFactor)
+        }
+
+        return currentCarbFactor
     }
 
     /// Calculate initial factor from historical data (before any recommendations exist)

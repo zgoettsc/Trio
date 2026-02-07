@@ -19,17 +19,38 @@ struct HistoricalMealOutcome: Identifiable {
     var fatCalorieRatio: Double { calories > 0 ? (fat * 9) / calories : 0 }
     var proteinCalorieRatio: Double { calories > 0 ? (protein * 4) / calories : 0 }
 
-    // Dosing context
+    // Dosing context — what was entered in Trio vs what Cronometer reported
     let trioEnteredCarbs: Double
+    let trioEnteredFat: Double
+    let trioEnteredProtein: Double
     let bolusInsulin: Double // Non-SMB boluses within 30 min of meal
     let totalInsulin: Double // All insulin (bolus + SMBs) within 2h of meal
     let bgAtMeal: Int
     let iobAtMeal: Double
 
+    // Entry ratios: what fraction of Cronometer macros was entered in Trio
+    var carbEntryRatio: Double? { carbs > 0 && trioEnteredCarbs > 0 ? trioEnteredCarbs / carbs : nil }
+    var fatEntryRatio: Double? { fat > 0 && trioEnteredFat > 0 ? trioEnteredFat / fat : nil }
+    var proteinEntryRatio: Double? { protein > 0 && trioEnteredProtein > 0 ? trioEnteredProtein / protein : nil }
+
     // Effective ICR based on actual carbs and bolus given
     var effectiveICR: Double? {
         guard bolusInsulin > 0, carbs > 0 else { return nil }
         return carbs / bolusInsulin
+    }
+
+    /// Did BG stay in range at late checkpoints (4h+)? Indicates fat/protein was covered well.
+    var hadLateRise: Bool {
+        let lateCheckpoints = [bgAt4h, bgAt6h, bgAt8h].compactMap { $0 }
+        guard !lateCheckpoints.isEmpty else { return false }
+        return lateCheckpoints.contains { $0 > 180 }
+    }
+
+    /// Was BG low at late checkpoints? Indicates too much fat/protein was entered.
+    var hadLateLow: Bool {
+        let lateCheckpoints = [bgAt4h, bgAt6h, bgAt8h].compactMap { $0 }
+        guard !lateCheckpoints.isEmpty else { return false }
+        return lateCheckpoints.contains { $0 < 70 }
     }
 
     // BG trajectory (closest reading within 15 min of each checkpoint)
@@ -95,6 +116,18 @@ struct MealOutcomePrediction {
 
     // What dose would have kept BG in range for similar meals
     let suggestedBolus: Double?
+
+    // Suggested macro entry based on similar meals with good BG outcomes.
+    // Fat/protein interact with carbs: entering more fat/protein → more FPU carb-equivalents →
+    // more SMBs from the loop → less upfront carb bolus needed. These are learned as a coupled system.
+    let suggestedCarbFactor: Double? // Ratio of Cronometer carbs to enter (0-1.5)
+    let suggestedFatFactor: Double? // Ratio of Cronometer fat to enter (0-1.5)
+    let suggestedProteinFactor: Double? // Ratio of Cronometer protein to enter (0-1.5)
+    let suggestedCarbEntry: Double? // Absolute grams of carbs to enter
+    let suggestedFatEntry: Double? // Absolute grams of fat to enter
+    let suggestedProteinEntry: Double? // Absolute grams of protein to enter
+    // Estimated FPU carb-equivalents from suggested fat/protein entry
+    let estimatedFPUCarbEquivalents: Double?
 
     // Similar meals for display
     let topSimilarMeals: [SimilarMealMatch]
@@ -180,8 +213,8 @@ final class MealOutcomePredictionService {
             // Find IOB at meal time from loop states
             let iobAtMeal = findClosestIOB(near: meal.detectedAt, in: allLoopStates)
 
-            // Find Trio carb entry near this meal
-            let trioCarbs = findClosestCarbEntry(near: meal.detectedAt, in: allCarbEntries, withinMinutes: 60)
+            // Find Trio carb entry near this meal (includes fat/protein)
+            let trioEntry = findClosestCarbEntry(near: meal.detectedAt, in: allCarbEntries, withinMinutes: 60)
 
             // Find meal bolus (non-SMB within 30 min)
             let mealBolus = findMealBoluses(near: meal.detectedAt, in: allBoluses, withinMinutes: 30)
@@ -210,7 +243,9 @@ final class MealOutcomePredictionService {
                 fat: meal.fatDelta,
                 protein: meal.proteinDelta,
                 calories: meal.totalCalories,
-                trioEnteredCarbs: trioCarbs,
+                trioEnteredCarbs: trioEntry.carbs,
+                trioEnteredFat: trioEntry.fat,
+                trioEnteredProtein: trioEntry.protein,
                 bolusInsulin: mealBolus,
                 totalInsulin: totalInsulin,
                 bgAtMeal: bgAtMeal,
@@ -248,7 +283,9 @@ final class MealOutcomePredictionService {
                 predictedBGAt1h: nil, predictedBGAt2h: nil, predictedBGAt3h: nil,
                 predictedBGAt4h: nil, predictedBGAt6h: nil, predictedPeakBG: nil,
                 predictedBGRise: nil, suggestedEffectiveICR: nil, suggestedBolus: nil,
-                topSimilarMeals: []
+                suggestedCarbFactor: nil, suggestedFatFactor: nil, suggestedProteinFactor: nil,
+                suggestedCarbEntry: nil, suggestedFatEntry: nil, suggestedProteinEntry: nil,
+                estimatedFPUCarbEquivalents: nil, topSimilarMeals: []
             )
         }
 
@@ -281,7 +318,9 @@ final class MealOutcomePredictionService {
                 predictedBGAt1h: nil, predictedBGAt2h: nil, predictedBGAt3h: nil,
                 predictedBGAt4h: nil, predictedBGAt6h: nil, predictedPeakBG: nil,
                 predictedBGRise: nil, suggestedEffectiveICR: nil, suggestedBolus: nil,
-                topSimilarMeals: []
+                suggestedCarbFactor: nil, suggestedFatFactor: nil, suggestedProteinFactor: nil,
+                suggestedCarbEntry: nil, suggestedFatEntry: nil, suggestedProteinEntry: nil,
+                estimatedFPUCarbEquivalents: nil, topSimilarMeals: []
             )
         }
 
@@ -315,6 +354,52 @@ final class MealOutcomePredictionService {
 
         let suggestedBolus = suggestedICR.map { carbs / $0 }
 
+        // Compute suggested entry factors from similar meals as a COUPLED system.
+        // Fat/protein → FPU carb-equivalents → loop delivers extra insulin via SMBs over hours.
+        // So entering more fat/protein means less upfront carb bolus is needed.
+        // "Good outcomes" = BG stayed in range (early: no spike, late: no rise or low)
+        let goodFullOutcomes = topMatches.filter { match in
+            guard let peak = match.meal.peakBG else { return false }
+            return match.meal.cleanWindowHours >= 4
+                && peak <= 180
+                && (match.meal.bgAt2h ?? 0) >= 70
+                && !match.meal.hadLateRise
+                && !match.meal.hadLateLow
+        }
+
+        let sourceMatches = goodFullOutcomes.isEmpty ? topMatches : goodFullOutcomes
+
+        // Learn coupled entry factors from meals with good outcomes
+        let suggestedCarbFactor: Double?
+        let suggestedFatFactor: Double?
+        let suggestedProteinFactor: Double?
+
+        let carbRatios = sourceMatches.compactMap { $0.meal.carbEntryRatio }
+        suggestedCarbFactor = carbRatios.isEmpty ? nil :
+            max(0.1, min(1.5, carbRatios.reduce(0, +) / Double(carbRatios.count)))
+
+        let fatRatios = sourceMatches.compactMap { $0.meal.fatEntryRatio }
+        suggestedFatFactor = fatRatios.isEmpty ? nil :
+            max(0.0, min(1.5, fatRatios.reduce(0, +) / Double(fatRatios.count)))
+
+        let proteinRatios = sourceMatches.compactMap { $0.meal.proteinEntryRatio }
+        suggestedProteinFactor = proteinRatios.isEmpty ? nil :
+            max(0.0, min(1.5, proteinRatios.reduce(0, +) / Double(proteinRatios.count)))
+
+        let suggestedCarbEntry = suggestedCarbFactor.map { carbs * $0 }
+        let suggestedFatEntry = suggestedFatFactor.map { fat * $0 }
+        let suggestedProteinEntry = suggestedProteinFactor.map { protein * $0 }
+
+        // Estimate FPU carb-equivalents from the suggested fat/protein
+        // This helps the user understand how much extra insulin the loop will deliver
+        let estFPU: Double?
+        if let sugFat = suggestedFatEntry, let sugProt = suggestedProteinEntry {
+            let kcal = sugProt * 4 + sugFat * 9
+            estFPU = (kcal / 10) * 0.5 // Using default individualAdjustmentFactor
+        } else {
+            estFPU = nil
+        }
+
         let confidence: MealOutcomePrediction.PredictionConfidence
         let cleanMatches = topMatches.filter { $0.meal.cleanWindowHours >= 4 }
         if cleanMatches.count >= 5 { confidence = .high }
@@ -335,6 +420,13 @@ final class MealOutcomePredictionService {
             predictedBGRise: predictedRise,
             suggestedEffectiveICR: suggestedICR,
             suggestedBolus: suggestedBolus,
+            suggestedCarbFactor: suggestedCarbFactor,
+            suggestedFatFactor: suggestedFatFactor,
+            suggestedProteinFactor: suggestedProteinFactor,
+            suggestedCarbEntry: suggestedCarbEntry,
+            suggestedFatEntry: suggestedFatEntry,
+            suggestedProteinEntry: suggestedProteinEntry,
+            estimatedFPUCarbEquivalents: estFPU,
             topSimilarMeals: Array(topMatches.prefix(5))
         )
     }
@@ -461,6 +553,8 @@ final class MealOutcomePredictionService {
     private struct CarbRecord {
         let date: Date
         let carbs: Double
+        let fat: Double
+        let protein: Double
     }
 
     private struct LoopStateRecord {
@@ -514,14 +608,14 @@ final class MealOutcomePredictionService {
         await context.perform {
             let request = CarbEntryStored.fetchRequest()
             request.predicate = NSPredicate(
-                format: "date >= %@ AND date <= %@ AND isFPU == NO AND carbs > 0",
+                format: "date >= %@ AND date <= %@ AND isFPU == NO AND (carbs > 0 OR fat > 0 OR protein > 0)",
                 startDate as NSDate, endDate as NSDate
             )
             request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
             guard let results = try? context.fetch(request) else { return [] }
             return results.compactMap { entry in
                 guard let date = entry.date else { return nil }
-                return CarbRecord(date: date, carbs: entry.carbs)
+                return CarbRecord(date: date, carbs: entry.carbs, fat: entry.fat, protein: entry.protein)
             }
         }
     }
@@ -564,12 +658,15 @@ final class MealOutcomePredictionService {
             .iob ?? 0
     }
 
-    private func findClosestCarbEntry(near targetTime: Date, in records: [CarbRecord], withinMinutes: Int) -> Double {
+    private func findClosestCarbEntry(
+        near targetTime: Date, in records: [CarbRecord], withinMinutes: Int
+    ) -> (carbs: Double, fat: Double, protein: Double) {
         let maxInterval = TimeInterval(withinMinutes * 60)
-        return records
-            .filter { abs($0.date.timeIntervalSince(targetTime)) <= maxInterval }
-            .min { abs($0.date.timeIntervalSince(targetTime)) < abs($1.date.timeIntervalSince(targetTime)) }?
-            .carbs ?? 0
+        guard let closest = records
+            .filter({ abs($0.date.timeIntervalSince(targetTime)) <= maxInterval })
+            .min(by: { abs($0.date.timeIntervalSince(targetTime)) < abs($1.date.timeIntervalSince(targetTime)) })
+        else { return (0, 0, 0) }
+        return (closest.carbs, closest.fat, closest.protein)
     }
 
     private func findMealBoluses(near targetTime: Date, in records: [BolusRecord], withinMinutes: Int) -> Double {
