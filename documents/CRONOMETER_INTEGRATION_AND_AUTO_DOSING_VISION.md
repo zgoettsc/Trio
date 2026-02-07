@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** February 7, 2026
-**Status:** Phases 1-4 implemented, Phases 5-8 planned
+**Status:** Phases 1-5b implemented, Phases 6-8 planned
 
 ## Table of Contents
 
@@ -12,12 +12,13 @@
 4. [Phase 3: Meal Outcome Prediction System](#phase-3-meal-outcome-prediction-system)
 5. [Phase 4: Coupled Fat/Protein/Carb Dosing](#phase-4-coupled-fatproteincarb-dosing)
 6. [Phase 5: Snapshot Delta Reliability & Log Button](#phase-5-snapshot-delta-reliability--log-button)
-7. [Phase 6: Background Auto-Detection & Notification Dosing](#phase-6-background-auto-detection--notification-dosing)
-8. [Phase 7: Garmin/Firestore Context Integration](#phase-7-garminfirestore-context-integration)
-9. [Phase 8: Personalized Sensitivity Model](#phase-8-personalized-sensitivity-model)
-10. [Architecture Overview](#architecture-overview)
-11. [Key Technical Decisions](#key-technical-decisions)
-12. [File Reference](#file-reference)
+7. [Phase 5b: Late Dosing with Meal Picker](#phase-5b-late-dosing-with-meal-picker)
+8. [Phase 6: Background Auto-Detection & Notification Dosing](#phase-6-background-auto-detection--notification-dosing)
+9. [Phase 7: Garmin/Firestore Context Integration](#phase-7-garminfirestore-context-integration)
+10. [Phase 8: Personalized Sensitivity Model](#phase-8-personalized-sensitivity-model)
+11. [Architecture Overview](#architecture-overview)
+12. [Key Technical Decisions](#key-technical-decisions)
+13. [File Reference](#file-reference)
 
 ---
 
@@ -673,18 +674,21 @@ Over time, the model finds patterns no human would notice:
 
 ## Architecture Overview
 
-### Current Data Flow (Phases 1-5, implemented)
+### Current Data Flow (Phases 1-5b, implemented)
 
 ```
 Cronometer App
   → Apple Health (cumulative daily totals)
-    → HKObserverQuery fires in Trio
+    → HKObserverQuery fires in Trio (auto-started at app launch)
       → NutritionSnapshotStore saves snapshot
-        → Delta computed from previous snapshot = meal
+        → Consecutive snapshots within 15 min grouped as one meal
+
+User taps "Log" button:
+  → Snapshot baseline recorded → Cronometer app opens via URL scheme
 
 User taps "Crono" button:
   → fetchLatestMealDelta() [live HealthKit query]
-    → Apply learned carb/fat/protein factors
+    → Recent meal found? → Apply learned carb/fat/protein factors
       → Run oref simulation
         → Show recommendation view
           → User taps Apply
@@ -693,6 +697,13 @@ User taps "Crono" button:
                 → Insulin delivered + carbs/fat/protein logged
                   → Outcome tracked over next 2-10 hours
                     → Factors recalibrated from outcomes
+    → No recent meal found? → Search today's grouped meals
+      → Present CronometerMealPickerView
+        → User selects a meal
+          → Apply carb decay model (time-based + BG-informed hybrid)
+          → Apply FPU decay with 60-min delay awareness
+            → Show recommendation with late-meal banner
+              → (continues as above)
 ```
 
 ### Future Data Flow (Phases 6-8, planned)
@@ -760,7 +771,19 @@ Cronometer App
 
 **Reason:** Dosing decisions need millisecond latency (especially for auto-dose notifications). Can't wait for an API call. But Claude excels at finding subtle patterns, explaining them, and suggesting model adjustments — tasks that can happen asynchronously.
 
-### 6. Firestore for Garmin Data (Not HealthKit)
+### 6. 15-Minute Meal Grouping Window
+
+**Decision:** Group consecutive snapshots within 15 minutes as a single meal
+
+**Reason:** Cronometer writes one HealthKit update per food item. A meal with 4 items (bread, almond butter, blueberries, honey) produces 4 separate observer fires and 4 snapshots. Without grouping, the Crono button only showed the last item's delta. The grouping algorithm walks backwards through snapshots, accumulating any within 15 minutes into a single meal cluster, then computes the delta from the pre-cluster baseline.
+
+### 7. Hybrid Carb Decay Model (Time-Based + BG-Informed)
+
+**Decision:** Take the minimum of time-based exponential decay and BG-informed absorption estimate
+
+**Reason:** For late dosing, we need to estimate how many carbs remain unabsorbed. Time-based decay (`exp(-0.025 * minutes)`) gives a reasonable estimate but can't account for individual meal composition or current insulin action. BG-informed estimation (`bgRise * CR / ISF`) uses actual glucose rise to infer absorption. Taking the minimum of the two is more conservative (safer) — it prevents overdosing in cases where either model is inaccurate.
+
+### 8. Firestore for Garmin Data (Not HealthKit)
 
 **Decision:** Read Garmin data from existing Firestore database via Garmin Health API
 
@@ -774,13 +797,14 @@ Cronometer App
 
 | File | Purpose |
 |---|---|
-| `Trio/Sources/Models/NutritionSnapshot.swift` | `NutritionSnapshot`, `NutritionSnapshotStore`, `InferredMealEvent`, snapshot delta logic |
+| `Trio/Sources/Models/NutritionSnapshot.swift` | `NutritionSnapshot`, `NutritionSnapshotStore`, `InferredMealEvent` (with `minutesAgo`, `timeAgoString`), `CarbDecayModel` (hybrid time+BG decay, FPU decay, warning levels), 15-minute meal grouping in `recordAndComputeLatestMeal()` and `inferredMealEvents()` |
 | `Trio/Sources/Models/MealOutcomePrediction.swift` | `HistoricalMealOutcome`, `MealOutcomePrediction`, `MealOutcomePredictionService`, `CarbRecord` |
 | `Trio/Sources/Models/CronometerRecommendation.swift` | `CronometerMealRecommendation`, `CronometerRecommendationStore`, factor learning, outcome backfill |
 | `Trio/Sources/Services/HealthKit/NutritionHealthService.swift` | HealthKit nutrition queries, observer, `fetchLatestMealDelta()`, auto-start |
-| `Trio/Sources/Modules/Treatments/TreatmentsStateModel.swift` | `fetchCronometerMeal()`, `calculateCronometerRecommendation()`, `runCronometerSimulation()`, `applyCronometerRecommendation()`, `recordCronometerBaseline()` |
-| `Trio/Sources/Modules/Treatments/View/TreatmentsRootView.swift` | Crono button, Log button, compact button layout |
-| `Trio/Sources/Modules/Treatments/View/CronometerMealRecommendationView.swift` | Full recommendation UI with macros, FPU, simulation, prediction |
+| `Trio/Sources/Modules/Treatments/TreatmentsStateModel.swift` | `fetchCronometerMeal()` (with meal picker fallback), `selectCronometerMeal()` (late dosing with decay), `approximateBGAtTime()`, `calculateCronometerRecommendation()`, `runCronometerSimulation()`, `applyCronometerRecommendation()`, `recordCronometerBaseline()` |
+| `Trio/Sources/Modules/Treatments/View/TreatmentsRootView.swift` | Crono button, Log button, compact button layout, meal picker sheet |
+| `Trio/Sources/Modules/Treatments/View/CronometerMealRecommendationView.swift` | Full recommendation UI with macros, FPU, simulation, prediction, late-meal banner |
+| `Trio/Sources/Modules/Treatments/View/CronometerMealPickerView.swift` | Meal selection UI for late dosing — shows today's grouped meals with age, remaining carbs, already-dosed badges, decay warnings |
 | `Trio/Sources/Application/TrioApp.swift` | `NutritionHealthService` resolved at startup in `loadServices()` |
 
 ### Planned Files (Phase 6+)
@@ -807,3 +831,6 @@ Cronometer App
 | 6 | Fix whole-day totals — live HealthKit query, `recordAndComputeLatestMeal()` |
 | 7 | Start nutrition observer at app launch + add Log Food button |
 | 8 | Make quick-add buttons fit on one line |
+| 9 | Fix meal grouping — group snapshots within 15 minutes as single meal |
+| 10 | Late dosing with meal picker, carb decay model, FPU decay, BG-informed hybrid |
+| 11 | Fix Decimal→Double conversion for individualAdjustmentFactor |
