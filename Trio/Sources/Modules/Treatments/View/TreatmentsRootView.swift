@@ -146,7 +146,7 @@ extension Treatments {
                 }
 
                 // Quick-add carb buttons
-                HStack(spacing: 8) {
+                HStack(spacing: 4) {
                     // Photo AI button - always visible
                     Button(action: {
                         if AIInsightsConfig.Config.isAPIKeyConfigured {
@@ -155,13 +155,14 @@ extension Treatments {
                             showAPIKeyRequiredAlert = true
                         }
                     }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             Image(systemName: "camera.fill")
-                                .font(.caption)
+                                .font(.caption2)
                             Text("Photo")
-                                .font(.subheadline.weight(.medium))
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
                         }
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 7)
                         .padding(.vertical, 6)
                         .background(Color.mint.opacity(0.15))
                         .foregroundColor(.mint)
@@ -178,13 +179,14 @@ extension Treatments {
                             }
                         }
                     }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             Image(systemName: "arrow.up.forward.app")
-                                .font(.caption)
+                                .font(.caption2)
                             Text("Log")
-                                .font(.subheadline.weight(.medium))
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
                         }
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 7)
                         .padding(.vertical, 6)
                         .background(Color.green.opacity(0.15))
                         .foregroundColor(.green)
@@ -201,18 +203,19 @@ extension Treatments {
                             }
                         }
                     }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             if state.isFetchingCronometerMeal {
                                 ProgressView()
                                     .controlSize(.mini)
                             } else {
                                 Image(systemName: "fork.knife")
-                                    .font(.caption)
+                                    .font(.caption2)
                             }
                             Text("Crono")
-                                .font(.subheadline.weight(.medium))
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
                         }
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 7)
                         .padding(.vertical, 6)
                         .background(Color.orange.opacity(0.15))
                         .foregroundColor(.orange)
@@ -226,8 +229,9 @@ extension Treatments {
                         handleDebouncedInput()
                     }) {
                         Text("+5g")
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 12)
+                            .font(.caption.weight(.medium))
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
                             .padding(.vertical, 6)
                             .background(Color.blue.opacity(0.15))
                             .foregroundColor(.blue)
@@ -240,8 +244,9 @@ extension Treatments {
                         handleDebouncedInput()
                     }) {
                         Text("+10g")
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 12)
+                            .font(.caption.weight(.medium))
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
                             .padding(.vertical, 6)
                             .background(Color.blue.opacity(0.15))
                             .foregroundColor(.blue)
