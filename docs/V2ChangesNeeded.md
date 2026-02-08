@@ -10,9 +10,19 @@
 
 ## Summary
 
-The core three-curve model, split dosing logic, and curve math are solid. The issues live in the adaptive/learning layers, safety gates, and a few whitepaper-to-code mismatches. Below are 16 specific changes grouped by priority.
+The core three-curve model, split dosing logic, and curve math are solid. The issues live in the adaptive/learning layers, safety gates, and a few whitepaper-to-code mismatches. Below are the original 16 specific changes grouped by priority, plus additional items discovered during implementation.
 
-**14 of 16 items have been implemented.** Items #12 and #13 are deferred — see details below.
+**14 of 16 original items have been implemented.** Items #12 and #13 are deferred — see details below.
+
+**Additional completed work:**
+- **Export system** — comprehensive meal data export with pre/post-meal BG traces, scheduled entries, Garmin contributions, user settings, and dosing summary
+- **mealID linkage fix** — resolved critical bug where scheduled entries were always empty in the export due to disconnected UUIDs between V2MealOutcome and Core Data fpuIDs
+- **Export documentation** — see `docs/V2ExportSystem.md` for full details
+
+**Remaining work:**
+- **#12** — Claude AI recalibration spec (needs design decisions)
+- **#13** — Core Data migration for outcome storage (architectural change)
+- **#17** — Fiber full-stack integration (engine support done in #15, but fiber data never reaches the engine because the full pipeline — Apple Health → Core Data → CarbsEntry → engine — doesn't carry fiber yet)
 
 ---
 
@@ -341,6 +351,86 @@ Additionally, oref was independently issuing correction SMBs for the same high B
 
 ---
 
+## ADDITIONAL ITEMS (Discovered During Implementation)
+
+### 17. Fiber Full-Stack Integration
+
+**Status: NOT IMPLEMENTED**
+
+**Problem:** Item #15 added fiber support to the engine (`MacroAbsorptionEngine.carbTau()` and `generateEntries()` accept a `fiber` parameter) and to the outcome struct (`V2MealOutcome.fiber`). However, fiber is always `0` because no part of the data pipeline actually collects or passes fiber data. The engine support exists but is inert.
+
+**Root cause investigation:** Fiber is absent from every layer:
+
+| Layer | Current State | What's Needed |
+|-------|--------------|---------------|
+| Apple Health permissions | Only requests `.dietaryCarbohydrates`, `.dietaryFatTotal`, `.dietaryProtein` | Add `.dietaryFiber` to `requestPermissions()` |
+| Cronometer extraction | Only queries carbs, fat, protein from HealthKit | Add `HKQuantityType(.dietaryFiber)` query |
+| `CarbsEntry` struct | Has `carbs`, `fat`, `protein` — no `fiber` | Add `fiber: Double` field |
+| `InferredMealEvent` struct | Has `carbs`, `fat`, `protein` — no `fiber` | Add `fiber: Double` field |
+| Core Data `CarbEntryStored` | Has `carbs`, `fat`, `protein` attributes — no `fiber` | Add `fiber` attribute (requires migration) |
+| `CarbsStorage.saveCarbEquivalents()` | Passes `carbs`, `fat`, `protein` to engine | Pass `fiber` too |
+| `TreatmentsStateModel` | Threads macros to CarbsStorage — no `fiber` | Add `fiber` property, thread it through |
+| Treatment/meal entry UI | Has carbs, fat, protein fields — no fiber | Add optional fiber field |
+
+**Files that need changes:**
+
+1. **`Trio/Sources/APS/Storage/HealthKitManager.swift`** — Add `.dietaryFiber` to HealthKit permission request
+2. **`Trio/Sources/Modules/Cronometer/CronometerViewModel.swift`** (or equivalent) — Query fiber from Apple Health alongside other macros
+3. **`Trio/Sources/APS/Storage/CarbsEntry.swift`** — Add `fiber: Double` field
+4. **`Trio/Sources/APS/Storage/InferredMealEvent.swift`** — Add `fiber: Double` field
+5. **`Trio.xcdatamodeld`** — Add `fiber` attribute to `CarbEntryStored` entity (lightweight migration)
+6. **`Trio/Sources/APS/Storage/CarbsStorage.swift`** — Thread `fiber` from `CarbsEntry` to `MacroAbsorptionEngine.generateEntries(fiber:)`
+7. **`Trio/Sources/Modules/Treatments/TreatmentsStateModel.swift`** — Add `fiber` property, pass to CarbsStorage
+8. **`Trio/Sources/Modules/Treatments/TreatmentsView.swift`** (or equivalent) — Optional: add fiber input field to manual meal entry
+
+**Implementation plan:**
+
+Phase 1 — Data pipeline (no UI changes):
+1. Add `.dietaryFiber` to HealthKit permissions
+2. Add `fiber` to `CarbsEntry` and `InferredMealEvent`
+3. Add `fiber` attribute to Core Data model (lightweight migration — new optional attribute with default 0)
+4. Wire fiber through `CarbsStorage` → `MacroAbsorptionEngine.generateEntries(fiber:)`
+5. Wire fiber through `TreatmentsStateModel` → `CarbsStorage`
+
+Phase 2 — Cronometer integration:
+6. Query `HKQuantityType(.dietaryFiber)` in Cronometer snapshot extraction
+7. Populate fiber in the `CronometerMealRecommendation` (or equivalent) data flow
+
+Phase 3 — Manual entry (optional):
+8. Add fiber field to meal entry UI for users who don't use Cronometer
+
+**Note:** Phase 1 and 2 are required for fiber to stop being `0`. Phase 3 is nice-to-have — most fiber data will come from Cronometer/Apple Health.
+
+**Dependency:** The Core Data migration in Phase 1 is a small additive change (new optional attribute with default value). This is independent of the larger outcome storage migration in #13. Lightweight Core Data migration handles this automatically.
+
+---
+
+### Export System (Completed — not in original 16)
+
+**Status: IMPLEMENTED**
+
+**Files:** `V2CurveOutcomeLearning.swift`, `V2OutcomeAnalysisView.swift`, `CarbsStorage.swift`, `TreatmentsStateModel.swift`
+
+**What was built:** Comprehensive JSON meal data export accessible from Settings > V2 Macro Dosing > Outcome Analysis. Captures every meal the V2 engine has processed with full dosing context:
+
+- Pre-meal BG trace (2h before meal)
+- Post-meal BG trace (meal to +8h)
+- All V2 scheduled dosing entries from Core Data (via fpuID linkage)
+- Garmin sensitivity contributions (re-derived from stored snapshot)
+- Full user settings snapshot (V2 engine + OpenAPS/oref settings)
+- Dosing summary (upfront insulin, protein/fat equivalents, entry counts)
+- Complete V2MealOutcome with macros, engine params, checkpoints, adaptive adjustments
+
+**Critical bug fixed — mealID linkage (commit `b76b71e`):**
+The initial export always showed zero scheduled entries. Root cause: `V2MealOutcome.mealID` was a random UUID created in `applyCronometerRecommendation()`, while `MacroAbsorptionEngine.generateEntries()` created a separate UUID used as `fpuID` in Core Data. They never matched. Fix:
+1. `CarbsStorage` now exposes `v2LastEngineMealID` after the engine runs
+2. Outcome save is deferred from `applyCronometerRecommendation()` to `invokeTreatmentsTask()` (after `saveMeal()`)
+3. Pending outcome is finalized with the engine's actual mealID via `withMealID()`
+
+See `docs/V2ExportSystem.md` for complete documentation including timing sequence, data flow, all export struct fields, and known limitations.
+
+---
+
 ## Items NOT Changed (Confirmed Correct)
 
 The following were reviewed and found to be correctly implemented:
@@ -363,15 +453,34 @@ The following were reviewed and found to be correctly implemented:
 
 ---
 
-## Summary of Remaining Integration Work
+## Summary of Remaining Work
 
-The code changes are self-contained and internally correct, but several items require **call-site wiring** to be fully operational:
+### Integration Wiring (functions exist, need call-site connections)
 
 | Item | What needs wiring | Where |
 |------|------------------|-------|
 | #1 | Call `recordMealInsulin(mealID, units)` when boluses/SMBs are delivered | Bolus delivery + SMB delivery code paths |
 | #2 | Populate `mealStartBGs` from `V2MealOutcome.bgAtMeal` for active meals | Caller of `runAdaptiveCycle()` |
 | #5 | Gate 5 params already computed internally — no additional wiring needed | — |
-| #15 | Add `HKQuantityType(.dietaryFiber)` query to Cronometer snapshot extraction | Health data integration layer |
 
-These are integration tasks, not design tasks — the functions exist and have defined interfaces. The wiring depends on the specific architecture of the loop integration layer, which varies by how Trio connects oref to the V2 services.
+### New Features (design + implementation needed)
+
+| Item | Scope | Effort |
+|------|-------|--------|
+| #12 — Claude AI recalibration spec | Design prompt schema, validation pipeline, user confirmation UX, error handling. Then implement service + document in whitepaper. | Large — requires design decisions before implementation |
+| #13 — Core Data migration for outcomes | Define Core Data model, write migration, replace UserDefaults CRUD, add fetch controllers. | Large — architectural change, but not urgent (UserDefaults works at current scale) |
+| #17 — Fiber full-stack integration | Wire fiber through 8 files: HealthKit → Cronometer → CarbsEntry → Core Data → CarbsStorage → engine. Engine already supports it. | Medium — mostly plumbing, but includes a Core Data schema change |
+
+### Whitepaper Updates (documentation only)
+
+| Item | What | Where |
+|------|------|-------|
+| #7 | Document `-3.0` threshold with hysteresis (replaces `-5.0`) | V2DosingStrategy.md Section 9 |
+| #10 | Update clamping table to show 0.10–0.80 (replaces 0.10–0.60) | V2DosingStrategy.md Section 11 |
+
+### Priority Order for Remaining Work
+
+1. **#17 Fiber full-stack** — Most impactful for dosing accuracy. The engine already slows carb absorption for high-fiber meals, but currently gets `fiber: 0` for every meal. Real fiber data will immediately improve τ estimates for meals like beans, whole grains, vegetables.
+2. **#1/#2 Integration wiring** — Completes the adaptive service's meal-specific IOB and BG delta calculations. The adaptive service works but uses less precise inputs without this wiring.
+3. **#12 Claude AI spec** — Defines the AI recalibration feature. Can be designed using the export data (which is now fully functional) to prototype prompts and validate parameter recommendations.
+4. **#13 Core Data migration** — Performance optimization. Only becomes urgent at high meal volume (~270+ records). Can be combined with fiber's Core Data change (#17) to do a single schema migration.
