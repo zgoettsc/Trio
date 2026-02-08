@@ -12,16 +12,17 @@
 
 The core three-curve model, split dosing logic, and curve math are solid. The issues live in the adaptive/learning layers, safety gates, and a few whitepaper-to-code mismatches. Below are the original 16 specific changes grouped by priority, plus additional items discovered during implementation.
 
-**14 of 16 original items have been implemented.** Items #12 and #13 are deferred — see details below.
+**All 16 original items + 1 additional item (#17) have been implemented.** All integration wiring is complete.
 
 **Additional completed work:**
 - **Export system** — comprehensive meal data export with pre/post-meal BG traces, scheduled entries, Garmin contributions, user settings, and dosing summary
 - **mealID linkage fix** — resolved critical bug where scheduled entries were always empty in the export due to disconnected UUIDs between V2MealOutcome and Core Data fpuIDs
 - **Export documentation** — see `docs/V2ExportSystem.md` for full details
-
-**Remaining work:**
-- **#12** — Claude AI recalibration spec (needs design decisions)
-- **#13** — Core Data migration for outcome storage (architectural change)
+- **Fiber full-stack integration (#17)** — end-to-end fiber data pipeline from Apple Health through Core Data, engine, settings UI, and recalibration service
+- **Integration wiring (#1/#2)** — recordMealInsulin and mealStartBGs wired into APSManager for both manual bolus and SMB delivery
+- **Claude AI recalibration (#12)** — full spec documented in whitepaper, validation pipeline with 30% change limit, fiber coefficient added
+- **Core Data migration (#13)** — V2MealOutcome storage migrated from UserDefaults to Core Data with one-time automatic migration
+- **Whitepaper updates (#7/#10)** — Gate 3 threshold, protein factor clamping, Gate 5 documentation, dynamic phase attribution, meal-attributed IOB, Core Data storage
 
 ---
 
@@ -46,8 +47,9 @@ Additionally, oref was independently issuing correction SMBs for the same high B
 
 **Implementation decision:** Used a simple in-memory accumulator (`recordMealInsulin` adds, `getMealAttributedIOB` reads) rather than tagging insulin doses with mealID in Core Data. This is simpler but does not model IOB decay — the recorded value is total insulin attributed, not remaining active insulin. This is acceptable for the adaptive correction use case (which compares cumulative effects), but a future improvement could apply an exponential decay curve based on DIA to make the IOB estimate more accurate over time.
 
-**Remaining work:**
-- The call site that delivers boluses and SMBs must call `recordMealInsulin()` with the mealID and units delivered. This wiring depends on where in the oref integration the bolus/SMB decisions are made. The function exists and is ready to be called.
+**Integration wiring completed:**
+- Manual bolus path: `APSManager.enactBolus()` calls `recordMealInsulin(mealID:units:)` using `carbsStorage.v2LastEngineMealID`
+- SMB delivery path: `APSManager.performBolus()` calls `recordMealInsulin()` for each active meal, splitting proportionally
 - Consider adding IOB decay modeling using the user's DIA setting for longer meals (6-8h) where the upfront bolus has substantially decayed by the time late entries are evaluated.
 
 ---
@@ -69,8 +71,9 @@ Additionally, oref was independently issuing correction SMBs for the same high B
 
 **Implementation decision:** The `mealStartBGs` map is passed in from outside rather than looked up internally from V2MealOutcome. This keeps MacroAdaptiveService decoupled from the outcome storage layer. The caller can populate it from `V2MealOutcome.bgAtMeal` for each active meal.
 
-**Remaining work:**
-- The call site that invokes `runAdaptiveCycle()` must populate `mealStartBGs` from the active V2MealOutcome records. The `bgAtMeal` field already exists on every outcome.
+**Integration wiring completed:**
+- `APSManager.determineBasal()` now calls `runAdaptiveCycle()` before oref, populating `mealStartBGs` from `V2OutcomeLearningStore.loadAll()` outcomes that match active meal IDs
+- ISF and CR loaded from file storage (same source oref uses) via `storage.retrieve(OpenAPS.Settings.insulinSensitivities, as: InsulinSensitivities.self)`
 
 ---
 
@@ -245,46 +248,50 @@ Additionally, oref was independently issuing correction SMBs for the same high B
 
 ### 12. Claude AI Recalibration Is Underspecified
 
-**Status: NOT IMPLEMENTED**
+**Status: IMPLEMENTED**
 
-**File:** `docs/V2DosingStrategy.md`, Section 11
+**Files:** `docs/V2DosingStrategy.md` (Section 11), `Trio/Sources/Services/SensitivityRecalibrationService.swift`
 
 **Problem:** The whitepaper devotes 3 sentences to the Claude integration. It doesn't describe the prompt structure, expected JSON schema, validation pipeline, parameter clamping on Claude output, user confirmation flow, or error handling.
 
-**Why deferred:** This is a documentation expansion task that requires design decisions about the Claude integration itself — prompt engineering, JSON schema definition, safety guardrails, UX flow for user confirmation. These decisions should be made alongside the actual Claude recalibration service implementation (in `ClaudeRecalibrationService` or equivalent), not in isolation. Writing a spec for a service that doesn't have a finalized design yet risks creating a spec that doesn't match reality.
-
-**What needs to happen:**
-1. Design the Claude recalibration prompt and expected response JSON schema
-2. Define the validation pipeline: schema check → parameter range clamping → sanity check (no parameter changes > X% in one cycle)
-3. Define the user confirmation UX: show the recommendation, explain what changed and why, require explicit approval before applying
-4. Define error handling: malformed JSON, parameters outside ranges, API failures, rate limiting
-5. Document all of the above in V2DosingStrategy.md Section 11
-6. Implementation should follow the spec, not precede it
+**What was done:**
+1. Expanded V2DosingStrategy.md Section 11 with comprehensive Claude AI recalibration spec:
+   - What Claude analyzes (full data prompt structure with meal outcomes, Garmin context, current parameters)
+   - Expected JSON response schema (curve parameters, sensitivity weights, patterns, confidence levels)
+   - Five-step validation pipeline: JSON extraction → schema validation → 30% change limit → confidence filter → range clamping
+   - User confirmation flow (AI Insights view, explicit apply action)
+   - Error handling (malformed JSON, API failures, rate limiting)
+2. Added `validateUpdate()` method to `SensitivityRecalibrationService` — rejects any single-parameter change > 30%
+3. Updated protein factor clamp from 0.60 to 0.80 to match settings UI range
+4. Added `fiberCoefficient` to the recalibration schema, prompt, parser, and apply pipeline (0.00–1.00 range)
+5. Updated system prompt to describe the fiber modifier and four-curve model
 
 ---
 
 ### 13. UserDefaults for Outcome Storage
 
-**Status: NOT IMPLEMENTED**
+**Status: IMPLEMENTED**
 
-**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`
+**Files:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`, `Model/TrioCoreDataPersistentContainer.xcdatamodeld`, `Model/Classes+Properties/V2MealOutcomeStored+CoreData{Class,Properties}.swift`
 
-**Problem:** All outcomes are serialized as a single JSON blob in UserDefaults. Over 90 days at 3 meals/day, that's ~270 records fully deserialized on every `loadAll()` call.
+**Problem:** All outcomes were serialized as a single JSON blob in UserDefaults. Over 90 days at 3 meals/day, that's ~270 records fully deserialized on every `loadAll()` call.
 
-**Why deferred:** This is a significant architectural migration. The app uses Core Data extensively, and V2MealOutcome maps naturally to a Core Data entity with relationships to checkpoints and adaptive adjustments. However:
-- Core Data schema changes require migration support (lightweight or custom) for existing users
-- The V2MealOutcome struct has nested arrays (checkpoints, adaptive adjustments) that need to become Core Data relationships
-- All callers of `loadAll()`, `save()`, `update()`, and `persistOutcomes()` need to be rewritten
-- The current UserDefaults approach works correctly at the current data scale — it's a performance concern, not a correctness concern
-- New fields added in this change (fiber, 5h checkpoint, confounding meal detection) would need to be in the Core Data schema, making the migration more complex if done now
+**What was done:**
+1. Added `V2MealOutcomeStored` Core Data entity with queryable attributes (date, mealID, macros, curve parameters, dosing context) and JSON-encoded binary attributes for nested data (checkpoints, adaptive adjustments, Garmin snapshot)
+2. Created `V2MealOutcomeStored+CoreDataClass.swift` and `V2MealOutcomeStored+CoreDataProperties.swift`
+3. Rewrote `V2OutcomeLearningStore`:
+   - `save()` creates a `V2MealOutcomeStored` in a new task context
+   - `loadAll()` uses date predicate with sort descriptor (no full deserialization of all records)
+   - `update()` fetches by ID and updates only changed fields
+   - `detectConfoundingMeals()` and `backfillOutcomes()` update individual records instead of rewriting entire blob
+4. Added `migrateFromUserDefaultsIfNeeded()` — one-time migration on first access:
+   - Decodes legacy UserDefaults JSON
+   - Inserts each outcome into Core Data
+   - Removes the UserDefaults key after successful migration
+   - Sets a migration-completed flag
+5. Personal parameters remain in UserDefaults (small, infrequently updated — no performance concern)
 
-**What needs to happen:**
-1. Define a Core Data model for `V2MealOutcomeEntity` with relationships to `V2BGCheckpointEntity` and `V2AdaptiveAdjustmentEntity`
-2. Write a one-time migration that reads existing UserDefaults JSON and inserts into Core Data
-3. Replace all `UserDefaults`-based CRUD in `V2OutcomeLearningStore` with `NSManagedObjectContext` operations
-4. Add `NSFetchedResultsController` or similar for the outcome analysis view instead of loading all records
-5. Remove the UserDefaults key after successful migration
-6. Test with ~270 records to verify performance improvement
+**Implementation decision:** Used hybrid approach — main queryable fields as proper Core Data attributes (enabling date/mealID predicates and fetch limits), nested arrays (checkpoints, adaptive adjustments, Garmin snapshot) as JSON-encoded binary attributes. This avoids the complexity of Core Data relationships and migration mapping for nested types while still eliminating the "deserialize everything on every read" bottleneck. Individual CRUD operations now touch only the affected record.
 
 ---
 
@@ -452,32 +459,31 @@ The following were reviewed and found to be correctly implemented:
 
 ---
 
-## Summary of Remaining Work
+## Summary
 
-### Integration Wiring (functions exist, need call-site connections)
+**All items complete.** 16 original items + 1 additional (#17 fiber full-stack) = 17 total items implemented.
 
-| Item | What needs wiring | Where |
-|------|------------------|-------|
-| #1 | Call `recordMealInsulin(mealID, units)` when boluses/SMBs are delivered | Bolus delivery + SMB delivery code paths |
-| #2 | Populate `mealStartBGs` from `V2MealOutcome.bgAtMeal` for active meals | Caller of `runAdaptiveCycle()` |
-| #5 | Gate 5 params already computed internally — no additional wiring needed | — |
+| # | Item | Status |
+|---|------|--------|
+| 1 | Meal-attributed IOB (recordMealInsulin) | Implemented + wired |
+| 2 | BG delta from meal start (mealStartBGs) | Implemented + wired |
+| 3 | Dynamic phase attribution | Implemented |
+| 4 | Confounding meal detection | Implemented |
+| 5 | IOB safety gate (Gate 5) | Implemented |
+| 6 | Nonlinear fat coefficient | Implemented |
+| 7 | Gate 3 threshold (-3.0 with hysteresis) | Implemented + whitepaper updated |
+| 8 | Garmin weight epistemic disclaimer | Implemented |
+| 9 | Cumulative scaling persistence | Implemented |
+| 10 | Protein factor range (0.10–0.80) | Implemented + whitepaper updated |
+| 11 | 5-hour checkpoint | Implemented |
+| 12 | Claude AI recalibration spec | Implemented (service + whitepaper) |
+| 13 | Core Data migration for outcomes | Implemented |
+| 14 | Gentilcore liquid fat caveat | Implemented |
+| 15 | Fiber modifier for carb tau | Implemented |
+| 16 | Test suite | Implemented |
+| 17 | Fiber full-stack integration | Implemented |
 
-### New Features (design + implementation needed)
-
-| Item | Scope | Effort |
-|------|-------|--------|
-| #12 — Claude AI recalibration spec | Design prompt schema, validation pipeline, user confirmation UX, error handling. Then implement service + document in whitepaper. | Large — requires design decisions before implementation |
-| #13 — Core Data migration for outcomes | Define Core Data model, write migration, replace UserDefaults CRUD, add fetch controllers. | Large — architectural change, but not urgent (UserDefaults works at current scale) |
-
-### Whitepaper Updates (documentation only)
-
-| Item | What | Where |
-|------|------|-------|
-| #7 | Document `-3.0` threshold with hysteresis (replaces `-5.0`) | V2DosingStrategy.md Section 9 |
-| #10 | Update clamping table to show 0.10–0.80 (replaces 0.10–0.60) | V2DosingStrategy.md Section 11 |
-
-### Priority Order for Remaining Work
-
-1. **#1/#2 Integration wiring** — Completes the adaptive service's meal-specific IOB and BG delta calculations. The adaptive service works but uses less precise inputs without this wiring.
-2. **#12 Claude AI spec** — Defines the AI recalibration feature. Can be designed using the export data (which is now fully functional) to prototype prompts and validate parameter recommendations.
-3. **#13 Core Data migration** — Performance optimization. Only becomes urgent at high meal volume (~270+ records).
+### Whitepaper updates applied to V2DosingStrategy.md:
+- Section 9: Gate 3 threshold -5.0 → -3.0 with hysteresis, "Four Safety Gates" → "Five Safety Gates" with Gate 5 (IOB vs remaining absorption)
+- Section 10: Predicted BG impact uses meal-attributed IOB; actual BG uses delta from meal start
+- Section 11: Protein factor clamp 0.60 → 0.80; seven checkpoints with dynamic phase attribution; Claude AI full spec (prompt schema, JSON response, validation pipeline, user confirmation, error handling); Core Data outcome storage

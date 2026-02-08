@@ -176,59 +176,165 @@ struct V2PersonalCurveParameters: Codable {
 // MARK: - Outcome Learning Store
 
 /// Persistent store for V2 meal outcomes and personal parameter learning.
+/// Uses Core Data for outcome storage (#13) with a one-time migration from UserDefaults.
+/// Parameters remain in UserDefaults (small, infrequently updated).
 final class V2OutcomeLearningStore {
     static let shared = V2OutcomeLearningStore()
 
-    private let outcomesKey = "V2MealOutcomes"
+    private let legacyOutcomesKey = "V2MealOutcomes"
+    private let migrationCompletedKey = "V2OutcomesMigratedToCoreData"
     private let parametersKey = "V2PersonalCurveParameters"
     private let retentionDays = 90
     private let icrMatchTolerance = 0.10
 
-    private init() {}
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
 
-    // MARK: - Outcome Storage
+    private init() {
+        // Run one-time migration from UserDefaults to Core Data on first access
+        migrateFromUserDefaultsIfNeeded()
+    }
+
+    // MARK: - Core Data ↔ Struct Conversion
+
+    private func toStored(_ outcome: V2MealOutcome, in context: NSManagedObjectContext) -> V2MealOutcomeStored {
+        let stored = V2MealOutcomeStored(context: context)
+        stored.id = outcome.id
+        stored.date = outcome.date
+        stored.mealID = outcome.mealID
+        stored.carbs = outcome.carbs
+        stored.fat = outcome.fat
+        stored.protein = outcome.protein
+        stored.fiber = outcome.fiber
+        stored.tauCarb = outcome.tauCarb
+        stored.proteinFactor = outcome.proteinFactor
+        stored.fatTotalEquiv = outcome.fatTotalEquiv
+        stored.upfrontPercent = outcome.upfrontPercent
+        stored.curveSuggestedPercent = outcome.curveSuggestedPercent
+        stored.insulinDemandFactor = outcome.insulinDemandFactor
+        stored.safeWindowMinutes = Int16(outcome.safeWindowMinutes)
+        stored.bgAtMeal = Int16(outcome.bgAtMeal)
+        stored.carbRatioAtMeal = outcome.carbRatioAtMeal
+        stored.isfAtMeal = outcome.isfAtMeal
+        stored.mealSMBMultiplier = outcome.mealSMBMultiplier
+        stored.mealModeWasActive = outcome.mealModeWasActive
+        stored.hasConfoundingMeal = outcome.hasConfoundingMeal
+        stored.checkpointsJSON = try? encoder.encode(outcome.checkpoints)
+        stored.adaptiveAdjustmentsJSON = try? encoder.encode(outcome.adaptiveAdjustments)
+        stored.garminSnapshotJSON = try? encoder.encode(outcome.garminSnapshot)
+        return stored
+    }
+
+    private func toOutcome(_ stored: V2MealOutcomeStored) -> V2MealOutcome? {
+        guard let id = stored.id, let date = stored.date else { return nil }
+
+        let checkpoints: [V2BGCheckpoint] = stored.checkpointsJSON
+            .flatMap { try? decoder.decode([V2BGCheckpoint].self, from: $0) } ?? []
+        let adjustments: [V2MealOutcome.AdaptiveAdjustmentRecord] = stored.adaptiveAdjustmentsJSON
+            .flatMap { try? decoder.decode([V2MealOutcome.AdaptiveAdjustmentRecord].self, from: $0) } ?? []
+        let garmin: GarminContextSnapshot? = stored.garminSnapshotJSON
+            .flatMap { try? decoder.decode(GarminContextSnapshot.self, from: $0) }
+
+        return V2MealOutcome(
+            id: id, date: date, mealID: stored.mealID ?? "",
+            carbs: stored.carbs, fat: stored.fat, protein: stored.protein, fiber: stored.fiber,
+            tauCarb: stored.tauCarb, proteinFactor: stored.proteinFactor, fatTotalEquiv: stored.fatTotalEquiv,
+            upfrontPercent: stored.upfrontPercent, curveSuggestedPercent: stored.curveSuggestedPercent,
+            insulinDemandFactor: stored.insulinDemandFactor, safeWindowMinutes: Int(stored.safeWindowMinutes),
+            garminSnapshot: garmin, bgAtMeal: Int(stored.bgAtMeal),
+            carbRatioAtMeal: stored.carbRatioAtMeal, isfAtMeal: stored.isfAtMeal,
+            mealSMBMultiplier: stored.mealSMBMultiplier, mealModeWasActive: stored.mealModeWasActive,
+            adaptiveAdjustments: adjustments, checkpoints: checkpoints,
+            hasConfoundingMeal: stored.hasConfoundingMeal
+        )
+    }
+
+    private func updateStored(_ stored: V2MealOutcomeStored, from outcome: V2MealOutcome) {
+        stored.hasConfoundingMeal = outcome.hasConfoundingMeal
+        stored.checkpointsJSON = try? encoder.encode(outcome.checkpoints)
+        stored.adaptiveAdjustmentsJSON = try? encoder.encode(outcome.adaptiveAdjustments)
+    }
+
+    // MARK: - One-Time Migration from UserDefaults (#13)
+
+    private func migrateFromUserDefaultsIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: migrationCompletedKey) else { return }
+        guard let data = UserDefaults.standard.data(forKey: legacyOutcomesKey) else {
+            UserDefaults.standard.set(true, forKey: migrationCompletedKey)
+            return
+        }
+
+        do {
+            let legacyOutcomes = try decoder.decode([V2MealOutcome].self, from: data)
+            guard !legacyOutcomes.isEmpty else {
+                UserDefaults.standard.set(true, forKey: migrationCompletedKey)
+                return
+            }
+
+            let context = CoreDataStack.shared.newTaskContext()
+            context.performAndWait {
+                for outcome in legacyOutcomes {
+                    _ = toStored(outcome, in: context)
+                }
+                do {
+                    try context.save()
+                    UserDefaults.standard.set(true, forKey: migrationCompletedKey)
+                    UserDefaults.standard.removeObject(forKey: legacyOutcomesKey)
+                    debugPrint("V2OutcomeLearningStore: Migrated \(legacyOutcomes.count) outcomes to Core Data")
+                } catch {
+                    debugPrint("V2OutcomeLearningStore: Migration failed: \(error)")
+                }
+            }
+        } catch {
+            debugPrint("V2OutcomeLearningStore: Failed to decode legacy outcomes for migration: \(error)")
+        }
+    }
+
+    // MARK: - Outcome Storage (Core Data)
 
     func save(_ outcome: V2MealOutcome) {
-        var all = loadAll()
-        all.append(outcome)
-        persistOutcomes(all)
+        let context = CoreDataStack.shared.newTaskContext()
+        context.performAndWait {
+            _ = toStored(outcome, in: context)
+            try? context.save()
+        }
     }
 
     func loadAll() -> [V2MealOutcome] {
-        guard let data = UserDefaults.standard.data(forKey: outcomesKey) else { return [] }
-        do {
-            var outcomes = try JSONDecoder().decode([V2MealOutcome].self, from: data)
-            let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date()) ?? Date()
-            outcomes = outcomes.filter { $0.date >= cutoff }
-            return outcomes.sorted { $0.date < $1.date }
-        } catch {
-            debugPrint("V2OutcomeLearningStore: Failed to decode outcomes: \(error)")
-            return []
+        let context = CoreDataStack.shared.newTaskContext()
+        var results: [V2MealOutcome] = []
+        let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date()) ?? Date()
+
+        context.performAndWait {
+            let request = V2MealOutcomeStored.fetchRequest()
+            request.predicate = NSPredicate(format: "date >= %@", cutoff as NSDate)
+            request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+
+            guard let fetched = try? context.fetch(request) else { return }
+            results = fetched.compactMap { toOutcome($0) }
         }
+        return results
     }
 
     func update(_ outcome: V2MealOutcome) {
-        var all = loadAll()
-        if let index = all.firstIndex(where: { $0.id == outcome.id }) {
-            all[index] = outcome
-            persistOutcomes(all)
+        let context = CoreDataStack.shared.newTaskContext()
+        context.performAndWait {
+            let request = V2MealOutcomeStored.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", outcome.id as CVarArg)
+            request.fetchLimit = 1
+
+            if let stored = (try? context.fetch(request))?.first {
+                updateStored(stored, from: outcome)
+                try? context.save()
+            }
         }
     }
 
-    private func persistOutcomes(_ outcomes: [V2MealOutcome]) {
-        do {
-            let data = try JSONEncoder().encode(outcomes)
-            UserDefaults.standard.set(data, forKey: outcomesKey)
-        } catch {
-            debugPrint("V2OutcomeLearningStore: Failed to encode outcomes: \(error)")
-        }
-    }
-
-    // MARK: - Personal Parameters
+    // MARK: - Personal Parameters (still in UserDefaults — small, infrequently updated)
 
     func loadParameters() -> V2PersonalCurveParameters {
         guard let data = UserDefaults.standard.data(forKey: parametersKey),
-              let params = try? JSONDecoder().decode(V2PersonalCurveParameters.self, from: data)
+              let params = try? decoder.decode(V2PersonalCurveParameters.self, from: data)
         else {
             return V2PersonalCurveParameters()
         }
@@ -236,7 +342,7 @@ final class V2OutcomeLearningStore {
     }
 
     func saveParameters(_ params: V2PersonalCurveParameters) {
-        if let data = try? JSONEncoder().encode(params) {
+        if let data = try? encoder.encode(params) {
             UserDefaults.standard.set(data, forKey: parametersKey)
         }
     }
@@ -249,8 +355,6 @@ final class V2OutcomeLearningStore {
         var outcomes = loadAll()
         guard outcomes.count > 1 else { return }
 
-        var anyUpdated = false
-
         for i in 0 ..< outcomes.count {
             let mealTime = outcomes[i].date
             let windowEnd = mealTime.addingTimeInterval(8 * 3600)
@@ -262,33 +366,32 @@ final class V2OutcomeLearningStore {
                     other.date < windowEnd
             }
 
+            var modified = false
+
             if overlappingMeals.isEmpty {
                 if outcomes[i].hasConfoundingMeal {
                     outcomes[i].hasConfoundingMeal = false
-                    anyUpdated = true
+                    modified = true
                 }
-                continue
-            }
-
-            // Per-checkpoint clean/dirty marking based on whether a confounding meal's
-            // absorption window overlaps that specific checkpoint time
-            outcomes[i].hasConfoundingMeal = true
-            for j in 0 ..< outcomes[i].checkpoints.count {
-                let cpTime = mealTime.addingTimeInterval(
-                    TimeInterval(outcomes[i].checkpoints[j].hoursAfterMeal * 3600)
-                )
-                // A checkpoint is dirty if any confounding meal started before the checkpoint time
-                // (its absorption is active at that point)
-                let isDirty = overlappingMeals.contains { $0.date < cpTime }
-                if isDirty {
-                    outcomes[i].checkpoints[j].isClean = false
-                    anyUpdated = true
+            } else {
+                // Per-checkpoint clean/dirty marking based on whether a confounding meal's
+                // absorption window overlaps that specific checkpoint time
+                outcomes[i].hasConfoundingMeal = true
+                modified = true
+                for j in 0 ..< outcomes[i].checkpoints.count {
+                    let cpTime = mealTime.addingTimeInterval(
+                        TimeInterval(outcomes[i].checkpoints[j].hoursAfterMeal * 3600)
+                    )
+                    let isDirty = overlappingMeals.contains { $0.date < cpTime }
+                    if isDirty {
+                        outcomes[i].checkpoints[j].isClean = false
+                    }
                 }
             }
-        }
 
-        if anyUpdated {
-            persistOutcomes(outcomes)
+            if modified {
+                update(outcomes[i])
+            }
         }
     }
 
@@ -297,7 +400,6 @@ final class V2OutcomeLearningStore {
     /// Backfill BG outcomes for pending V2 meal outcomes.
     func backfillOutcomes(context: NSManagedObjectContext) async {
         var outcomes = loadAll()
-        var anyUpdated = false
 
         for i in 0 ..< outcomes.count {
             var updated = false
@@ -317,12 +419,8 @@ final class V2OutcomeLearningStore {
             }
 
             if updated {
-                anyUpdated = true
+                update(outcomes[i])
             }
-        }
-
-        if anyUpdated {
-            persistOutcomes(outcomes)
         }
 
         // (#4) After backfilling BG data, detect confounding meals and mark dirty checkpoints

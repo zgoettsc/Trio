@@ -94,6 +94,10 @@ final class BaseAPSManager: APSManager, Injectable {
 
     private var openAPS: OpenAPS!
 
+    /// V2: Adaptive service for meal-mode SMB enhancement and BG-adaptive entry adjustments.
+    /// Persists across loop cycles to maintain cumulative scaling and meal-attributed IOB.
+    private lazy var macroAdaptiveService = MacroAdaptiveService()
+
     private var lifetime = Lifetime()
 
     private var backgroundTaskID: UIBackgroundTaskIdentifier?
@@ -479,6 +483,47 @@ final class BaseAPSManager: APSManager, Injectable {
 
             _ = try await autosenseResult
             try await openAPS.createProfiles()
+
+            // V2: Run meal-mode adaptive cycle before oref if V2 is enabled
+            let trioSettings = settingsManager.settings
+            if trioSettings.useV2MacroAbsorption {
+                let activeMealIDs = await MacroAdaptiveService.activeMealIDs(context: privateContext)
+                if !activeMealIDs.isEmpty {
+                    // Build mealStartBGs map from V2 outcome records
+                    let outcomes = V2OutcomeLearningStore.shared.loadAll()
+                    var mealStartBGs: [String: Double] = [:]
+                    for outcome in outcomes where activeMealIDs.contains(outcome.mealID) {
+                        mealStartBGs[outcome.mealID] = Double(outcome.bgAtMeal)
+                    }
+
+                    let latestBG = glucose.first.map { Double($0.glucose) }
+                    let bgTrend: Double? = glucose.count >= 2 ? Double(glucose[0].glucose - glucose[1].glucose) : nil
+
+                    // Load ISF and CR from file storage (same source oref uses)
+                    let isfValue: Double = storage.retrieve(OpenAPS.Settings.insulinSensitivities, as: InsulinSensitivities.self)
+                        .flatMap { $0.sensitivities.first.map { NSDecimalNumber(decimal: $0.sensitivity).doubleValue } } ?? 100
+                    let crValue: Double = storage.retrieve(OpenAPS.Settings.carbRatios, as: CarbRatios.self)
+                        .flatMap { $0.schedule.first.map { NSDecimalNumber(decimal: $0.ratio).doubleValue } } ?? 10
+
+                    let mealMode = await macroAdaptiveService.runAdaptiveCycle(
+                        currentBG: latestBG,
+                        bgTrend: bgTrend,
+                        cgmTimestamp: glucose.first?.date,
+                        currentIOB: 0, // IOB is computed inside oref; adaptive uses entry-level adjustments
+                        isf: isfValue,
+                        cr: crValue,
+                        activeMealIDs: activeMealIDs,
+                        mealStartBGs: mealStartBGs,
+                        context: privateContext,
+                        userMaxSMBMinutes: settingsManager.preferences.maxSMBBasalMinutes,
+                        mealSMBMultiplier: NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue,
+                        bgFloor: NSDecimalNumber(decimal: trioSettings.mealModeBGFloor).doubleValue
+                    )
+
+                    debug(.apsManager, "V2 adaptive cycle: mealMode=\(mealMode.isActive), effectiveSMBMinutes=\(mealMode.effectiveMaxSMBMinutes)")
+                }
+            }
+
             let determination = try await openAPS.determineBasal(currentTemp: await currentTemp, clock: now)
             iobFileDidUpdate.send(())
 
@@ -576,6 +621,15 @@ final class BaseAPSManager: APSManager, Injectable {
         do {
             try await pump.enactBolus(units: roundedAmount, automatic: isSMB)
             debug(.apsManager, "Bolus succeeded")
+
+            // V2: Record manual bolus for meal-attributed IOB tracking
+            if !isSMB, settingsManager.settings.useV2MacroAbsorption {
+                if let mealID = carbsStorage.v2LastEngineMealID {
+                    macroAdaptiveService.recordMealInsulin(mealID: mealID, units: roundedAmount)
+                    debug(.apsManager, "V2: Recorded manual bolus \(String(format: "%.2f", roundedAmount))U for meal \(mealID.prefix(8))")
+                }
+            }
+
             if !isSMB {
                 try await determineBasalSync()
             }
@@ -746,8 +800,22 @@ final class BaseAPSManager: APSManager, Injectable {
     }
 
     private func performBolus(pump: PumpManager, smbToDeliver: NSDecimalNumber) async throws {
-        try await pump.enactBolus(units: Double(truncating: smbToDeliver), automatic: true)
+        let smbUnits = Double(truncating: smbToDeliver)
+        try await pump.enactBolus(units: smbUnits, automatic: true)
         bolusProgress.send(0)
+
+        // V2: Record SMB insulin for meal-attributed IOB tracking
+        if settingsManager.settings.useV2MacroAbsorption {
+            let activeMealIDs = await MacroAdaptiveService.activeMealIDs(context: privateContext)
+            if !activeMealIDs.isEmpty {
+                // Attribute equally across active meals (proportional split)
+                let perMeal = smbUnits / Double(activeMealIDs.count)
+                for mealID in activeMealIDs {
+                    macroAdaptiveService.recordMealInsulin(mealID: mealID, units: perMeal)
+                }
+                debug(.apsManager, "V2: Recorded SMB \(String(format: "%.3f", smbUnits))U across \(activeMealIDs.count) meal(s)")
+            }
+        }
     }
 
     private func reportEnacted(wasEnacted: Bool) async {
