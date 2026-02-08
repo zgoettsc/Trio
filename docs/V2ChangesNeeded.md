@@ -4,11 +4,15 @@
 **Sources:** Internal code review + commissioned external critique
 **Scope:** V2DosingStrategy.md, MacroAbsorptionEngine.swift, MacroAdaptiveService.swift, V2CurveOutcomeLearning.swift, GarminSensitivityModel.swift, V2MacroDosingSettingsView.swift
 
+**Implementation status updated:** February 8, 2026
+
 ---
 
 ## Summary
 
 The core three-curve model, split dosing logic, and curve math are solid. The issues live in the adaptive/learning layers, safety gates, and a few whitepaper-to-code mismatches. Below are 16 specific changes grouped by priority.
+
+**14 of 16 items have been implemented.** Items #12 and #13 are deferred — see details below.
 
 ---
 
@@ -16,159 +20,111 @@ The core three-curve model, split dosing logic, and curve math are solid. The is
 
 ### 1. BG-Adaptive Service Uses Total IOB Instead of Meal-Attributed IOB
 
-**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`, line 201
+**Status: IMPLEMENTED**
 
-**Current code:**
-```swift
-let predictedBGImpact = (absorbedCarbs / cr) * isf - currentIOB * isf
-```
+**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`
 
-**Problem:** `currentIOB` is total insulin on board from all sources — basal, corrections, prior meals, manual boluses. The formula compares a meal-specific carb absorption prediction against system-wide IOB. A large correction bolus from a prior high inflates `currentIOB`, making `predictedBGImpact` very negative, making `error` very positive, which scales UP remaining entries even though the meal itself is absorbing correctly.
+**Problem:** `currentIOB` was total insulin on board from all sources — basal, corrections, prior meals, manual boluses. The formula compared a meal-specific carb absorption prediction against system-wide IOB. A large correction bolus from a prior high inflated `currentIOB`, making `predictedBGImpact` very negative, making `error` very positive, which scaled UP remaining entries even though the meal itself was absorbing correctly.
 
-Additionally, oref is independently issuing correction SMBs for the same high BG. The adaptive service scales up future entries to deliver more insulin, and oref issues corrections to deliver more insulin — double-correcting the same problem. The 50% damping and 0.5–1.5 cycle clamp reduce but do not eliminate this.
+Additionally, oref was independently issuing correction SMBs for the same high BG. The adaptive service scaled up future entries to deliver more insulin, and oref issued corrections to deliver more insulin — double-correcting the same problem. The 50% damping and 0.5–1.5 cycle clamp reduced but did not eliminate this.
 
-**Change:** Track meal-attributed IOB separately. When the upfront bolus is delivered and SMBs are issued against V2 entries, accumulate the insulin attributed to this mealID. Use that meal-specific IOB in the prediction formula instead of total system IOB:
+**What was done:**
+- Added `mealAttributedIOB: [String: Double]` dictionary to track insulin per mealID
+- Added `recordMealInsulin(mealID:units:)` to accumulate insulin attributed to a meal
+- Added `getMealAttributedIOB(mealID:)` to retrieve the meal-specific total
+- Changed the prediction formula from `currentIOB * isf` to `mealIOB * isf`
+- Cleanup on `mealCompleted()` removes the meal's IOB entry
 
-```swift
-let mealIOB = getMealAttributedIOB(mealID: mealID)  // new function
-let predictedBGImpact = (absorbedCarbs / cr) * isf - mealIOB * isf
-```
+**Implementation decision:** Used a simple in-memory accumulator (`recordMealInsulin` adds, `getMealAttributedIOB` reads) rather than tagging insulin doses with mealID in Core Data. This is simpler but does not model IOB decay — the recorded value is total insulin attributed, not remaining active insulin. This is acceptable for the adaptive correction use case (which compares cumulative effects), but a future improvement could apply an exponential decay curve based on DIA to make the IOB estimate more accurate over time.
 
-This requires either tagging insulin doses with mealID in Core Data, or estimating meal IOB from the bolus + SMBs delivered while V2 entries were active for this meal.
-
-**Why:** Without this, every adaptive adjustment is contaminated by non-meal insulin. The system could systematically over-dose on meals that happen after correction boluses.
+**Remaining work:**
+- The call site that delivers boluses and SMBs must call `recordMealInsulin()` with the mealID and units delivered. This wiring depends on where in the oref integration the bolus/SMB decisions are made. The function exists and is ready to be called.
+- Consider adding IOB decay modeling using the user's DIA setting for longer meals (6-8h) where the upfront bolus has substantially decayed by the time late entries are evaluated.
 
 ---
 
 ### 2. BG-Adaptive "Actual Trend" Extrapolation Is Inaccurate
 
-**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`, line 209
+**Status: IMPLEMENTED**
 
-**Current code:**
-```swift
-let trendBasedActual = trend * (absorbedAndRemaining.minutesSinceFirst / 5.0)
-```
+**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`
 
-**Problem:** This takes the current 5-minute CGM trend and linearly extrapolates it across the entire duration since the first entry. If the meal started 3 hours ago and the current trend is +2 mg/dL/5min, this yields `2 × (180/5) = 72 mg/dL` — "what would happen if the current rate held for 3 hours," not "what actually happened over 3 hours." A meal that spiked 60 mg/dL at hour 1 and is now flat at +2/5min would be treated identically to one that was flat for 3 hours and just started rising.
+**Problem:** The old code took the current 5-minute CGM trend and linearly extrapolated it across the entire duration since the first entry. A meal that spiked 60 mg/dL at hour 1 and was now flat would be treated identically to one that was flat for 3 hours and just started rising.
 
-**Change:** Use cumulative CGM delta instead of trend extrapolation. Record the BG at meal start (already stored as `bgAtMeal` in V2MealOutcome) and compute:
+**What was done:**
+- Added `mealStartBGs: [String: Double]` parameter to `runAdaptiveCycle()` (defaults to empty, backwards-compatible)
+- Replaced `trend * (minutesSinceFirst / 5.0)` with `currentBG - mealStartBG`
+- Falls back to `bg` (no delta) if `mealStartBGs` doesn't contain the mealID
+- Removed `bgTrend` from the guard clause for adaptive adjustment (trend is still used by Gate 3 for meal-mode, but no longer for error calculation)
+- `trendError` in `AdaptiveAdjustment` is now set to 0 (field retained for Codable compatibility)
 
-```swift
-let actualBGDelta = currentBG - mealStartBG
-let error = actualBGDelta - predictedBGImpact
-```
+**Implementation decision:** The `mealStartBGs` map is passed in from outside rather than looked up internally from V2MealOutcome. This keeps MacroAdaptiveService decoupled from the outcome storage layer. The caller can populate it from `V2MealOutcome.bgAtMeal` for each active meal.
 
-This requires passing `bgAtMeal` into the adaptive cycle, either by looking it up from the V2MealOutcome or storing it when the meal is created.
-
-**Why:** The current formula produces wildly different error values depending on transient CGM noise. A cumulative delta reflects what actually happened.
+**Remaining work:**
+- The call site that invokes `runAdaptiveCycle()` must populate `mealStartBGs` from the active V2MealOutcome records. The `bgAtMeal` field already exists on every outcome.
 
 ---
 
 ### 3. Static Phase Attribution Ignores Actual Meal Composition
 
-**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`, lines 381–388
+**Status: IMPLEMENTED**
 
-**Current code:**
-```swift
-checkpoints: [
-    V2BGCheckpoint(hoursAfterMeal: 1, bgValue: nil, isClean: true, curvePhase: .carb),
-    V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
-    V2BGCheckpoint(hoursAfterMeal: 3, bgValue: nil, isClean: true, curvePhase: .protein),
-    V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true, curvePhase: .overlap),
-    V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true, curvePhase: .fat),
-    V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true, curvePhase: .fat),
-],
-```
+**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`
 
-**Problem:** Phase attribution is hardcoded regardless of what the person actually ate. For a meal with 80g carbs, 40g fat, and only 8g protein (below the 15g threshold), zero protein entries are generated. Yet the 3h checkpoint is still tagged `.protein` and BG errors at 3h adjust `proteinFactor` — a parameter that had no effect on this meal. Similarly, for a low-fat meal (3g fat, below the 5g threshold), the 6h and 8h checkpoints still attribute errors to the fat curve.
+**Problem:** Phase attribution was hardcoded regardless of what the person actually ate. A low-protein meal still attributed 3h errors to `proteinFactor`. A low-fat meal still attributed 6h/8h errors to the fat curve.
 
-Compounding this: the 3–5h overlap zone is the most ambiguous window physiologically. A high BG at 4h could mean carb tau is wrong, protein factor is wrong, or fat is hitting earlier than modeled. Distributing error at 30% weight to all three curves may just add noise to all parameters.
+**What was done:**
+- Added `V2BGCheckpoint.computePhases(carbs:fat:protein:proteinThreshold:)` static function
+- Added `.skip` case to `CurvePhase` enum for checkpoints not relevant to the meal
+- Checkpoints at 3h, 4h, 5h, 6h, 8h are now dynamically assigned based on whether protein > threshold and fat >= 5g
+- `createOutcome()` now calls `computePhases()` instead of using hardcoded checkpoints
+- The learning loop in `recalculateCurveParameters()` handles `.skip` by breaking (no adjustment)
 
-**Change:** Compute phase attribution dynamically based on the actual macros at meal time:
+**Implementation decision:** Kept the `.overlap` phase for meals with both protein and fat (at 4h), rather than dropping it entirely as the external critique suggested. Rationale: dropping overlap entirely would lose all signal from the 4h window, which for full-macro meals is actually the most information-dense checkpoint. The 30% reduced weight already limits its influence. If parameter convergence is noisy in practice, the overlap phase can be dropped later — but removing it now loses data we may want.
 
-```swift
-static func computePhases(carbs: Double, fat: Double, protein: Double,
-                           proteinThreshold: Double) -> [V2BGCheckpoint] {
-    let hasProtein = protein > proteinThreshold
-    let hasFat = fat >= 5
-
-    return [
-        V2BGCheckpoint(hoursAfterMeal: 1, curvePhase: .carb),
-        V2BGCheckpoint(hoursAfterMeal: 2, curvePhase: .carb),
-        V2BGCheckpoint(hoursAfterMeal: 3, curvePhase: hasProtein ? .protein : .carb),
-        V2BGCheckpoint(hoursAfterMeal: 4, curvePhase: hasProtein && hasFat ? .overlap :
-                                                       hasProtein ? .protein :
-                                                       hasFat ? .fat : .carb),
-        V2BGCheckpoint(hoursAfterMeal: 6, curvePhase: hasFat ? .fat : .skip),
-        V2BGCheckpoint(hoursAfterMeal: 8, curvePhase: hasFat ? .fat : .skip),
-    ]
-}
-```
-
-Additionally, consider dropping the `.overlap` phase from parameter learning entirely (external critique recommendation). Only learn from clean single-curve checkpoints — 1h/2h for carbs, 6h/8h for fat — and skip the ambiguous middle zone. This may converge slower but more accurately.
-
-**Why:** Wrong attribution = wrong parameter adjustments = the system learns the wrong lessons from every meal that doesn't have all three macros in significant amounts.
+**Remaining work:** None for the code change. Monitor whether parameter convergence improves with dynamic attribution vs. the old static approach using the outcome analysis view.
 
 ---
 
 ### 4. Confounding Meal Detection Is Dead Code
 
-**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`, line 389
+**Status: IMPLEMENTED**
 
-**Current code:**
-```swift
-hasConfoundingMeal: false   // hardcoded, never set to true
-```
+**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`
 
-The learning system filters on this flag (line 257: `!outcome.hasConfoundingMeal`), but nothing ever sets it to `true`. If a user eats a snack 2 hours after lunch, the lunch outcome's 4h/6h/8h checkpoints reflect both meals, but errors are attributed to the lunch curves.
+**Problem:** `hasConfoundingMeal` was hardcoded to `false` and never set to `true`. Meals followed by snacks within 8 hours corrupted the learning data.
 
-**Change:** Implement confounding meal detection in the backfill method. When backfilling checkpoints for outcome X, check if any other V2MealOutcome was recorded between X's meal time and X's last checkpoint time:
+**What was done:**
+- Added `detectConfoundingMeals()` method to `V2OutcomeLearningStore`
+- Uses the more nuanced per-checkpoint approach (external critique recommendation): individual checkpoints are marked `isClean = false` when a confounding meal's start time falls before that checkpoint's time
+- Sets `hasConfoundingMeal = true` on the outcome when any overlap exists
+- Called automatically at the end of `backfillOutcomes()` so detection runs whenever new BG data is filled in
+- Correctly clears `hasConfoundingMeal` back to `false` if outcomes are deleted and no overlap remains
 
-```swift
-func detectConfoundingMeals() {
-    var outcomes = loadAll()
-    for i in 0..<outcomes.count {
-        let mealTime = outcomes[i].date
-        let windowEnd = mealTime.addingTimeInterval(8 * 3600)  // 8h window
-        let hasOverlap = outcomes.contains { other in
-            other.id != outcomes[i].id &&
-            other.date > mealTime &&
-            other.date < windowEnd
-        }
-        if hasOverlap {
-            outcomes[i].hasConfoundingMeal = true
-        }
-    }
-    persistOutcomes(outcomes)
-}
-```
+**Implementation decision:** Went with per-checkpoint dirty marking rather than binary whole-meal exclusion. This preserves early checkpoints (1h, 2h) that are clean even when a snack at 3h contaminates later checkpoints. Since the learning system already checks `cp.isClean` in its inner loop, dirty checkpoints are automatically excluded from parameter adjustments without losing the clean ones.
 
-For a more nuanced approach (per the external critique), instead of binary exclusion, mark individual checkpoints as clean/dirty based on whether a confounding meal's absorption window overlaps that specific checkpoint time.
-
-**Why:** Without this, every meal followed by a snack within 8 hours corrupts the learning data. Most people eat more than once per 8-hour window.
+**Remaining work:** None. The detection is fully automated via the backfill hook.
 
 ---
 
 ### 5. Add IOB Safety Gate for SMB Enhancement
 
-**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`, lines 20–49
+**Status: IMPLEMENTED**
 
-**Current gates:** (1) active meal entries, (2) BG above floor, (3) trend flat/rising, (4) CGM fresh.
+**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`
 
-**Missing gate:** No check on whether IOB already exceeds predicted remaining absorption. Scenario: BG is 95 and flat, all four gates pass, meal-mode multiplier delivers an enhanced SMB. But there's already 8 units of IOB from the upfront bolus + earlier SMBs, with only 5g of carb entries remaining. The stacked insulin will cause a crash once it peaks.
+**Problem:** No check on whether IOB already exceeded predicted remaining absorption. Insulin stacking could cause hypoglycemia even when BG looked fine.
 
-**Change:** Add Gate 5 — IOB vs remaining absorption:
+**What was done:**
+- Added Gate 5 to `MealModeState.evaluate()` after Gate 4
+- Added `currentIOB`, `remainingCarbsForActiveMeals`, and `carbRatio` parameters to `evaluate()`
+- Gate logic: `remainingInsulinNeed = remainingCarbs / carbRatio`; fails if `currentIOB > remainingInsulinNeed * 1.2`
+- `runAdaptiveCycle()` now computes `totalRemainingCarbs` across all active meals before calling `evaluate()`
+- Gate is guarded by `carbRatio > 0` and `remainingCarbs > 0` to avoid division issues
 
-```swift
-// Gate 5: IOB should not exceed remaining predicted need
-// remainingCarbs / CR = insulin still needed; if IOB > that, back off
-let remainingInsulinNeed = remainingCarbsForActiveMeals / carbRatio
-guard currentIOB <= remainingInsulinNeed * 1.2 else { return baseState }  // 20% buffer
-```
+**Implementation decision:** Used the 20% buffer (1.2x) as specified in the changes doc. The gate is evaluated using total remaining carbs across all active meals and total system IOB. This is a conservative choice — it could over-restrict when multiple meals are active and IOB is split across them. A per-meal IOB gate would be more precise but requires the meal-attributed IOB tracking from #1 to be fully wired. The current approach errs on the side of safety.
 
-This requires passing `currentIOB`, `carbRatio`, and the sum of remaining carb entries into `MealModeState.evaluate()`.
-
-**Why:** The existing gates protect against low BG and falling trends, but not against insulin stacking where BG hasn't dropped *yet*. This is a real hypoglycemia vector — BG can look fine while insulin is accumulating, then crash 30–60 minutes later.
+**Remaining work:** None for the gate itself. Once meal-attributed IOB (#1) is fully wired at the call site, consider switching Gate 5 to use per-meal IOB instead of total system IOB for higher precision.
 
 ---
 
@@ -176,138 +132,74 @@ This requires passing `currentIOB`, `carbRatio`, and the sum of remaining carb e
 
 ### 6. Fat Coefficient Should Be Nonlinear
 
-**File:** `Trio/Sources/Models/MacroAbsorptionEngine.swift`, lines 146–148
+**Status: IMPLEMENTED**
 
-**Current code:**
-```swift
-fatTotalEquiv = fat * params.effectiveFatTotalCoeff   // linear: 0.69 * fat_grams
-```
+**File:** `Trio/Sources/Models/MacroAbsorptionEngine.swift`
 
-**Problem:** The default coefficient of 0.69 is derived from Wolpert (2013) who studied 50g fat meals (+42% insulin). But Bell (2020) found the dose-response is nonlinear: 60g fat needed +21%, 40g fat needed +6%, 20g fat needed +6%. A single linear coefficient overcharges moderate-fat meals (where the effect is small) and may undercharge extreme-fat meals.
+**Problem:** A single linear coefficient (0.69) overcharged moderate-fat meals and may have undercharged extreme-fat meals. Bell (2020) showed the dose-response is nonlinear.
 
-The jump from the Wolpert-derived 0.55 to 0.69 is described as targeting "median-to-upper range" — a design choice presented as a derivation.
+**What was done:**
+- Added `fatCarbEquivalent(fatGrams:maxCoeff:threshold:plateau:)` static function
+- Saturating ramp: 0.05 coefficient at ≤10g fat, linear ramp to `maxCoeff` at ≥50g fat
+- Called from `generateEntries()` instead of the old `fat * params.effectiveFatTotalCoeff`
+- Updated the example calculation in `V2MacroDosingSettingsView` to use `fatCarbEquivalent()`
 
-**Change:** Replace the linear coefficient with a saturating ramp, similar to the existing protein model. Note: the tau modification already handles the timing shift from fat (slower gastric emptying), which is the dominant effect at moderate fat levels. Curve 3 entries add carb-equivalent demand *on top of* that timing shift, so the ramp should be conservative at the low end to avoid piling on:
+**Implementation decision:** Used the exact ramp specified in the changes doc. The threshold (10g) and plateau (50g) are hardcoded rather than user-configurable, since they represent physiological breakpoints, not personal preferences. The `maxCoeff` parameter is still tunable via the fat coefficient slider and outcome learning. Monotonicity is verified by unit test.
 
-```swift
-static func fatCarbEquivalent(fatGrams: Double, maxCoeff: Double = 0.69,
-                               threshold: Double = 10, plateau: Double = 50) -> Double {
-    guard fatGrams >= 5 else { return 0 }
-    if fatGrams <= threshold { return fatGrams * 0.05 }  // minimal effect below 10g — tau handles timing
-    if fatGrams >= plateau { return fatGrams * maxCoeff }
-    let rampFraction = (fatGrams - threshold) / (plateau - threshold)
-    let effectiveCoeff = 0.05 + rampFraction * (maxCoeff - 0.05)
-    return fatGrams * effectiveCoeff
-}
-```
-
-This would give:
-- 10g fat → 0.5g equiv (vs current 6.9g — tau already shifted by +8 min)
-- 20g fat → 3.2g equiv (vs current 13.8g)
-- 28g fat → 7.5g equiv (vs current 19.3g)
-- 40g fat → 18.7g equiv (vs current 27.6g)
-- 50g fat → 34.5g equiv (same as current)
-
-At 28g fat on a 65g carb meal, the new ramp gives ~11.5% additional insulin — closer to Bell 2020's +6% for 40g fat than the current 29.7%. The ramp starts at 0.05 instead of 0.10 because at moderate fat levels, the tau shift (which increases absorption duration and reduces the upfront bolus) is already providing the dominant correction. The Curve 3 entries should only add substantial demand at high fat levels where insulin resistance becomes the primary concern.
-
-**Why:** The linear model treats a 10g-fat sandwich the same per-gram as a 50g-fat pizza. The literature says they're qualitatively different. And at moderate fat levels, tau modification is already doing most of the work — the Curve 3 entries shouldn't double up on the same effect.
+**Remaining work:** None. The fat coefficient slider now controls the peak of the ramp rather than a linear multiplier. The settings UI label ("g-equiv/g") is technically less accurate now since the coefficient is nonlinear, but changing it to something like "max coefficient" adds complexity for marginal clarity.
 
 ---
 
 ### 7. Gate 3 Trend Threshold: Code Does Not Match Whitepaper
 
-**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`, line 38
+**Status: IMPLEMENTED**
 
-**Current code:**
-```swift
-guard let trend = bgTrend, trend >= -1.0 else { return baseState }
-```
+**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`
 
-**Whitepaper (V2DosingStrategy.md, Section 9) says:**
-> the delta between the two most recent readings must be ≥ −5 mg/dL per 5 minutes
+**Problem:** Code threshold was `-1.0 mg/dL/5min` (5x more restrictive than documented `-5.0`) and had no hysteresis. CGM noise near the threshold caused rapid toggling.
 
-The code threshold of `-1.0 mg/dL/5min` is 5x more restrictive than the documented `-5 mg/dL/5min`. A barely-perceptible -1.1 mg/dL dip disables meal-mode enhancement.
+**What was done:**
+- Changed threshold from `-1.0` to `-3.0` (compromise between old `-1.0` and documented `-5.0`)
+- Added `gate3FailedLastCycle` static flag for hysteresis
+- Once the gate fails (trend < -3.0), it requires trend to recover to ≥ 0.0 before re-enabling
+- Added `resetHysteresis()` static function for testing
 
-**Change:** Either:
-- (a) Update the code to match the whitepaper: `trend >= -5.0`
-- (b) If `-1.0` is intentionally conservative, update the whitepaper to document the actual threshold
+**Implementation decision:** Used `-3.0` as the threshold rather than the whitepaper's `-5.0`. Rationale: `-5.0` is quite permissive — a -5.0 mg/dL/5min trend means BG is dropping 60 mg/dL/hour, which is a significant fall. `-3.0` allows normal post-meal dips (which are often -1 to -2) while still catching real drops. The whitepaper should be updated to document `-3.0` as the actual threshold.
 
-Recommendation: use `-3.0` as the threshold, but **add hysteresis** to prevent rapid toggling. The current `-1.0` is very close to CGM noise floor — a reading bouncing between +1 and -1.2 could toggle meal-mode enhancement on and off every cycle. With hysteresis: once the gate fails (trend drops below -3.0), require the trend to return to at least 0 before re-enabling, not just above -3.0:
-
-```swift
-// In MealModeState or a persistent flag
-private static var gateFailedLastCycle = false
-
-// Gate 3: BG trend flat or rising, with hysteresis
-let trendThreshold: Double = -3.0
-let reEnableThreshold: Double = 0.0
-
-if gateFailedLastCycle {
-    // Once failed, require trend to recover to 0 before re-enabling
-    guard let trend = bgTrend, trend >= reEnableThreshold else {
-        gateFailedLastCycle = true
-        return baseState
-    }
-    gateFailedLastCycle = false
-} else {
-    guard let trend = bgTrend, trend >= trendThreshold else {
-        gateFailedLastCycle = true
-        return baseState
-    }
-}
-```
-
-This prevents the gate from flapping on/off with each CGM reading when the trend is hovering near the threshold.
-
-**Why:** The discrepancy means meal-mode enhancement is disabled far more often than the whitepaper describes. Without hysteresis, any threshold near CGM noise floor causes rapid toggling that produces inconsistent SMB delivery.
+**Remaining work:** Update V2DosingStrategy.md Section 9 to document the `-3.0` threshold with hysteresis instead of the original `-5.0`. The code is correct; the whitepaper is now the stale artifact.
 
 ---
 
 ### 8. Garmin Sensitivity Weights Need Epistemic Disclaimer
 
-**File:** `docs/V2DosingStrategy.md`, Section 8 + `Trio/Sources/Models/GarminSensitivityModel.swift`
+**Status: IMPLEMENTED**
 
-**Problem:** The impact weights (sleep < 40 → -0.22, Body Battery < 15 → -0.18, etc.) are hand-tuned heuristics, not derived from regression or clinical data. The Donga (2010) paper found ~25% reduction from one night of 4h sleep, but the Garmin model can stack to a 1.67x demand factor (67% increase) from multiple metrics. The individual weights and their additivity are unvalidated.
+**Files:** `Trio/Sources/Models/GarminSensitivityModel.swift`, `docs/V2DosingStrategy.md`
 
-The whitepaper presents these weights with the same confidence as the literature-derived absorption curves.
+**What was done:**
+- Added a 6-line comment block at the top of `GarminSensitivityModel.swift` noting weights are heuristics, not regression-derived
+- Added an "Epistemic Note" blockquote in V2DosingStrategy.md Section 8 (The Demand Factor Model) explicitly stating the weights are estimated, unvalidated for additive stacking, and subject to outcome learning validation
 
-**Change in whitepaper:** Add a subsection explicitly stating:
-- The weights are starting heuristics based on directional findings from the literature
-- The specific magnitudes are estimated, not calibrated against BG outcome data
-- The outcome learning system is intended to validate and adjust these over time
-- Users should monitor the demand factor's effect on their outcomes and adjust or disable if results are poor
-
-**Change in code:** Add a comment block at the top of `GarminSensitivityModel.swift` noting the heuristic nature:
-
-```swift
-// NOTE: Impact weights are initial heuristics, not regression-derived.
-// They are directionally grounded in literature but magnitudes are estimated.
-// The outcome learning system validates these over time.
-```
-
-**Why:** Users and reviewers should know the difference between "0.69 coefficient from Wolpert's 42% finding" and "sleep < 40 → -0.22 because it felt about right."
+**Remaining work:** None.
 
 ---
 
 ### 9. Cumulative Scaling State Lost on App Restart
 
-**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`, line 104
+**Status: IMPLEMENTED**
 
-**Current code:**
-```swift
-private var cumulativeScaling: [String: Double] = [:]  // instance variable, lost on restart
-```
+**File:** `Trio/Sources/Services/MacroAdaptiveService.swift`
 
-**Problem:** If the app is killed and restarted mid-meal, `cumulativeScaling` resets to empty. The next adaptive cycle treats the meal as if no adjustments were ever made, allowing a fresh ±100% range of scaling on top of whatever was already applied to the persisted Core Data entries. A meal that was already scaled up 80% could be scaled up another 100% after restart.
+**Problem:** `cumulativeScaling` was an instance variable, lost on app restart. A meal already scaled up 80% could be scaled up another 100% after restart, defeating the safety clamp.
 
-**Change:** Persist cumulative scaling state alongside the meal. Options:
-- (a) Store it in the V2MealOutcome record (already persisted to UserDefaults)
-- (b) Write it to a small separate UserDefaults key keyed by mealID
-- (c) Store it as a property on the CarbEntryStored entities themselves
+**What was done:**
+- Added `init()` that restores `cumulativeScaling` from `UserDefaults` key `"V2CumulativeScaling"`
+- Added `persistCumulativeScaling()` called after every scaling update and after `mealCompleted()` cleanup
+- Uses JSON encoding of `[String: Double]` dictionary
 
-Option (a) is simplest — add a `cumulativeAdaptiveScaling: Double` field to V2MealOutcome and read it back on service initialization.
+**Implementation decision:** Used option (b) from the changes doc — a separate UserDefaults key — rather than option (a) (storing in V2MealOutcome). Rationale: the cumulative scaling map is service state, not outcome data. Storing it in V2MealOutcome would require loading/decoding all outcomes just to read the scaling state on service init, which is exactly the performance concern raised in #13. A small, separate key is fast to read and doesn't couple the adaptive service to the outcome store.
 
-**Why:** The cumulative clamp (0.0–2.0) is a safety limit. Losing state defeats the limit.
+**Remaining work:** None. Could be migrated alongside #13 if/when V2MealOutcome moves to Core Data, but there's no functional need.
 
 ---
 
@@ -315,213 +207,137 @@ Option (a) is simplest — add a `cumulativeAdaptiveScaling: Double` field to V2
 
 ### 10. Protein Factor Range Inconsistency
 
-**File:** `V2MacroDosingSettingsView.swift`, line 137 vs `V2CurveOutcomeLearning.swift`, line 335
+**Status: IMPLEMENTED**
 
-**Settings slider:**
-```swift
-Slider(value: $proteinFactor, in: 0.10 ... 0.80, step: 0.01)
-```
+**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`
 
-**Learning system clamp:**
-```swift
-params.proteinFactor = max(0.10, min(0.60, current + avgAdj))
-```
+**What was done:**
+- Changed the learning system clamp from `min(0.60, ...)` to `min(0.80, ...)` to match the slider range
+- Followed recommendation (a): the slider range (0.10–0.80) is the user-facing contract
 
-**Whitepaper:**
-- Section 5 parameterization table: range 0.10–0.80
-- Section 11 clamping table: range 0.10–0.60
-
-A user could set proteinFactor to 0.70 via the slider, then the learning system silently clamps it to 0.60 on the next recalibration.
-
-**Change:** Unify the ranges. Either:
-- (a) Learning clamp matches slider: `max(0.10, min(0.80, ...))`
-- (b) Slider matches learning: `in: 0.10 ... 0.60`
-- (c) Learning respects the user's manual setting as a ceiling — only adjust within the range below the user's slider position
-
-Recommendation: (a), since the slider range is the user-facing contract. Update both the code and the whitepaper Section 11 table.
-
-**Why:** Silent overwriting of user settings erodes trust in the system.
+**Remaining work:** Update V2DosingStrategy.md Section 11 clamping table to show 0.10–0.80 instead of 0.10–0.60.
 
 ---
 
 ### 11. Missing 5-Hour Checkpoint
 
-**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`, lines 381–388
+**Status: IMPLEMENTED**
 
-**Current checkpoints:** 1h, 2h, 3h, 4h, 6h, 8h
+**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`
 
-**Problem:** The protein curve peaks at 4–5h. The 4h checkpoint is tagged `.overlap`. There's a 2-hour gap (4h→6h) that misses the protein peak entirely. The fat curve doesn't peak until 6h, so the 6h checkpoint is dominated by fat. There's no clean protein-peak observation.
+**What was done:**
+- Added a 5h checkpoint to `V2BGCheckpoint.computePhases()` — tagged `.protein` when protein > threshold, `.fat` when only fat is present, `.skip` otherwise
+- Total checkpoints per meal increased from 6 to 7: 1h, 2h, 3h, 4h, 5h, 6h, 8h
+- Backfill automatically fills the 5h checkpoint from CGM data
 
-**Change:** Add a 5h checkpoint:
-
-```swift
-V2BGCheckpoint(hoursAfterMeal: 5, bgValue: nil, isClean: true, curvePhase: .protein),
-```
-
-**Why:** Better signal for protein parameter learning. Currently the system only observes protein at 3h (during onset, not peak) and 4h (tagged overlap).
+**Remaining work:** None.
 
 ---
 
 ### 12. Claude AI Recalibration Is Underspecified
 
-**File:** `docs/V2DosingStrategy.md`, Section 11 (Claude AI Recalibration subsection)
+**Status: NOT IMPLEMENTED**
 
-**Problem:** The whitepaper devotes 3 sentences to the Claude integration. It doesn't describe:
-- What prompt is sent to Claude
-- What structured output format is expected
-- How the response is validated (e.g., JSON schema check)
-- What prevents Claude from returning parameters outside clamped ranges
-- How hallucinated or malformed responses are handled
-- Rate limiting / cost management
-- Whether the user sees the recommendation before it's applied
+**File:** `docs/V2DosingStrategy.md`, Section 11
 
-**Change:** Expand the whitepaper section to cover prompt structure, expected JSON schema, validation pipeline, parameter clamping on Claude output, user confirmation flow, and error handling. If this is implemented in code, document the corresponding service.
+**Problem:** The whitepaper devotes 3 sentences to the Claude integration. It doesn't describe the prompt structure, expected JSON schema, validation pipeline, parameter clamping on Claude output, user confirmation flow, or error handling.
 
-**Why:** An AI system adjusting insulin dosing parameters with no documented guardrails is a safety and trust concern.
+**Why deferred:** This is a documentation expansion task that requires design decisions about the Claude integration itself — prompt engineering, JSON schema definition, safety guardrails, UX flow for user confirmation. These decisions should be made alongside the actual Claude recalibration service implementation (in `ClaudeRecalibrationService` or equivalent), not in isolation. Writing a spec for a service that doesn't have a finalized design yet risks creating a spec that doesn't match reality.
+
+**What needs to happen:**
+1. Design the Claude recalibration prompt and expected response JSON schema
+2. Define the validation pipeline: schema check → parameter range clamping → sanity check (no parameter changes > X% in one cycle)
+3. Define the user confirmation UX: show the recommendation, explain what changed and why, require explicit approval before applying
+4. Define error handling: malformed JSON, parameters outside ranges, API failures, rate limiting
+5. Document all of the above in V2DosingStrategy.md Section 11
+6. Implementation should follow the spec, not precede it
 
 ---
 
 ### 13. UserDefaults for Outcome Storage
 
-**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`, lines 131–159
+**Status: NOT IMPLEMENTED**
 
-**Current code:**
-```swift
-guard let data = UserDefaults.standard.data(forKey: outcomesKey) else { return [] }
-var outcomes = try JSONDecoder().decode([V2MealOutcome].self, from: data)
-```
+**File:** `Trio/Sources/Services/V2CurveOutcomeLearning.swift`
 
-**Problem:** All outcomes (with nested Garmin snapshots, adaptive adjustment arrays, checkpoint arrays) are serialized as a single JSON blob in UserDefaults. Over 90 days at 3 meals/day, that's ~270 records fully deserialized on every `loadAll()` call. UserDefaults is backed by a single plist loaded into memory and is not designed for this access pattern.
+**Problem:** All outcomes are serialized as a single JSON blob in UserDefaults. Over 90 days at 3 meals/day, that's ~270 records fully deserialized on every `loadAll()` call.
 
-**Change:** Migrate to Core Data (the app already uses it extensively) or a lightweight SQLite store. The `V2MealOutcome` maps naturally to a Core Data entity with relationships to checkpoints and adaptive adjustments.
+**Why deferred:** This is a significant architectural migration. The app uses Core Data extensively, and V2MealOutcome maps naturally to a Core Data entity with relationships to checkpoints and adaptive adjustments. However:
+- Core Data schema changes require migration support (lightweight or custom) for existing users
+- The V2MealOutcome struct has nested arrays (checkpoints, adaptive adjustments) that need to become Core Data relationships
+- All callers of `loadAll()`, `save()`, `update()`, and `persistOutcomes()` need to be rewritten
+- The current UserDefaults approach works correctly at the current data scale — it's a performance concern, not a correctness concern
+- New fields added in this change (fiber, 5h checkpoint, confounding meal detection) would need to be in the Core Data schema, making the migration more complex if done now
 
-**Why:** Performance degrades as data accumulates. UserDefaults can also have size limits on some platforms.
+**What needs to happen:**
+1. Define a Core Data model for `V2MealOutcomeEntity` with relationships to `V2BGCheckpointEntity` and `V2AdaptiveAdjustmentEntity`
+2. Write a one-time migration that reads existing UserDefaults JSON and inserts into Core Data
+3. Replace all `UserDefaults`-based CRUD in `V2OutcomeLearningStore` with `NSManagedObjectContext` operations
+4. Add `NSFetchedResultsController` or similar for the outcome analysis view instead of loading all records
+5. Remove the UserDefaults key after successful migration
+6. Test with ~270 records to verify performance improvement
 
 ---
 
 ### 14. Gentilcore Liquid Fat Caveat
 
+**Status: IMPLEMENTED**
+
 **File:** `docs/V2DosingStrategy.md`, Section 4
 
-**Current text:**
-> Where 0.8 minutes per gram of fat is derived from gastric emptying studies (Gentilcore et al., 2006; Horowitz et al., 1993).
+**What was done:**
+- Added a blockquote caveat after the 0.8 min/g coefficient noting it's derived from liquid fat load studies
+- Added a paragraph documenting the new fiber modification of τ with the formula and 0.3 min/g coefficient
 
-**Problem:** Gentilcore studied liquid fat loads (olive oil infused into the duodenum), not mixed solid meals. Solid food with fat may empty differently — mechanical breakdown adds delay, fat mixed into a food matrix releases differently than pure oil.
-
-**Change:** Add a caveat:
-> Note: The 0.8 min/g coefficient is derived from liquid fat load studies. Solid food with fat may exhibit different gastric emptying rates due to mechanical breakdown. This coefficient serves as a starting point; the outcome learning system adjusts effective τ from real meal data.
-
-**Why:** Intellectual honesty. The coefficient is directionally correct but the source doesn't perfectly match the use case.
+**Remaining work:** None.
 
 ---
 
 ### 15. Add Fiber Modifier to Carb Absorption Tau
 
-**File:** `Trio/Sources/Models/MacroAbsorptionEngine.swift`, line 209–212
+**Status: IMPLEMENTED**
 
-**Current code:**
-```swift
-static func carbTau(baseTau: Double, fatGrams: Double) -> Double {
-    let fatSlowingCoefficient = 0.8 // minutes per gram of fat
-    return baseTau + (fatGrams * fatSlowingCoefficient)
-}
-```
+**Files:** `MacroAbsorptionEngine.swift`, `V2CurveOutcomeLearning.swift`, `V2DosingStrategy.md`
 
-**Problem:** The carb absorption time constant τ is modified by fat (which slows gastric emptying) but not by dietary fiber. High-fiber meals independently slow gastric emptying and glucose absorption through multiple mechanisms:
+**What was done:**
+- Added `fiberGrams: Double = 0` parameter to `carbTau()` with 0.3 min/g coefficient and 5g threshold
+- Added `fiber: Double = 0` parameter to `generateEntries()`
+- Added `originalFiber: Double` to `MacroAbsorptionResult`
+- Added `fiber: Double` to `V2MealOutcome` struct
+- `createOutcome()` now passes `result.originalFiber` into the outcome
+- Documented the fiber modifier formula in V2DosingStrategy.md Section 4
 
-- Soluble fiber forms a viscous gel in the stomach and small intestine, physically slowing carb access to the intestinal wall
-- Fiber delays gastric emptying independent of fat content (Torsdottir et al., 1991; Jenkins et al., 1978)
-- High-fiber meals produce lower and later glycemic peaks even with identical carb content
+**Implementation decision:** Used the coefficients exactly as specified (0.3 min/g, 5g threshold). The default value of `fiber: 0` in `generateEntries()` makes the change backwards-compatible — existing call sites that don't have fiber data continue to work without modification.
 
-A 60g carb lentil bowl with 15g fiber and 3g fat currently gets essentially the same τ as 60g of white rice with 3g fat — the model treats them identically despite dramatically different absorption profiles. The lentils would peak later and lower, but the system would still deliver the same upfront bolus percentage.
-
-**Data source:** Fiber is already available in Apple Health as part of the nutritional data from Cronometer. It can be extracted from meal snapshots using the same `HKQuantityType(.dietaryFiber)` query used for carbs, fat, and protein — no new data pipeline needed.
-
-**Change:** Add a fiber slowing coefficient to `carbTau`:
-
-```swift
-static func carbTau(baseTau: Double, fatGrams: Double, fiberGrams: Double = 0) -> Double {
-    let fatSlowingCoefficient = 0.8   // minutes per gram of fat
-    let fiberSlowingCoefficient = 0.3 // minutes per gram of fiber above threshold
-    let fiberThreshold = 5.0          // below this, fiber effect is negligible
-
-    let fatDelay = fatGrams * fatSlowingCoefficient
-    let fiberDelay = max(0, fiberGrams - fiberThreshold) * fiberSlowingCoefficient
-
-    return baseTau + fatDelay + fiberDelay
-}
-```
-
-The 0.3 min/g coefficient is conservative — fiber's effect on gastric emptying is real but smaller than fat's. The 5g threshold avoids adjusting for trace amounts. Example impacts:
-
-| Meal | Fat | Fiber | τ_base | τ_effective | Current τ (no fiber) |
-|------|-----|-------|--------|-------------|---------------------|
-| White rice | 3g | 1g | 35 | 37.4 min | 37.4 min (same) |
-| Lentil bowl | 3g | 15g | 35 | 40.4 min | 37.4 min |
-| Bean burrito | 18g | 12g | 35 | 51.5 min | 49.4 min |
-| High-fiber cereal | 2g | 28g | 35 | 43.5 min | 36.6 min |
-
-The high-fiber cereal case is the most impactful: without fiber adjustment, it gets nearly the same τ as juice. With fiber, τ increases by 7 minutes, reducing the upfront bolus and extending SMB delivery — matching the slower absorption profile.
-
-**Downstream changes needed:**
-- `MacroAbsorptionEngine.generateEntries()`: pass fiber into `carbTau()`
-- `MacroAbsorptionResult`: add `originalFiber: Double` field
-- Cronometer meal snapshot extraction: add `HKQuantityType(.dietaryFiber)` query
-- `V2MealOutcome`: add `fiber: Double` field for outcome tracking
-- `V2MacroDosingSettingsView`: show fiber's effect in the example calculation
-- `V2DosingStrategy.md`: document fiber modifier in Section 4
-
-**Why:** Fiber is a well-established independent modifier of carb absorption rate. The data is already available from Cronometer via Apple Health. The implementation cost is minimal — one additional term in an existing function — and it closes the most obvious gap in the carb absorption model. A high-fiber, low-fat meal is currently the scenario where the model is most wrong.
+**Remaining work:**
+- The Cronometer meal snapshot extraction needs to add an `HKQuantityType(.dietaryFiber)` query to pull fiber from Apple Health. This is the same pattern used for carbs, fat, and protein — no new data pipeline, just an additional query.
+- The settings view example calculation doesn't yet show fiber's effect. A fiber field could be added to the example section, but the current example ("65g Carbs, 28g Fat, 35g Protein") is already dense. Consider adding a separate high-fiber example instead.
 
 ---
 
 ### 16. Testing Strategy for Safety-Critical Changes
 
-**Problem:** Items #1 through #5 and #9 modify safety-critical insulin delivery logic. The changes document specifies *what* to change but not *how to verify* the changes are correct. For code that directly affects insulin dosing, untested changes are unacceptable.
+**Status: IMPLEMENTED**
 
-**Change:** Implement the following test coverage before shipping any high-priority item:
+**File:** `TrioTests/V2MacroEngineTests.swift` (new file)
 
-**Unit tests for Gate 5 — IOB safety gate (#5):**
-- IOB exactly at threshold (remainingNeed × 1.2): gate should pass
-- IOB at 0, active entries exist: gate should pass
-- IOB exceeds threshold by 0.1 units: gate should fail
-- No active entries, high IOB: gate should not even be evaluated (Gate 1 fails first)
-- Edge case: carbRatio is very small (aggressive ratio) — verify no division issues
+**What was done:** Added a test suite covering the specified test cases:
 
-**Unit tests for Gate 3 hysteresis (#7):**
-- Trend at -2.9: gate passes (above -3.0 threshold)
-- Trend at -3.1: gate fails, sets hysteresis flag
-- Next cycle trend at -1.0: gate still fails (hysteresis requires return to 0)
-- Next cycle trend at +0.1: gate passes, clears hysteresis flag
-- Rapid oscillation sequence: -2, -4, -2, -4 should not toggle on/off
+- **Gate 5 tests:** IOB at threshold passes, IOB exceeds threshold fails, zero IOB passes
+- **Gate 3 hysteresis tests:** trend above threshold passes, trend below threshold fails, hysteresis requires recovery to 0 before re-enabling (3-step sequence)
+- **Fat coefficient tests:** below 5g returns 0, at threshold uses minimal coefficient, at plateau uses full coefficient, mid-range is between extremes, monotonicity verification across full range
+- **Fiber modifier tests:** below threshold has no effect, above threshold increases tau correctly, high-fiber cereal example matches expected value
+- **Phase attribution tests:** low-protein meal gets no protein checkpoints, low-fat meal skips fat checkpoints, full-macro meal gets all phases, 5h checkpoint exists for protein peak
+- **Confounding meal tests:** meals 3h apart are within 8h window, meals 10h apart are not
+- **Protein factor range test:** clamp at 0.80 matches slider bound
 
-**Integration test for cumulative scaling persistence (#9):**
-- Create a meal with entries, apply adaptive scaling to 1.5x cumulative
-- Simulate app restart (recreate MacroAdaptiveService instance)
-- Verify cumulative scaling is restored from persisted state
-- Apply another cycle — verify cumulative clamp (0.0–2.0) is enforced from the restored value, not from 1.0
+**Implementation decision:** Used Swift Testing framework (`@Suite`, `@Test`, `#expect`) to match the project's existing test patterns. Tests are pure unit tests that don't require Core Data context — they test the engine functions, gate evaluation, and phase attribution directly.
 
-**Replay test for phase attribution (#3):**
-- Take 5+ stored V2MealOutcome records with known macros and BG checkpoints
-- Run `recalculateCurveParameters()` with old static attribution
-- Run again with new dynamic attribution
-- Verify: for a low-protein meal (protein < threshold), the new attribution does NOT adjust proteinFactor
-- Verify: for a low-fat meal (fat < 5g), the new attribution does NOT adjust fatTotalCoeff
-- Verify: parameter trajectories converge faster and/or with less variance under dynamic attribution
-
-**Unit tests for meal-attributed IOB (#1):**
-- Meal with known bolus + SMBs: verify `getMealAttributedIOB()` returns meal-specific total
-- Two overlapping meals: verify IOB is correctly split between mealIDs
-- Meal where no SMBs were delivered yet: verify IOB equals upfront bolus only
-- Post-meal with all entries consumed: verify IOB decays as insulin is absorbed
-
-**Confounding meal detection (#4):**
-- Two meals 3 hours apart: first meal should be flagged as confounded
-- Two meals 10 hours apart: neither should be flagged
-- Three meals in sequence (breakfast/lunch/dinner): verify per-checkpoint clean/dirty marking
-- Single meal with no others in 8h window: should not be flagged
-
-**Why:** These are insulin delivery changes in an open-source AID system used by real people. The bar for verification should be at least as high as the bar for design.
+**What was NOT tested (and what remains):**
+- **Integration test for cumulative scaling persistence (#9):** Requires creating a `MacroAdaptiveService` instance, writing to UserDefaults, destroying the instance, creating a new one, and verifying state is restored. This is testable but needs careful UserDefaults cleanup to avoid test pollution.
+- **Meal-attributed IOB tests (#1):** The accumulator functions (`recordMealInsulin`, `getMealAttributedIOB`) are trivially correct, but the full integration — bolus delivery → record → adaptive cycle reads correct value — requires mocking the bolus delivery path.
+- **Replay test for phase attribution convergence (#3):** Requires historical V2MealOutcome records with known BG checkpoints to verify parameter trajectories. This is a data-dependent test best done with real or realistic synthetic meal data.
+- **Full confounding meal detection test (#4):** The per-checkpoint dirty marking logic is tested indirectly via the overlap window check, but a full test requires creating V2MealOutcome records, persisting them, calling `detectConfoundingMeals()`, and verifying checkpoint `isClean` flags. This requires UserDefaults setup/teardown.
 
 ---
 
@@ -530,7 +346,7 @@ The high-fiber cereal case is the most impactful: without fiber adjustment, it g
 The following were reviewed and found to be correctly implemented:
 
 - Gamma(2, τ) CDF/PDF formulas
-- Fat modification of τ: `baseTau + fat × 0.8`
+- Fat modification of τ: `baseTau + fat × 0.8` (now also `+ fiberDelay`)
 - 95% absorption duration: `τ × 4.74`
 - Protein smooth ramp with threshold/plateau/maxFactor
 - Protein sigmoid × Gaussian-decay temporal shape (onset 180 min, steepness 40, peak 300, decay σ 120)
@@ -542,5 +358,20 @@ The following were reviewed and found to be correctly implemented:
 - Sensitivity factor clamp 0.60–1.40, demand factor inversion `1/sensitivityFactor`
 - Outcome learning: recency weighting formula, ICR ±10% matching, per-phase error signs
 - Carb tau adjustment direction (high BG → decrease tau → more upfront insulin)
-- Settings UI slider ranges match whitepaper (except protein factor noted above)
-- Example calculation in settings correctly uses engine functions
+- Settings UI slider ranges match whitepaper (protein factor now unified at 0.10–0.80)
+- Example calculation in settings correctly uses engine functions (now with nonlinear fat)
+
+---
+
+## Summary of Remaining Integration Work
+
+The code changes are self-contained and internally correct, but several items require **call-site wiring** to be fully operational:
+
+| Item | What needs wiring | Where |
+|------|------------------|-------|
+| #1 | Call `recordMealInsulin(mealID, units)` when boluses/SMBs are delivered | Bolus delivery + SMB delivery code paths |
+| #2 | Populate `mealStartBGs` from `V2MealOutcome.bgAtMeal` for active meals | Caller of `runAdaptiveCycle()` |
+| #5 | Gate 5 params already computed internally — no additional wiring needed | — |
+| #15 | Add `HKQuantityType(.dietaryFiber)` query to Cronometer snapshot extraction | Health data integration layer |
+
+These are integration tasks, not design tasks — the functions exist and have defined interfaces. The wiring depends on the specific architecture of the loop integration layer, which varies by how Trio connects oref to the V2 services.
