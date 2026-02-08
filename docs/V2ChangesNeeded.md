@@ -8,7 +8,7 @@
 
 ## Summary
 
-The core three-curve model, split dosing logic, and curve math are solid. The issues live in the adaptive/learning layers, safety gates, and a few whitepaper-to-code mismatches. Below are 13 specific changes grouped by priority.
+The core three-curve model, split dosing logic, and curve math are solid. The issues live in the adaptive/learning layers, safety gates, and a few whitepaper-to-code mismatches. Below are 16 specific changes grouped by priority.
 
 ---
 
@@ -187,29 +187,30 @@ fatTotalEquiv = fat * params.effectiveFatTotalCoeff   // linear: 0.69 * fat_gram
 
 The jump from the Wolpert-derived 0.55 to 0.69 is described as targeting "median-to-upper range" — a design choice presented as a derivation.
 
-**Change:** Replace the linear coefficient with a saturating ramp, similar to the existing protein model:
+**Change:** Replace the linear coefficient with a saturating ramp, similar to the existing protein model. Note: the tau modification already handles the timing shift from fat (slower gastric emptying), which is the dominant effect at moderate fat levels. Curve 3 entries add carb-equivalent demand *on top of* that timing shift, so the ramp should be conservative at the low end to avoid piling on:
 
 ```swift
 static func fatCarbEquivalent(fatGrams: Double, maxCoeff: Double = 0.69,
                                threshold: Double = 10, plateau: Double = 50) -> Double {
     guard fatGrams >= 5 else { return 0 }
-    if fatGrams <= threshold { return fatGrams * 0.10 }  // modest effect below 10g
+    if fatGrams <= threshold { return fatGrams * 0.05 }  // minimal effect below 10g — tau handles timing
     if fatGrams >= plateau { return fatGrams * maxCoeff }
     let rampFraction = (fatGrams - threshold) / (plateau - threshold)
-    let effectiveCoeff = 0.10 + rampFraction * (maxCoeff - 0.10)
+    let effectiveCoeff = 0.05 + rampFraction * (maxCoeff - 0.05)
     return fatGrams * effectiveCoeff
 }
 ```
 
 This would give:
-- 10g fat → 1.0g equiv (vs current 6.9g)
-- 20g fat → 5.6g equiv (vs current 13.8g)
-- 28g fat → 10.8g equiv (vs current 19.3g)
+- 10g fat → 0.5g equiv (vs current 6.9g — tau already shifted by +8 min)
+- 20g fat → 3.2g equiv (vs current 13.8g)
+- 28g fat → 7.5g equiv (vs current 19.3g)
+- 40g fat → 18.7g equiv (vs current 27.6g)
 - 50g fat → 34.5g equiv (same as current)
 
-The result: moderate-fat meals get less aggressive dosing (matching Bell 2020), high-fat meals are unchanged.
+At 28g fat on a 65g carb meal, the new ramp gives ~11.5% additional insulin — closer to Bell 2020's +6% for 40g fat than the current 29.7%. The ramp starts at 0.05 instead of 0.10 because at moderate fat levels, the tau shift (which increases absorption duration and reduces the upfront bolus) is already providing the dominant correction. The Curve 3 entries should only add substantial demand at high fat levels where insulin resistance becomes the primary concern.
 
-**Why:** The linear model treats a 10g-fat sandwich the same per-gram as a 50g-fat pizza. The literature says they're qualitatively different.
+**Why:** The linear model treats a 10g-fat sandwich the same per-gram as a 50g-fat pizza. The literature says they're qualitatively different. And at moderate fat levels, tau modification is already doing most of the work — the Curve 3 entries shouldn't double up on the same effect.
 
 ---
 
@@ -231,9 +232,34 @@ The code threshold of `-1.0 mg/dL/5min` is 5x more restrictive than the document
 - (a) Update the code to match the whitepaper: `trend >= -5.0`
 - (b) If `-1.0` is intentionally conservative, update the whitepaper to document the actual threshold
 
-Recommendation: use `-3.0` as a compromise — allows normal post-bolus settling but cuts off before a true downward trend.
+Recommendation: use `-3.0` as the threshold, but **add hysteresis** to prevent rapid toggling. The current `-1.0` is very close to CGM noise floor — a reading bouncing between +1 and -1.2 could toggle meal-mode enhancement on and off every cycle. With hysteresis: once the gate fails (trend drops below -3.0), require the trend to return to at least 0 before re-enabling, not just above -3.0:
 
-**Why:** The discrepancy means meal-mode enhancement is disabled far more often than the whitepaper describes. Anyone reading the whitepaper to understand system behavior will have wrong expectations.
+```swift
+// In MealModeState or a persistent flag
+private static var gateFailedLastCycle = false
+
+// Gate 3: BG trend flat or rising, with hysteresis
+let trendThreshold: Double = -3.0
+let reEnableThreshold: Double = 0.0
+
+if gateFailedLastCycle {
+    // Once failed, require trend to recover to 0 before re-enabling
+    guard let trend = bgTrend, trend >= reEnableThreshold else {
+        gateFailedLastCycle = true
+        return baseState
+    }
+    gateFailedLastCycle = false
+} else {
+    guard let trend = bgTrend, trend >= trendThreshold else {
+        gateFailedLastCycle = true
+        return baseState
+    }
+}
+```
+
+This prevents the gate from flapping on/off with each CGM reading when the trend is hovering near the threshold.
+
+**Why:** The discrepancy means meal-mode enhancement is disabled far more often than the whitepaper describes. Without hysteresis, any threshold near CGM noise floor causes rapid toggling that produces inconsistent SMB delivery.
 
 ---
 
@@ -446,6 +472,56 @@ The high-fiber cereal case is the most impactful: without fiber adjustment, it g
 - `V2DosingStrategy.md`: document fiber modifier in Section 4
 
 **Why:** Fiber is a well-established independent modifier of carb absorption rate. The data is already available from Cronometer via Apple Health. The implementation cost is minimal — one additional term in an existing function — and it closes the most obvious gap in the carb absorption model. A high-fiber, low-fat meal is currently the scenario where the model is most wrong.
+
+---
+
+### 16. Testing Strategy for Safety-Critical Changes
+
+**Problem:** Items #1 through #5 and #9 modify safety-critical insulin delivery logic. The changes document specifies *what* to change but not *how to verify* the changes are correct. For code that directly affects insulin dosing, untested changes are unacceptable.
+
+**Change:** Implement the following test coverage before shipping any high-priority item:
+
+**Unit tests for Gate 5 — IOB safety gate (#5):**
+- IOB exactly at threshold (remainingNeed × 1.2): gate should pass
+- IOB at 0, active entries exist: gate should pass
+- IOB exceeds threshold by 0.1 units: gate should fail
+- No active entries, high IOB: gate should not even be evaluated (Gate 1 fails first)
+- Edge case: carbRatio is very small (aggressive ratio) — verify no division issues
+
+**Unit tests for Gate 3 hysteresis (#7):**
+- Trend at -2.9: gate passes (above -3.0 threshold)
+- Trend at -3.1: gate fails, sets hysteresis flag
+- Next cycle trend at -1.0: gate still fails (hysteresis requires return to 0)
+- Next cycle trend at +0.1: gate passes, clears hysteresis flag
+- Rapid oscillation sequence: -2, -4, -2, -4 should not toggle on/off
+
+**Integration test for cumulative scaling persistence (#9):**
+- Create a meal with entries, apply adaptive scaling to 1.5x cumulative
+- Simulate app restart (recreate MacroAdaptiveService instance)
+- Verify cumulative scaling is restored from persisted state
+- Apply another cycle — verify cumulative clamp (0.0–2.0) is enforced from the restored value, not from 1.0
+
+**Replay test for phase attribution (#3):**
+- Take 5+ stored V2MealOutcome records with known macros and BG checkpoints
+- Run `recalculateCurveParameters()` with old static attribution
+- Run again with new dynamic attribution
+- Verify: for a low-protein meal (protein < threshold), the new attribution does NOT adjust proteinFactor
+- Verify: for a low-fat meal (fat < 5g), the new attribution does NOT adjust fatTotalCoeff
+- Verify: parameter trajectories converge faster and/or with less variance under dynamic attribution
+
+**Unit tests for meal-attributed IOB (#1):**
+- Meal with known bolus + SMBs: verify `getMealAttributedIOB()` returns meal-specific total
+- Two overlapping meals: verify IOB is correctly split between mealIDs
+- Meal where no SMBs were delivered yet: verify IOB equals upfront bolus only
+- Post-meal with all entries consumed: verify IOB decays as insulin is absorbed
+
+**Confounding meal detection (#4):**
+- Two meals 3 hours apart: first meal should be flagged as confounded
+- Two meals 10 hours apart: neither should be flagged
+- Three meals in sequence (breakfast/lunch/dinner): verify per-checkpoint clean/dirty marking
+- Single meal with no others in 8h window: should not be flagged
+
+**Why:** These are insulin delivery changes in an open-source AID system used by real people. The bar for verification should be at least as high as the bar for design.
 
 ---
 
