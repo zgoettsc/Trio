@@ -3059,7 +3059,6 @@
 				E41F65D7FA7986001C975515 /* WeekdayPickerView.swift */,
 				E26FF508B6A5D8FB0D60275A /* ProfileSwitchBannerView.swift */,
 				V2F00900000000000000009 /* MealDetectedBannerView.swift */,
-				V2F01000000000000000010 /* MacroDecayChartView.swift */,
 				V2F00A0000000000000000A /* BolusAdjustSliderView.swift */,
 			);
 			path = Trio/Sources/Views;
@@ -3082,6 +3081,7 @@
 				BDFD16592AE40438007F0DDA /* TreatmentsRootView.swift */,
 				58237D9D2BCF0A6B00A47A79 /* PopupView.swift */,
 				BDB899872C564509006F3298 /* ForecastChart.swift */,
+				V2F01000000000000000010 /* MacroDecayChartView.swift */,
 				CR0N0V13W000000001 /* CronometerMealRecommendationView.swift */,
 				CR0N0P1CK000000001 /* CronometerMealPickerView.swift */,
 				DD07CA5A2CE950B9002D45A9 /* MealPreset */,
