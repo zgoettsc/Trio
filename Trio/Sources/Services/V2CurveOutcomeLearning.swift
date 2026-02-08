@@ -499,6 +499,79 @@ final class V2OutcomeLearningStore {
             currentParameters: params
         )
     }
+
+    // MARK: - Comprehensive Data Export
+
+    /// Build a full data export for every recorded meal: pre-meal BG trace,
+    /// all V2 engine inputs, all curve parameters, Garmin context, adaptive
+    /// adjustments, and BG outcomes at every checkpoint.
+    func buildComprehensiveExport(context: NSManagedObjectContext) async -> V2ComprehensiveExport {
+        let outcomes = loadAll()
+        let params = loadParameters()
+
+        var mealExports: [V2MealExportRecord] = []
+
+        for outcome in outcomes {
+            // Fetch 2h pre-meal BG trace (every 5 min reading)
+            let preMealStart = outcome.date.addingTimeInterval(-2 * 3600)
+            let preMealBG = await fetchGlucoseTrace(
+                from: preMealStart,
+                to: outcome.date,
+                context: context
+            )
+
+            // Fetch post-meal BG trace through end of absorption window (8h)
+            let postMealEnd = outcome.date.addingTimeInterval(8 * 3600)
+            let postMealBG = await fetchGlucoseTrace(
+                from: outcome.date,
+                to: min(postMealEnd, Date()),
+                context: context
+            )
+
+            let record = V2MealExportRecord(
+                outcome: outcome,
+                preMealBGTrace: preMealBG,
+                postMealBGTrace: postMealBG
+            )
+            mealExports.append(record)
+        }
+
+        return V2ComprehensiveExport(
+            exportDate: Date(),
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            totalMeals: outcomes.count,
+            currentParameters: params,
+            meals: mealExports
+        )
+    }
+
+    /// Fetch all glucose readings in a time range as lightweight structs.
+    private func fetchGlucoseTrace(
+        from start: Date,
+        to end: Date,
+        context: NSManagedObjectContext
+    ) async -> [V2BGReading] {
+        await context.perform {
+            let request = GlucoseStored.fetchRequest()
+            request.predicate = NSPredicate(
+                format: "date >= %@ AND date <= %@",
+                start as NSDate,
+                end as NSDate
+            )
+            request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+
+            guard let results = try? context.fetch(request) else { return [] }
+
+            return results.compactMap { entry in
+                guard let date = entry.date else { return nil }
+                return V2BGReading(
+                    date: date,
+                    glucose: Int(entry.glucose),
+                    direction: entry.direction
+                )
+            }
+        }
+    }
 }
 
 // MARK: - Export Format
@@ -509,4 +582,34 @@ struct V2RecalibrationExport: Codable {
     let periodDays: Int
     let outcomes: [V2MealOutcome]
     let currentParameters: V2PersonalCurveParameters
+}
+
+// MARK: - Comprehensive Export Types
+
+/// A single BG reading for export.
+struct V2BGReading: Codable {
+    let date: Date
+    let glucose: Int        // mg/dL
+    let direction: String?  // CGM trend arrow (e.g. "Flat", "FortyFiveUp")
+}
+
+/// Complete export record for one meal — everything the system knew and did.
+struct V2MealExportRecord: Codable {
+    // The full outcome record (macros, params, Garmin, checkpoints, adjustments)
+    let outcome: V2MealOutcome
+
+    // 2h pre-meal BG trace — every CGM reading from meal-2h to meal time
+    let preMealBGTrace: [V2BGReading]
+
+    // Post-meal BG trace — every CGM reading from meal time through 8h (or now)
+    let postMealBGTrace: [V2BGReading]
+}
+
+/// Top-level comprehensive export — the whole system picture.
+struct V2ComprehensiveExport: Codable {
+    let exportDate: Date
+    let appVersion: String
+    let totalMeals: Int
+    let currentParameters: V2PersonalCurveParameters
+    let meals: [V2MealExportRecord]
 }

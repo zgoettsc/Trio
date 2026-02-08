@@ -1,9 +1,13 @@
 import SwiftUI
+import UIKit
 
 /// Displays V2 meal outcome accuracy analysis — predicted vs actual BG outcomes.
 struct V2OutcomeAnalysisView: View {
     @State private var outcomes: [V2MealOutcome] = []
     @State private var selectedOutcome: V2MealOutcome?
+    @State private var isExporting = false
+    @State private var exportURL: URL?
+    @State private var showShareSheet = false
 
     var body: some View {
         List {
@@ -81,6 +85,27 @@ struct V2OutcomeAnalysisView: View {
                 }
             }
 
+            // MARK: - Export
+            Section(header: Text("Export")) {
+                Button {
+                    exportAllData()
+                } label: {
+                    HStack {
+                        Image(systemName: "square.and.arrow.up")
+                        Text("Export All Meal Data")
+                        Spacer()
+                        if isExporting {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(outcomes.isEmpty || isExporting)
+
+                Text("Exports pre-meal BG (2h), all V2 engine inputs, curve parameters, Garmin data, adaptive adjustments, and BG outcomes at every checkpoint as JSON.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             // MARK: - Recent Meals
             Section(header: Text("Recent Meals (\(outcomes.suffix(20).count))")) {
                 if outcomes.isEmpty {
@@ -105,6 +130,46 @@ struct V2OutcomeAnalysisView: View {
                 await MainActor.run {
                     outcomes = V2OutcomeLearningStore.shared.loadAll()
                 }
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = exportURL {
+                V2ExportShareSheet(activityItems: [url])
+            }
+        }
+    }
+
+    // MARK: - Export
+
+    private func exportAllData() {
+        isExporting = true
+        Task {
+            let context = CoreDataStack.shared.newTaskContext()
+            let export = await V2OutcomeLearningStore.shared.buildComprehensiveExport(context: context)
+
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+            guard let data = try? encoder.encode(export) else {
+                await MainActor.run { isExporting = false }
+                return
+            }
+
+            let dateStr = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
+            let fileName = "v2-meal-export-\(dateStr).json"
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+            do {
+                try data.write(to: tempURL)
+                await MainActor.run {
+                    exportURL = tempURL
+                    isExporting = false
+                    showShareSheet = true
+                }
+            } catch {
+                await MainActor.run { isExporting = false }
             }
         }
     }
@@ -241,4 +306,16 @@ struct V2OutcomeAnalysisView: View {
             }
         }
     }
+}
+
+// MARK: - Share Sheet
+
+private struct V2ExportShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context _: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_: UIActivityViewController, context _: Context) {}
 }
