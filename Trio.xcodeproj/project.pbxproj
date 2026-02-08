@@ -560,6 +560,8 @@
 		V2B00C0000000000000000C /* GarminFirestoreStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00C0000000000000000C /* GarminFirestoreStatusView.swift */; };
 		V2B00D00000000000000000D /* V2MacroDosingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00D00000000000000000D /* V2MacroDosingSettingsView.swift */; };
 		V2B00E00000000000000000E /* V2OutcomeAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00E00000000000000000E /* V2OutcomeAnalysisView.swift */; };
+		V2B00F00000000000000000F /* MacroOnBoardCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00F00000000000000000F /* MacroOnBoardCalculator.swift */; };
+		V2B01000000000000000010 /* MacroDecayChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F01000000000000000010 /* MacroDecayChartView.swift */; };
 		DD1745202C55523E00211FAC /* SMBSettingsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD17451F2C55523E00211FAC /* SMBSettingsDataFlow.swift */; };
 		DD1745222C55524800211FAC /* SMBSettingsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1745212C55524800211FAC /* SMBSettingsProvider.swift */; };
 		DD1745242C55526000211FAC /* SMBSettingsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1745232C55526000211FAC /* SMBSettingsStateModel.swift */; };
@@ -1443,6 +1445,8 @@
 		V2F00C0000000000000000C /* GarminFirestoreStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminFirestoreStatusView.swift; sourceTree = "<group>"; };
 		V2F00D00000000000000000D /* V2MacroDosingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2MacroDosingSettingsView.swift; sourceTree = "<group>"; };
 		V2F00E00000000000000000E /* V2OutcomeAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2OutcomeAnalysisView.swift; sourceTree = "<group>"; };
+		V2F00F00000000000000000F /* MacroOnBoardCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroOnBoardCalculator.swift; sourceTree = "<group>"; };
+		V2F01000000000000000010 /* MacroDecayChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroDecayChartView.swift; sourceTree = "<group>"; };
 		DD17451F2C55523E00211FAC /* SMBSettingsDataFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsDataFlow.swift; sourceTree = "<group>"; };
 		DD1745212C55524800211FAC /* SMBSettingsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsProvider.swift; sourceTree = "<group>"; };
 		DD1745232C55526000211FAC /* SMBSettingsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsStateModel.swift; sourceTree = "<group>"; };
@@ -2574,6 +2578,7 @@
 				DD9ECB692CA99F6C00AA7C45 /* CommandPayload.swift */,
 				DDD6D4D22CDE90720029439A /* EstimatedA1cDisplayUnit.swift */,
 				V2F00100000000000000001 /* MacroAbsorptionEngine.swift */,
+				V2F00F00000000000000000F /* MacroOnBoardCalculator.swift */,
 				V2F00200000000000000002 /* GarminContextSnapshot.swift */,
 				V2F00300000000000000003 /* GarminSensitivityModel.swift */,
 				V2F00400000000000000004 /* MacrosOnBoardTracker.swift */,
@@ -3076,6 +3081,7 @@
 				BDFD16592AE40438007F0DDA /* TreatmentsRootView.swift */,
 				58237D9D2BCF0A6B00A47A79 /* PopupView.swift */,
 				BDB899872C564509006F3298 /* ForecastChart.swift */,
+				V2F01000000000000000010 /* MacroDecayChartView.swift */,
 				CR0N0V13W000000001 /* CronometerMealRecommendationView.swift */,
 				CR0N0P1CK000000001 /* CronometerMealPickerView.swift */,
 				DD07CA5A2CE950B9002D45A9 /* MealPreset */,
@@ -4655,6 +4661,8 @@
 				V2B00C0000000000000000C /* GarminFirestoreStatusView.swift in Sources */,
 				V2B00D00000000000000000D /* V2MacroDosingSettingsView.swift in Sources */,
 				V2B00E00000000000000000E /* V2OutcomeAnalysisView.swift in Sources */,
+				V2B00F00000000000000000F /* MacroOnBoardCalculator.swift in Sources */,
+				V2B01000000000000000010 /* MacroDecayChartView.swift in Sources */,
 				38BF021B25E7D06400579895 /* PumpSettingsView.swift in Sources */,
 				3811DEEA25CA063400A708ED /* SyncAccess.swift in Sources */,
 				190EBCC829FF13AA00BA767D /* UserInterfaceSettingsStateModel.swift in Sources */,

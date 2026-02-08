@@ -29,6 +29,12 @@ extension Treatments {
         @State private var showAPIKeyRequiredAlert = false
         @StateObject private var aiInsightsState = AIInsightsConfig.StateModel()
 
+        @FetchRequest(
+            entity: CarbEntryStored.entity(),
+            sortDescriptors: [NSSortDescriptor(keyPath: \CarbEntryStored.date, ascending: false)],
+            predicate: NSPredicate.fpusForChart
+        ) private var fpuEntries: FetchedResults<CarbEntryStored>
+
         private enum Config {
             static let dividerHeight: CGFloat = 2
             static let spacing: CGFloat = 3
@@ -325,6 +331,16 @@ extension Treatments {
                             ForecastChart(state: state)
                                 .padding(.vertical)
                         }.listRowBackground(Color.chart)
+
+                        // V2 Macro Decay Chart
+                        let macroBreakdown = MacroOnBoardCalculator.currentBreakdown(from: Array(fpuEntries))
+                        if macroBreakdown.hasV2Entries {
+                            Section(header: Text("Macro Absorption")) {
+                                let decayPoints = MacroOnBoardCalculator.decayTimeline(from: Array(fpuEntries))
+                                MacroDecayChartView(decayPoints: decayPoints, breakdown: macroBreakdown)
+                                    .padding(.vertical, 4)
+                            }.listRowBackground(Color.chart)
+                        }
 
                         Section {
                             carbsTextField()
