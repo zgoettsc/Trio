@@ -573,15 +573,27 @@ extension Home {
                     Image(systemName: "fork.knife")
                         .font(.callout)
                         .foregroundColor(.loopYellow)
-                    Text(
-                        (
-                            Formatter.decimalFormatterWithTwoFractionDigits.string(
-                                from: NSNumber(value: state.enactedAndNonEnactedDeterminations.first?.cob ?? 0)
-                            ) ?? "0"
-                        ) +
-                            String(localized: " g", comment: "gram of carbs")
-                    )
-                    .font(.callout).fontWeight(.bold).fontDesign(.rounded)
+
+                    let effectiveCOB = state.enactedAndNonEnactedDeterminations.first?.cob ?? 0
+                    let breakdown = MacroOnBoardCalculator.currentBreakdown(from: state.fpusFromPersistence)
+
+                    if breakdown.hasV2Entries {
+                        // V2 mode: show real carb COB + effective total
+                        let realCOB = Int(breakdown.carbsOnBoard)
+                        let effCOB = Int(effectiveCOB)
+                        Text("\(realCOB)g (\(effCOB)g eff)")
+                            .font(.callout).fontWeight(.bold).fontDesign(.rounded)
+                    } else {
+                        Text(
+                            (
+                                Formatter.decimalFormatterWithTwoFractionDigits.string(
+                                    from: NSNumber(value: effectiveCOB)
+                                ) ?? "0"
+                            ) +
+                                String(localized: " g", comment: "gram of carbs")
+                        )
+                        .font(.callout).fontWeight(.bold).fontDesign(.rounded)
+                    }
                 }
 
                 Spacer()

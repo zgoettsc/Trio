@@ -1,8 +1,8 @@
 # V2: Macro Absorption Engine & Garmin Sensitivity Model
 
-**Version:** 2.5
-**Date:** February 7, 2026
-**Status:** Integration complete — all V2 components wired into Crono dosing flow, settings UI built, outcome analysis view added
+**Version:** 2.6
+**Date:** February 8, 2026
+**Status:** Integration complete — V2 components wired into Crono flow, settings UI, outcome analysis, macro on-board display with decay chart
 **Prerequisite:** V1 Cronometer Integration (Phases 1-5b, implemented)
 
 ---
@@ -67,6 +67,7 @@
     - 10.6 [Phase F: Outcome Learning & Calibration](#106-phase-f-outcome-learning--calibration)
     - 10.7 [Phase G: Claude Recalibration Service](#107-phase-g-claude-recalibration-service)
     - 10.8 [Phase H: V2 Settings UI & Outcome Analysis](#108-phase-h-v2-settings-ui--outcome-analysis)
+    - 10.9 [Phase I: Macro On-Board Display & Decay Chart](#109-phase-i-macro-on-board-display--decay-chart)
 11. [Crono Flow Integration (How V2 Works End-to-End)](#crono-flow-integration-how-v2-works-end-to-end)
 12. [Cloud Function Field Mappings](#cloud-function-field-mappings)
 13. [File Reference](#file-reference)
@@ -2312,6 +2313,46 @@ The email/password account must have a UID matching the Firestore path user ID. 
 
 ---
 
+### 10.9 Phase I: Macro On-Board Display & Decay Chart
+
+**Goal:** Show users real COB vs effective COB on the home screen, and a macro decay chart on the treatments screen showing carb/protein/fat curves decaying over time.
+
+**Status:** IMPLEMENTED
+
+**New files:**
+- `Trio/Sources/Models/MacroOnBoardCalculator.swift` — Computes real COB, POB (protein on board), FOB (fat on board) from V2 entry notes
+- `Trio/Sources/Modules/Treatments/View/MacroDecayChartView.swift` — SwiftUI Charts view showing three decay curves
+
+**Modified files:**
+- `Trio/Sources/Modules/Home/View/HomeRootView.swift` — Home screen COB display updated to show "real COB (effective COB eff)" when V2 entries exist
+- `Trio/Sources/Modules/Treatments/View/TreatmentsRootView.swift` — Added `@FetchRequest` for FPU entries and macro decay chart section after ForecastChart
+
+**How it works:**
+
+V2 entries are tagged with a `note` field:
+- `"carb-absorption"` — real carb entries (gamma curve)
+- `"protein-gluconeogenesis"` — protein glucose-equivalent entries (sigmoid curve)
+- `"fat-resistance"` — fat insulin-resistance equivalent entries (gaussian curve)
+
+`MacroOnBoardCalculator` filters future FPU entries by note type:
+- **Real COB** = sum of future "carb-absorption" entries (grams)
+- **POB** = sum of future "protein-gluconeogenesis" entries (gram carb-equivalent)
+- **FOB** = sum of future "fat-resistance" entries (gram carb-equivalent)
+- **Effective COB** = oref's COB (includes all three + demand scaling)
+
+**Home screen display:**
+- V2 active: `"45g (82g eff)"` — real carbs remaining + oref's effective total
+- V2 inactive: `"82 g"` — original display (oref COB only)
+
+**Treatments screen chart:**
+- Appears as a "Macro Absorption" section below the ForecastChart
+- Three color-coded area curves: Carbs (yellow), Protein (purple), Fat (orange)
+- Shows current values: `COB: 45g  POB: 5g  FOB: 17g`
+- Timeline from now until all entries are absorbed
+- Only visible when V2 entries exist (hidden for V1/manual carbs)
+
+---
+
 ## Crono Flow Integration (How V2 Works End-to-End)
 
 This section describes how V2 components are wired into the existing Cronometer dosing flow.
@@ -2492,6 +2533,8 @@ Stress and body battery are stored as arrays of time-offset objects, not simple 
 | `Trio/Sources/Services/V2CurveOutcomeLearning.swift` | F | V2MealOutcome, V2BGCheckpoint, V2OutcomeLearningStore persistence |
 | `Trio/Sources/Modules/Settings/View/Subviews/V2MacroDosingSettingsView.swift` | H | All V2 settings: engine, SMB, Garmin, learning, parameters |
 | `Trio/Sources/Modules/Settings/View/Subviews/V2OutcomeAnalysisView.swift` | H | Predicted vs actual BG outcome accuracy analysis |
+| `Trio/Sources/Models/MacroOnBoardCalculator.swift` | I | Computes real COB, POB, FOB from V2 entry note tags |
+| `Trio/Sources/Modules/Treatments/View/MacroDecayChartView.swift` | I | Three-curve decay chart (SwiftUI Charts) |
 
 ### Modified Files (V2)
 
@@ -2505,6 +2548,8 @@ Stress and body battery are stored as arrays of time-offset objects, not simple 
 | `Trio/Sources/Modules/Settings/View/Subviews/ServicesView.swift` | C | Added Garmin Health Data row with connection status indicator |
 | `Trio/Sources/Models/TrioSettings.swift` | All | V2 settings: `useV2MacroAbsorption`, `insulinType`, `garminEnabled`, etc. |
 | `Trio/Sources/Modules/Treatments/TreatmentsStateModel.swift` | A, D, F | V2 engine in Crono recommendation, Garmin demand factor fetch, V2MealOutcome recording |
+| `Trio/Sources/Modules/Home/View/HomeRootView.swift` | I | Dual COB display: real carbs + effective total when V2 active |
+| `Trio/Sources/Modules/Treatments/View/TreatmentsRootView.swift` | I | FPU FetchRequest + macro decay chart section after ForecastChart |
 | `Trio/Sources/Modules/Settings/SettingsStateModel.swift` | H | @Published V2 properties with subscribeSetting() bindings |
 | `Trio/Sources/Modules/Settings/View/Subviews/AlgorithmSettings.swift` | H | Added "V2 Macro Dosing" navigation section |
 | `Trio/Sources/Services/HealthKit/NutritionHealthService.swift` | E | Trigger MOB on observer fire |
@@ -2699,3 +2744,5 @@ All V2 components are now wired together through the existing Crono dosing flow:
 | MacroAdaptiveService | Loop cycle (BEFORE oref) | Coded, not yet wired |
 | MacrosOnBoardTracker | HK observer → banner display | Coded, not yet wired |
 | SensitivityRecalibrationService | Weekly Claude analysis | Coded, not yet wired |
+| MacroOnBoardCalculator | HomeRootView (COB display) + TreatmentsRootView (decay chart) | **Wired** |
+| MacroDecayChartView | TreatmentsRootView, after ForecastChart | **Wired** |
