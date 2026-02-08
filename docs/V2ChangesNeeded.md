@@ -22,7 +22,6 @@ The core three-curve model, split dosing logic, and curve math are solid. The is
 **Remaining work:**
 - **#12** — Claude AI recalibration spec (needs design decisions)
 - **#13** — Core Data migration for outcome storage (architectural change)
-- **#17** — Fiber full-stack integration (engine support done in #15, but fiber data never reaches the engine because the full pipeline — Apple Health → Core Data → CarbsEntry → engine — doesn't carry fiber yet)
 
 ---
 
@@ -355,7 +354,7 @@ Additionally, oref was independently issuing correction SMBs for the same high B
 
 ### 17. Fiber Full-Stack Integration
 
-**Status: NOT IMPLEMENTED**
+**Status: IMPLEMENTED** (commit `e6095d3`)
 
 **Problem:** Item #15 added fiber support to the engine (`MacroAbsorptionEngine.carbTau()` and `generateEntries()` accept a `fiber` parameter) and to the outcome struct (`V2MealOutcome.fiber`). However, fiber is always `0` because no part of the data pipeline actually collects or passes fiber data. The engine support exists but is inert.
 
@@ -469,7 +468,6 @@ The following were reviewed and found to be correctly implemented:
 |------|-------|--------|
 | #12 — Claude AI recalibration spec | Design prompt schema, validation pipeline, user confirmation UX, error handling. Then implement service + document in whitepaper. | Large — requires design decisions before implementation |
 | #13 — Core Data migration for outcomes | Define Core Data model, write migration, replace UserDefaults CRUD, add fetch controllers. | Large — architectural change, but not urgent (UserDefaults works at current scale) |
-| #17 — Fiber full-stack integration | Wire fiber through 8 files: HealthKit → Cronometer → CarbsEntry → Core Data → CarbsStorage → engine. Engine already supports it. | Medium — mostly plumbing, but includes a Core Data schema change |
 
 ### Whitepaper Updates (documentation only)
 
@@ -480,7 +478,6 @@ The following were reviewed and found to be correctly implemented:
 
 ### Priority Order for Remaining Work
 
-1. **#17 Fiber full-stack** — Most impactful for dosing accuracy. The engine already slows carb absorption for high-fiber meals, but currently gets `fiber: 0` for every meal. Real fiber data will immediately improve τ estimates for meals like beans, whole grains, vegetables.
-2. **#1/#2 Integration wiring** — Completes the adaptive service's meal-specific IOB and BG delta calculations. The adaptive service works but uses less precise inputs without this wiring.
-3. **#12 Claude AI spec** — Defines the AI recalibration feature. Can be designed using the export data (which is now fully functional) to prototype prompts and validate parameter recommendations.
-4. **#13 Core Data migration** — Performance optimization. Only becomes urgent at high meal volume (~270+ records). Can be combined with fiber's Core Data change (#17) to do a single schema migration.
+1. **#1/#2 Integration wiring** — Completes the adaptive service's meal-specific IOB and BG delta calculations. The adaptive service works but uses less precise inputs without this wiring.
+2. **#12 Claude AI spec** — Defines the AI recalibration feature. Can be designed using the export data (which is now fully functional) to prototype prompts and validate parameter recommendations.
+3. **#13 Core Data migration** — Performance optimization. Only becomes urgent at high meal volume (~270+ records).
