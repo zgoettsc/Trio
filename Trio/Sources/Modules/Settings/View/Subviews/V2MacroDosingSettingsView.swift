@@ -81,6 +81,10 @@ struct V2MacroDosingSettingsView: BaseView {
                         in: 1.0 ... 3.0,
                         step: 0.1
                     )
+                    insulinInfoBox(
+                        increase: "Larger SMBs after meals — more insulin delivered faster",
+                        decrease: "Smaller SMBs after meals — less insulin delivered"
+                    )
 
                     HStack {
                         Text("BG Floor for Activation")
@@ -95,6 +99,10 @@ struct V2MacroDosingSettingsView: BaseView {
                         ),
                         in: 70 ... 130,
                         step: 5
+                    )
+                    insulinInfoBox(
+                        increase: "SMB enhancement activates at higher BG — less aggressive overall",
+                        decrease: "SMB enhancement activates at lower BG — more aggressive overall"
                     )
                 }
                 .listRowBackground(Color.chart)
@@ -112,9 +120,10 @@ struct V2MacroDosingSettingsView: BaseView {
                             saveCurveParameter { $0.fatTotalCoeff = newValue }
                         }
 
-                    Text("How much extra insulin fat requires. Higher values increase delayed insulin for fatty meals. Based on Wolpert 2013 (default 0.69).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    insulinInfoBox(
+                        increase: "More delayed insulin for fat — use if you spike 4-8h after fatty meals",
+                        decrease: "Less delayed insulin for fat — use if you go low hours after fatty meals"
+                    )
                 }
                 .listRowBackground(Color.chart)
 
@@ -130,9 +139,10 @@ struct V2MacroDosingSettingsView: BaseView {
                             saveCurveParameter { $0.proteinFactor = newValue }
                         }
 
-                    Text("Peak fraction of protein converted to glucose via gluconeogenesis. Research range: 0.20-0.60 for most people.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    insulinInfoBox(
+                        increase: "More delayed insulin for protein — use if high-protein meals raise your BG at 3-5h",
+                        decrease: "Less delayed insulin for protein — use if you go low after high-protein meals"
+                    )
 
                     HStack {
                         Text("Protein Threshold")
@@ -145,9 +155,10 @@ struct V2MacroDosingSettingsView: BaseView {
                             saveCurveParameter { $0.proteinThreshold = newValue }
                         }
 
-                    Text("Minimum protein grams before gluconeogenesis kicks in. Below this, protein has no BG effect.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    insulinInfoBox(
+                        increase: "Less insulin — protein ignored until a higher amount (fewer meals trigger protein dosing)",
+                        decrease: "More insulin — smaller protein amounts trigger extra dosing"
+                    )
 
                     HStack {
                         Text("Protein Plateau")
@@ -160,9 +171,10 @@ struct V2MacroDosingSettingsView: BaseView {
                             saveCurveParameter { $0.proteinPlateau = newValue }
                         }
 
-                    Text("Protein grams at which conversion plateaus at max factor. Above this, more protein doesn't increase the conversion rate.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    insulinInfoBox(
+                        increase: "Less insulin — conversion ramps up more slowly, needs more protein to reach full effect",
+                        decrease: "More insulin — conversion hits maximum at a lower protein amount"
+                    )
                 }
                 .listRowBackground(Color.chart)
 
@@ -178,9 +190,10 @@ struct V2MacroDosingSettingsView: BaseView {
                             saveCurveParameter { $0.carbTau = newValue }
                         }
 
-                    Text("Base time constant for carb absorption. Higher = slower absorption. Fat adds 0.8 min per gram on top of this.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    insulinInfoBox(
+                        increase: "Slower absorption — less insulin upfront, more via SMBs later. Use if you go low soon after eating",
+                        decrease: "Faster absorption — more insulin upfront, less via SMBs. Use if you spike right after eating"
+                    )
                 }
                 .listRowBackground(Color.chart)
 
@@ -335,5 +348,27 @@ struct V2MacroDosingSettingsView: BaseView {
         var params = V2OutcomeLearningStore.shared.loadParameters()
         update(&params)
         V2OutcomeLearningStore.shared.saveParameters(params)
+    }
+
+    private func insulinInfoBox(increase: String, decrease: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                Text(increase)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundStyle(.cyan)
+                    .font(.caption)
+                Text(decrease)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
