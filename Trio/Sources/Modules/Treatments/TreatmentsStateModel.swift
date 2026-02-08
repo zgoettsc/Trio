@@ -138,6 +138,13 @@ extension Treatments {
         var v2DemandContributions: [GarminSensitivityModel.SensitivityResult.Contribution] = []
         var v2UpfrontCarbs: Double?
         var v2UpfrontPercent: Double?
+        var v2OriginalFullCarbs: Double?          // full meal carbs before split (for engine)
+        var v2UpfrontPercentOverride: Double?     // user's slider override (nil = use curve default)
+        var v2CurveSuggestedPercent: Double?      // what the gamma CDF calculated
+        var v2TauCarb: Double?                    // fat-modified tau for display
+        var v2FatTotalEquiv: Double?              // fat carb-equivalent for display
+        var v2SafeWindowMinutes: Int?             // safe window used for display
+        var showV2AdjustSlider: Bool = false       // show/hide inline slider
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
         var preprocessedData: [(id: UUID, forecast: Forecast, forecastValue: ForecastValue)] = []
@@ -491,6 +498,11 @@ extension Treatments {
 
                 v2UpfrontCarbs = result.upfrontCarbs
                 v2UpfrontPercent = result.upfrontPercent
+                v2CurveSuggestedPercent = result.curveSuggestedPercent
+                v2TauCarb = result.tauCarb
+                v2FatTotalEquiv = result.fatTotalEquiv
+                v2SafeWindowMinutes = result.safeWindowMinutes
+                v2OriginalFullCarbs = cronometerRecommendedCarbs
                 cronometerFPUCarbEquivalents = result.futureEntries.reduce(0.0) {
                     $0 + Double(truncating: $1.carbs as NSDecimalNumber)
                 }
@@ -674,14 +686,47 @@ extension Treatments {
             return closest?.value
         }
 
+        /// Called when user adjusts the V2 upfront % slider.
+        /// Recalculates upfront carbs and future entry totals for display.
+        @MainActor func adjustV2UpfrontPercent(_ newPercent: Double) {
+            guard let fullCarbs = v2OriginalFullCarbs else { return }
+            v2UpfrontPercentOverride = newPercent
+            v2UpfrontPercent = newPercent
+            v2UpfrontCarbs = fullCarbs * newPercent * v2DemandFactor
+
+            // Recalculate FPU display total (remaining carbs + protein + fat entries)
+            let remainingCarbs = fullCarbs * (1.0 - newPercent) * v2DemandFactor
+            let proteinEquiv = cronometerRecommendedProtein * MacroAbsorptionEngine.proteinGlucoFactor(proteinGrams: cronometerRecommendedProtein)
+                * NSDecimalNumber(decimal: settingsManager.settings.individualAdjustmentFactor).doubleValue * v2DemandFactor
+            let fatEquiv = cronometerRecommendedFat >= 5
+                ? cronometerRecommendedFat * 0.69 * NSDecimalNumber(decimal: settingsManager.settings.individualAdjustmentFactor).doubleValue * v2DemandFactor
+                : 0
+            cronometerFPUCarbEquivalents = remainingCarbs + proteinEquiv + fatEquiv
+        }
+
         /// Called when user taps Apply — populates carb/fat/protein fields and logs the recommendation
         @MainActor func applyCronometerRecommendation(carbs appliedCarbs: Double, fat appliedFat: Double, protein appliedProtein: Double) {
             guard let meal = cronometerMeal else { return }
 
-            // Populate the treatment fields
-            self.carbs = Decimal(appliedCarbs)
-            self.fat = Decimal(appliedFat)
-            self.protein = Decimal(appliedProtein)
+            let trioSettings = settingsManager.settings
+
+            // For V2, use upfront carbs for bolus calculation and thread full carbs to storage.
+            // The entry stores upfront carbs so the bolus calculator recommends correct insulin.
+            // The engine receives full carbs via v2FullCarbsForEngine for proper curve generation.
+            if trioSettings.useV2MacroAbsorption, let upfrontCarbs = v2UpfrontCarbs, let fullCarbs = v2OriginalFullCarbs {
+                self.carbs = Decimal(upfrontCarbs)
+                self.fat = Decimal(appliedFat)
+                self.protein = Decimal(appliedProtein)
+
+                // Thread full carbs and upfront override to CarbsStorage for the engine
+                carbsStorage.v2FullCarbsForEngine = fullCarbs
+                carbsStorage.v2UpfrontPercentOverride = v2UpfrontPercentOverride
+            } else {
+                // V1 legacy path: use full carbs as before
+                self.carbs = Decimal(appliedCarbs)
+                self.fat = Decimal(appliedFat)
+                self.protein = Decimal(appliedProtein)
+            }
 
             // Log the recommendation for outcome tracking
             let recommendation = CronometerMealRecommendation.create(

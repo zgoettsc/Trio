@@ -31,8 +31,20 @@ struct CronometerMealRecommendationView: View {
     let onToggleFactorLock: () -> Void
     let onDismiss: () -> Void
 
+    // V2 split dosing (nil = V1 mode, no slider shown)
+    let v2UpfrontCarbs: Double?
+    let v2UpfrontPercent: Double?
+    let v2CurveSuggestedPercent: Double?
+    let v2TauCarb: Double?
+    let v2FatTotalEquiv: Double?
+    let v2SafeWindowMinutes: Int?
+    let v2DemandFactor: Double?
+    let v2CarbRatio: Double?
+    let onAdjustV2Upfront: ((Double) -> Void)?
+
     @State private var editedFactor: Double
     @State private var showFactorEditor = false
+    @State private var editedUpfrontPercent: Double?
 
     struct GlucosePoint: Identifiable {
         let id = UUID()
@@ -60,9 +72,18 @@ struct CronometerMealRecommendationView: View {
         minutesSinceMeal: Double = 0,
         decayAdjustedCarbs: Double? = nil,
         isFactorLocked: Bool = false,
+        v2UpfrontCarbs: Double? = nil,
+        v2UpfrontPercent: Double? = nil,
+        v2CurveSuggestedPercent: Double? = nil,
+        v2TauCarb: Double? = nil,
+        v2FatTotalEquiv: Double? = nil,
+        v2SafeWindowMinutes: Int? = nil,
+        v2DemandFactor: Double? = nil,
+        v2CarbRatio: Double? = nil,
         onApply: @escaping (Double, Double, Double) -> Void,
         onAdjustFactor: @escaping (Double) -> Void,
         onToggleFactorLock: @escaping () -> Void = {},
+        onAdjustV2Upfront: ((Double) -> Void)? = nil,
         onDismiss: @escaping () -> Void
     ) {
         self.meal = meal
@@ -84,11 +105,21 @@ struct CronometerMealRecommendationView: View {
         self.minutesSinceMeal = minutesSinceMeal
         self.decayAdjustedCarbs = decayAdjustedCarbs
         self.isFactorLocked = isFactorLocked
+        self.v2UpfrontCarbs = v2UpfrontCarbs
+        self.v2UpfrontPercent = v2UpfrontPercent
+        self.v2CurveSuggestedPercent = v2CurveSuggestedPercent
+        self.v2TauCarb = v2TauCarb
+        self.v2FatTotalEquiv = v2FatTotalEquiv
+        self.v2SafeWindowMinutes = v2SafeWindowMinutes
+        self.v2DemandFactor = v2DemandFactor
+        self.v2CarbRatio = v2CarbRatio
         self.onApply = onApply
         self.onAdjustFactor = onAdjustFactor
         self.onToggleFactorLock = onToggleFactorLock
+        self.onAdjustV2Upfront = onAdjustV2Upfront
         self.onDismiss = onDismiss
         self._editedFactor = State(initialValue: adjustmentFactor)
+        self._editedUpfrontPercent = State(initialValue: v2UpfrontPercent)
     }
 
     var body: some View {
@@ -108,6 +139,11 @@ struct CronometerMealRecommendationView: View {
 
                     // Recommended entry
                     recommendedEntrySection
+
+                    // V2 Split Dosing slider (shows when V2 is active)
+                    if v2UpfrontPercent != nil {
+                        v2SplitDosingSection
+                    }
 
                     // FPU info
                     if fpuCarbEquivalents > 1 {
@@ -704,12 +740,148 @@ struct CronometerMealRecommendationView: View {
             .cornerRadius(4)
     }
 
+    // MARK: - V2 Split Dosing
+
+    private var v2SplitDosingSection: some View {
+        let percent = editedUpfrontPercent ?? v2UpfrontPercent ?? 0.5
+        let curvePercent = v2CurveSuggestedPercent ?? percent
+        let tau = v2TauCarb ?? 35
+        let fullCarbs = recommendedCarbs
+        let upfrontGrams = fullCarbs * percent
+        let remainingGrams = fullCarbs * (1.0 - percent)
+        let cr = v2CarbRatio ?? 10.0
+        let upfrontUnits = upfrontGrams / cr
+        let safeWindow = v2SafeWindowMinutes ?? 45
+        let isHighFat = (v2FatTotalEquiv ?? 0) > 5
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("V2 Split Dosing", systemImage: "chart.bar.doc.horizontal")
+                .font(.headline)
+                .foregroundStyle(.cyan)
+
+            // Explanation
+            VStack(alignment: .leading, spacing: 4) {
+                if isHighFat {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("High-fat meal: carb absorption slowed (tau: \(Int(tau)) min)")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                Text("Gamma curve suggests \(Int(curvePercent * 100))% upfront within \(safeWindow)-min safe window. Remaining carbs delivered via enhanced SMBs.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Upfront % slider
+            VStack(spacing: 6) {
+                HStack {
+                    Text("Upfront:")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Text("\(Int(percent * 100))%")
+                        .font(.title3.bold().monospacedDigit())
+                        .foregroundStyle(.cyan)
+                    Text("(\(String(format: "%.0f", upfrontGrams))g = \(String(format: "%.1f", upfrontUnits))U)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                ZStack(alignment: .leading) {
+                    Slider(
+                        value: Binding(
+                            get: { percent },
+                            set: { newVal in
+                                editedUpfrontPercent = newVal
+                                onAdjustV2Upfront?(newVal)
+                            }
+                        ),
+                        in: 0 ... 1.0,
+                        step: 0.05
+                    )
+                    .tint(.cyan)
+
+                    // Curve suggestion reference mark
+                    GeometryReader { geo in
+                        let xPos = geo.size.width * curvePercent
+                        Rectangle()
+                            .fill(Color.white.opacity(0.5))
+                            .frame(width: 2, height: 20)
+                            .offset(x: xPos - 1)
+                    }
+                    .frame(height: 20)
+                    .allowsHitTesting(false)
+                }
+
+                HStack {
+                    Text("Less upfront")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("|")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.3))
+                    Spacer()
+                    Text("More upfront")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                // High-fat warning
+                if isHighFat && percent > curvePercent * 1.5 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                        Text("Exceeds 1.5x curve suggestion. High fat delays carb absorption — bolusing more upfront risks going low before carbs absorb.")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+
+            // Split summary
+            HStack(spacing: 16) {
+                VStack(spacing: 2) {
+                    Text("\(String(format: "%.0f", upfrontGrams))g")
+                        .font(.subheadline.bold().monospacedDigit())
+                        .foregroundStyle(.green)
+                    Text("Bolus now")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 2) {
+                    Text("\(String(format: "%.0f", remainingGrams))g")
+                        .font(.subheadline.bold().monospacedDigit())
+                        .foregroundStyle(.blue)
+                    Text("Via SMBs")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(.vertical, 4)
+        }
+        .padding()
+        .background(Color.cyan.opacity(0.05))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.cyan.opacity(0.2), lineWidth: 1)
+        )
+        .cornerRadius(12)
+    }
+
     // MARK: - Action Buttons
 
     private var actionButtons: some View {
         VStack(spacing: 12) {
             Button(action: {
-                // Use the current factor's recommended values
                 let scaledCarbs = meal.carbsDelta * editedFactor
                 onApply(scaledCarbs, recommendedFat, recommendedProtein)
             }) {
@@ -725,10 +897,20 @@ struct CronometerMealRecommendationView: View {
                 .cornerRadius(12)
             }
 
-            Text("Carbs: \(Int(meal.carbsDelta * editedFactor))g (bolus), Fat: \(Int(recommendedFat))g + Protein: \(Int(recommendedProtein))g (FPU → loop SMBs over \(String(format: "%.0f", fpuDurationHours))h)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            // V2: show split dosing summary, V1: show FPU summary
+            if let percent = editedUpfrontPercent ?? v2UpfrontPercent {
+                let upfrontG = Int(recommendedCarbs * percent)
+                let remainingG = Int(recommendedCarbs * (1.0 - percent))
+                Text("Upfront bolus: \(upfrontG)g carbs (\(Int(percent * 100))%). Remaining: \(remainingG)g carbs + \(Int(recommendedFat))g fat + \(Int(recommendedProtein))g protein via enhanced SMBs.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Carbs: \(Int(meal.carbsDelta * editedFactor))g (bolus), Fat: \(Int(recommendedFat))g + Protein: \(Int(recommendedProtein))g (FPU -> loop SMBs over \(String(format: "%.0f", fpuDurationHours))h)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
 
