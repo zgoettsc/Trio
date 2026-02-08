@@ -6,7 +6,7 @@ import Foundation
 // Queried from Firestore at meal detection time.
 //
 // All field names and types match the Garmin Health API v1.2.3 spec exactly.
-// Firestore path: /users/{uid}/garminData/{summaryType}/{documents}
+// Firestore path: /users/{uid}/garminData/{dataType}/dates/{YYYY-MM-DD}
 
 struct GarminContextSnapshot: Codable {
     let queryTime: Date

@@ -132,6 +132,12 @@ extension Treatments {
         var cronometerMealIsLate: Bool = false
         var cronometerMealMinutesAgo: Double = 0
         var cronometerDecayAdjustedCarbs: Double?
+
+        // V2 Macro Absorption state
+        var v2DemandFactor: Double = 1.0
+        var v2DemandContributions: [GarminSensitivityModel.SensitivityResult.Contribution] = []
+        var v2UpfrontCarbs: Double?
+        var v2UpfrontPercent: Double?
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
         var preprocessedData: [(id: UUID, forecast: Forecast, forecastValue: ForecastValue)] = []
@@ -410,6 +416,19 @@ extension Treatments {
                 }
             }
 
+            // Fetch Garmin demand factor if V2 + Garmin enabled
+            let trioSettings = settingsManager.settings
+            if trioSettings.useV2MacroAbsorption, trioSettings.garminEnabled, GarminFirebaseManager.isSignedIn {
+                let service = GarminFirestoreService()
+                let snapshot = await service.fetchContext()
+                let sensitivityResult = GarminSensitivityModel.computeDemandFactor(from: snapshot)
+                v2DemandFactor = sensitivityResult.insulinDemandFactor
+                v2DemandContributions = sensitivityResult.contributions
+            } else {
+                v2DemandFactor = 1.0
+                v2DemandContributions = []
+            }
+
             // Calculate recommended entry
             calculateCronometerRecommendation()
 
@@ -451,9 +470,36 @@ extension Treatments {
                 cronometerRecommendedProtein = meal.proteinDelta * store.personalProteinFactor()
             }
 
-            // Calculate FPU carb equivalents from the RECOMMENDED fat/protein (not raw Cronometer values)
-            // This shows the user how much extra insulin the loop will deliver via SMBs
             let trioSettings = settingsManager.settings
+
+            // V2 three-curve engine: compute upfront/future split and Garmin demand factor
+            if trioSettings.useV2MacroAbsorption {
+                let adjustment = NSDecimalNumber(decimal: trioSettings.individualAdjustmentFactor).doubleValue
+                let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+
+                let result = MacroAbsorptionEngine.generateEntries(
+                    carbs: cronometerRecommendedCarbs,
+                    fat: cronometerRecommendedFat,
+                    protein: cronometerRecommendedProtein,
+                    mealTime: meal.detectedAt,
+                    insulinDemandFactor: v2DemandFactor,
+                    upfrontPercent: nil,
+                    insulinType: insulinType,
+                    individualAdjustmentFactor: adjustment,
+                    safeWindowOverride: trioSettings.v2SafeWindowMinutes
+                )
+
+                v2UpfrontCarbs = result.upfrontCarbs
+                v2UpfrontPercent = result.upfrontPercent
+                cronometerFPUCarbEquivalents = result.futureEntries.reduce(0.0) {
+                    $0 + Double(truncating: $1.carbs as NSDecimalNumber)
+                }
+                cronometerFPUDurationHours = Double(result.safeWindowMinutes) / 60.0 +
+                    (result.futureEntries.isEmpty ? 0 : 8.0)
+                return
+            }
+
+            // V1 legacy path: Warsaw Method FPU calculation
             let adjustment = NSDecimalNumber(decimal: trioSettings.individualAdjustmentFactor).doubleValue
             let timeCap = NSDecimalNumber(decimal: trioSettings.timeCap).doubleValue
 
@@ -656,6 +702,51 @@ extension Treatments {
                 predictedMinBG: cronometerPredictedMinBG
             )
             CronometerRecommendationStore.shared.save(recommendation)
+
+            // V2 outcome learning: record meal with curve parameters and Garmin context
+            let trioSettings = settingsManager.settings
+            if trioSettings.useV2MacroAbsorption, trioSettings.v2OutcomeLearningEnabled {
+                let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+                let adjustment = NSDecimalNumber(decimal: trioSettings.individualAdjustmentFactor).doubleValue
+
+                // Retrieve Garmin snapshot (cached from recommendation fetch)
+                var garminSnapshot: GarminContextSnapshot?
+                if trioSettings.garminEnabled, GarminFirebaseManager.isSignedIn {
+                    let service = GarminFirestoreService()
+                    garminSnapshot = await service.fetchContext() // uses cache
+                }
+
+                let outcome = V2MealOutcome(
+                    id: UUID(),
+                    date: Date(),
+                    mealID: UUID().uuidString,
+                    carbs: appliedCarbs,
+                    fat: appliedFat,
+                    protein: appliedProtein,
+                    tauCarb: 35, // base, will be personalized
+                    proteinFactor: 0.35,
+                    fatTotalEquiv: appliedFat * 0.69,
+                    upfrontPercent: v2UpfrontPercent ?? 0.65,
+                    curveSuggestedPercent: v2UpfrontPercent ?? 0.65,
+                    insulinDemandFactor: v2DemandFactor,
+                    safeWindowMinutes: trioSettings.v2SafeWindowMinutes ?? insulinType.defaultSafeWindowMinutes,
+                    garminSnapshot: garminSnapshot,
+                    bgAtMeal: Int(NSDecimalNumber(decimal: currentBG).intValue),
+                    carbRatioAtMeal: NSDecimalNumber(decimal: currentCarbRatio).doubleValue,
+                    isfAtMeal: NSDecimalNumber(decimal: currentISF).doubleValue,
+                    mealSMBMultiplier: NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue,
+                    mealModeWasActive: true,
+                    adaptiveAdjustments: [],
+                    checkpoints: [
+                        V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
+                        V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true, curvePhase: .protein),
+                        V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true, curvePhase: .fat),
+                        V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true, curvePhase: .fat),
+                    ],
+                    hasConfoundingMeal: false
+                )
+                V2OutcomeLearningStore.shared.save(outcome)
+            }
 
             // Dismiss the sheet
             showCronometerSheet = false

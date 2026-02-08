@@ -1,8 +1,8 @@
 # V2: Macro Absorption Engine & Garmin Sensitivity Model
 
-**Version:** 2.2
+**Version:** 2.5
 **Date:** February 7, 2026
-**Status:** Implementation in progress (Phases A-G coded, wiring complete)
+**Status:** Integration complete — all V2 components wired into Crono dosing flow, settings UI built, outcome analysis view added
 **Prerequisite:** V1 Cronometer Integration (Phases 1-5b, implemented)
 
 ---
@@ -66,10 +66,13 @@
     - 10.5 [Phase E: MOB Tracking & Auto-Recommendation](#105-phase-e-mob-tracking--auto-recommendation)
     - 10.6 [Phase F: Outcome Learning & Calibration](#106-phase-f-outcome-learning--calibration)
     - 10.7 [Phase G: Claude Recalibration Service](#107-phase-g-claude-recalibration-service)
-11. [File Reference](#file-reference)
-12. [Key Technical Decisions](#key-technical-decisions)
-13. [Safety Philosophy](#safety-philosophy)
-14. [Relationship to V1](#relationship-to-v1)
+    - 10.8 [Phase H: V2 Settings UI & Outcome Analysis](#108-phase-h-v2-settings-ui--outcome-analysis)
+11. [Crono Flow Integration (How V2 Works End-to-End)](#crono-flow-integration-how-v2-works-end-to-end)
+12. [Cloud Function Field Mappings](#cloud-function-field-mappings)
+13. [File Reference](#file-reference)
+14. [Key Technical Decisions](#key-technical-decisions)
+15. [Safety Philosophy](#safety-philosophy)
+16. [Relationship to V1](#relationship-to-v1)
 
 ---
 
@@ -1308,6 +1311,17 @@ struct MealModeState {
 
 ## Layer 3: Garmin Sensitivity Model
 
+Trio connects to the user's personal Firebase project (separate from Trio's Crashlytics project) to read Garmin health data. The integration uses a secondary `FirebaseApp` instance configured from build-time secrets, with email/password authentication matching the Firestore security rules.
+
+**Data pipeline:** Garmin Watch → Garmin Connect → Garmin Health API v1.2.3 webhooks → Cloud Function → Firestore → Trio (via Firebase iOS SDK)
+
+**Firebase architecture:**
+- Trio's **default** FirebaseApp = `trio-e776c` (Crashlytics only)
+- Trio's **secondary** FirebaseApp (`"garmin"`) = user's personal Firebase project (Firestore reads)
+- Configuration injected at build time from GitHub secrets (see §10.3)
+- Authentication: email/password sign-in at app launch (`GarminFirebaseManager.configureAndSignIn()`)
+- Firestore security rules require `request.auth.uid == userId` — satisfied by the authenticated session
+
 ### 7.1 Firestore Database Structure
 
 Data flows from the Garmin watch via **Garmin Health API v1.2.3** (server-to-server push) through a Cloud Function into Firestore. The Cloud Function receives webhook POST notifications containing summary data and stores each summary as a document keyed by `calendarDate`.
@@ -1404,20 +1418,32 @@ Where `uid` is the Firebase user ID (e.g., `0Zp7LAT9bLMIEFWNyy694Gylf0n1`).
 - Daily summaries update throughout the day as the user syncs. **Always replace old with new.**
 - Sleep summaries may arrive as `AUTO_TENTATIVE` and update to `AUTO_FINAL` or `ENHANCED_FINAL`.
 - Stress details contain per-3-minute samples. We extract the most recent valid reading (positive values only).
-- Body Battery is in the stress details `timeOffsetBodyBatteryValues` map. First entry = wake level, last entry = current level.
+- Body Battery is in the stress details `bodyBatteryTimeline` array. First entry = wake level, last entry = current level.
 - `bodyBatteryChargedValue` and `bodyBatteryDrainedValue` were moved from stressDetails to dailies in API v1.2.1 (Aug 2025).
 
-**Data pipeline:** Garmin Health API webhooks → Cloud Function → Firestore → Trio (via Firebase iOS SDK)
+**Data pipeline:** Garmin Health API webhooks → Cloud Function (transforms field names) → Firestore → Trio (via Firebase iOS SDK)
+
+**IMPORTANT: Cloud Function Transformation**
+
+The tree above shows the **raw Garmin Health API** field names. The Cloud Function transforms these before writing to Firestore:
+- Field names are shortened (e.g., `restingHeartRateInBeatsPerMinute` → `restingHeartRate`)
+- Sleep durations stored in **minutes** (not seconds): `totalMinutes`, `deepSleepMinutes`, etc.
+- Sleep score stored as `garminSleepScore` (not `overallSleepScore.value`)
+- Stress/body battery stored as arrays of `{offsetSeconds, level/value}` (not string-keyed maps)
+- Data types are organized under a `dates` subcollection: `/garminData/{dataType}/dates/{YYYY-MM-DD}`
+
+See [Cloud Function Field Mappings](#cloud-function-field-mappings) for the complete mapping table.
 
 ### 7.2 GarminContextSnapshot
 
-All field names match the Garmin Health API v1.2.3 spec exactly. The snapshot is built from Firestore documents in the collections defined in §7.1.
+The `GarminContextSnapshot` struct uses Garmin Health API v1.2.3 field names internally. The `GarminFirestoreService` maps from the Cloud Function's transformed Firestore field names to these internal names. The snapshot is built from Firestore documents in the collections defined in §7.1.
 
 ```swift
 /// A point-in-time snapshot of Garmin health data relevant to insulin sensitivity.
 /// Queried from Firestore at meal detection time.
-/// All field names and types match the Garmin Health API v1.2.3 spec exactly.
-/// Firestore path: /users/{uid}/garminData/{summaryType}/{documents}
+/// Internal field names match Garmin Health API v1.2.3 spec.
+/// GarminFirestoreService maps Firestore fields → internal model.
+/// Firestore path: /users/{uid}/garminData/{dataType}/dates/{YYYY-MM-DD}
 struct GarminContextSnapshot: Codable {
     let queryTime: Date
 
@@ -2016,6 +2042,8 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 **Goal:** Replace the linear FPU distribution with gamma/sigmoid/normalized-gaussian curves. Implement curve-driven split dosing for all entries.
 
+**Status:** IMPLEMENTED — Engine coded, wired into CarbsStorage.processFPU() and Crono recommendation flow.
+
 **New files:**
 - `Trio/Sources/Models/MacroAbsorptionEngine.swift` — curve math, entry generation, split dosing logic
 - `Trio/Sources/Models/MacroAbsorptionResult.swift` — result struct with upfront/future split
@@ -2068,32 +2096,108 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 **Goal:** Query Garmin health data from the user's existing Firestore database.
 
+**Status:** IMPLEMENTED
+
 **New files:**
-- `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` — Firestore queries
-- `Trio/Sources/Models/GarminContextSnapshot.swift` — data model
+- `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` — Firestore queries, `GarminFirebaseManager`
+- `Trio/Sources/Services/Garmin/GarminFirebaseConfig.swift` — Build-time config with placeholder values
+- `Trio/Sources/Models/GarminContextSnapshot.swift` — Data model (Garmin Health API v1.2.3 fields)
+- `Trio/Sources/Modules/Settings/View/Subviews/GarminFirestoreStatusView.swift` — Connection status & test UI
 
-**Dependencies:**
-- Firebase iOS SDK (FirebaseFirestore) — add via SPM
-- `GoogleService-Info.plist` or manual Firestore configuration
+**Dependencies (already in project):**
+- `firebase-ios-sdk` v11.11+ (already used for Crashlytics)
+- Added products: `FirebaseAuth`, `FirebaseFirestore` (from same SPM package)
 
-**Steps:**
-1. Add Firebase SDK dependency to the project
-2. Implement `GarminFirestoreService` with configurable collection paths
-3. Build `GarminContextSnapshot` from query results
-4. Add Settings UI: Firestore project config, collection paths, enable/disable toggle
-5. Test with user's actual Firestore data to confirm schema mapping
-6. Add caching (don't re-query within 5 minutes)
+**Architecture: Secondary Firebase App**
 
-**Configuration needed from user:**
-- Firebase project ID
-- Firestore collection paths (may differ from assumed schema above)
-- Read-only security rules for Trio's access
+Trio already uses Firebase for Crashlytics (`trio-e776c` project). The user's Garmin data lives in a separate Firebase project. We use Firebase's multi-app support:
+
+```swift
+// Default app (Crashlytics) — configured in AppDelegate
+FirebaseApp.configure()
+
+// Secondary app (Garmin Firestore) — configured after default
+let options = FirebaseOptions(googleAppID: "...", gcmSenderID: "...")
+options.apiKey = "..."
+options.projectID = "..."
+FirebaseApp.configure(name: "garmin", options: options)
+
+// Sign in to the secondary app
+let auth = Auth.auth(app: FirebaseApp.app(name: "garmin")!)
+try await auth.signIn(withEmail: email, password: password)
+
+// Access Firestore via the secondary app
+let db = Firestore.firestore(app: FirebaseApp.app(name: "garmin")!)
+```
+
+**Build-Time Secret Injection (GitHub Actions)**
+
+The `GarminFirebaseConfig.swift` file contains placeholder values (`__GARMIN_FIREBASE_API_KEY__`, etc.) that are replaced by `sed` during the `build_trio.yml` workflow, before Xcode compilation.
+
+| GitHub Secret | Purpose | Where to Find It |
+|---------------|---------|------------------|
+| `GARMIN_FIREBASE_API_KEY` | Firebase Web API Key | Firebase Console → Project Settings → Web API Key |
+| `GARMIN_FIREBASE_PROJECT_ID` | Firebase Project ID | Firebase Console → Project Settings → Project ID |
+| `GARMIN_FIREBASE_GCM_SENDER_ID` | GCM Sender ID | Firebase Console → Project Settings → Cloud Messaging → Sender ID |
+| `GARMIN_FIREBASE_GOOGLE_APP_ID` | iOS Google App ID | Firebase Console → Project Settings → Your Apps → iOS App → App ID |
+| `GARMIN_FIREBASE_STORAGE_BUCKET` | Storage Bucket | Firebase Console → Project Settings → Storage bucket |
+| `GARMIN_FIREBASE_USER_ID` | Firestore user UID | Your Firebase Auth UID (e.g. `0Zp7LAT9bLMIEFWNyy694Gylf0n1`) |
+| `GARMIN_FIREBASE_EMAIL` | Firebase Auth email | Your Firebase Auth email address |
+| `GARMIN_FIREBASE_PASSWORD` | Firebase Auth password | Your Firebase Auth password |
+
+**Note:** `GARMIN_FIREBASE_GOOGLE_APP_ID` requires an iOS app registered in the Firebase project. Go to Firebase Console → Project Settings → Add App → iOS, enter bundle ID `org.nightscout.trio`, and the generated App ID will be in the format `1:123456:ios:abc123`. The `CLIENT_ID` is not required (only needed for Google Sign-In, not email/password auth).
+
+**If secrets are not configured:** `GarminFirebaseConstants.isConfigured` returns `false`, `GarminFirebaseManager.configureAndSignIn()` is a no-op, all Firestore queries return `nil`, and the sensitivity model defaults to factor 1.0 (no adjustment). Zero impact on normal Trio operation.
+
+**Setup Guide (Step-by-Step)**
+
+1. **Register an iOS app in your Firebase project:**
+   - Firebase Console → Project Settings → Add App → iOS
+   - Bundle ID: `org.nightscout.trio`
+   - Download the generated config (you only need the `GOOGLE_APP_ID` from it)
+
+2. **Add GitHub secrets to your Trio repository:**
+   - Go to your GitHub repo → Settings → Secrets and variables → Actions
+   - Add all 8 `GARMIN_FIREBASE_*` secrets from the table above
+   - Values come from your Firebase Console project settings and the iOS app you just registered
+
+3. **Build and install via GitHub Actions:**
+   - The `build_trio.yml` workflow automatically detects and injects the secrets
+   - If `GARMIN_FIREBASE_API_KEY` is empty/missing, the injection step is skipped entirely
+
+4. **Verify in the app:**
+   - Open Trio → Settings → Services → **Garmin Health Data**
+   - Tap **"Test Connection"** to run a 3-step verification:
+     1. Configuration check (are secrets injected?)
+     2. Firebase Auth sign-in test
+     3. Firestore data fetch test
+   - Green checks = working. Red X = see error message for what to fix.
+   - On success, the view displays your latest Garmin data (sleep score, HR, HRV, Body Battery, etc.)
+
+**Connection Status Indicators (Settings → Services)**
+
+The Garmin Health Data row in the Services list shows an inline status icon:
+- Network icon + green check = configured and signed in
+- Network icon + orange question mark = configured but sign-in pending
+- Slashed network icon = secrets not configured (build without secrets)
+
+**Firestore security rules (user's Firebase project):**
+```
+match /garminData/{dataType} {
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if false;  // server-only writes via Cloud Function
+}
+```
+
+The email/password account must have a UID matching the Firestore path user ID. The sign-in happens once at app launch; Firebase Auth handles token refresh automatically.
 
 ---
 
 ### 10.4 Phase D: Sensitivity Model
 
 **Goal:** Compute daily sensitivity factor from Garmin data and apply to all entry generation.
+
+**Status:** IMPLEMENTED — GarminSensitivityModel coded, wired into CarbsStorage (entry generation) and TreatmentsStateModel (Crono recommendation). Demand factor passed through entire dosing pipeline.
 
 **New files:**
 - `Trio/Sources/Models/GarminSensitivityModel.swift` — rule-based model
@@ -2142,6 +2246,8 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 **Goal:** Personalize curve parameters and sensitivity weights from BG outcomes.
 
+**Status:** PARTIALLY IMPLEMENTED — V2MealOutcome recording wired into Crono apply flow. V2OutcomeLearningStore persists outcomes with BG checkpoints. V2OutcomeAnalysisView shows predicted vs actual accuracy. Personal parameter tuning from outcomes not yet implemented.
+
 **Modified files:**
 - `Trio/Sources/Models/CronometerRecommendation.swift` — store curve params + Garmin context + split dosing info with each recommendation
 - `Trio/Sources/Models/MacroAbsorptionEngine.swift` — use personalized parameters
@@ -2176,6 +2282,194 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 ---
 
+### 10.8 Phase H: V2 Settings UI & Outcome Analysis
+
+**Goal:** Central settings page for all V2 features and an outcome accuracy analysis view.
+
+**Status:** IMPLEMENTED
+
+**New files:**
+- `Trio/Sources/Modules/Settings/View/Subviews/V2MacroDosingSettingsView.swift` — Settings page for all V2 features
+- `Trio/Sources/Modules/Settings/View/Subviews/V2OutcomeAnalysisView.swift` — Predicted vs actual BG outcome accuracy analysis
+
+**Modified files:**
+- `Trio/Sources/Modules/Settings/SettingsStateModel.swift` — Added @Published V2 properties with subscribeSetting() bindings
+- `Trio/Sources/Modules/Settings/View/Subviews/AlgorithmSettings.swift` — Added "V2 Macro Dosing" navigation section
+- `Trio/Sources/Router/Screen.swift` — Added `.v2MacroDosingSettings` and `.v2OutcomeAnalysis` routes
+
+**V2 Macro Dosing Settings Page sections:**
+1. **V2 Macro Engine** — Master toggle, insulin type picker (ultra-rapid/rapid-acting), safe window override stepper
+2. **Meal-Mode SMB Enhancement** — SMB multiplier slider (1-3x), BG floor slider (70-130 mg/dL)
+3. **Garmin Sensitivity** — Enable toggle, Firebase connection status, link to GarminFirestoreStatusView
+4. **Outcome Learning** — Enable toggle, recorded meals count, Claude recalibration toggle
+5. **Analysis** — Link to V2OutcomeAnalysisView for reviewing predicted vs actual outcomes
+6. **Learned Parameters** — Displays current values for carbTau, proteinFactor, fatCoeff, etc. with default/learned badges and reset button
+
+**V2 Outcome Analysis View sections:**
+1. **Overall Accuracy** — Total meals, with BG checkpoints, in-range % at 2h, average BG error at 2h/4h, Garmin-adjusted count, average demand factor
+2. **Curve Phase Accuracy** — Per-phase (carb 0-2h, protein 2-5h, fat 4-8h) average BG and in-range %
+3. **Recent Meals** — Last 20 meals with date/time, macros (C/F/P), demand factor, upfront %, BG checkpoints color-coded (green=in-range, orange=high, red=low), confounding meal warnings
+
+---
+
+## Crono Flow Integration (How V2 Works End-to-End)
+
+This section describes how V2 components are wired into the existing Cronometer dosing flow.
+
+### End-to-End Flow
+
+```
+User taps "Crono" button on dosing page
+  │
+  ├── 1. fetchCronometerMeal() in TreatmentsStateModel
+  │     ├── Fetch meal via Apple Health snapshot deltas (V1 infrastructure)
+  │     ├── If V2 + Garmin enabled:
+  │     │     ├── Create GarminFirestoreService
+  │     │     ├── Fetch GarminContextSnapshot from Firestore
+  │     │     └── Compute insulinDemandFactor via GarminSensitivityModel
+  │     └── Call calculateCronometerRecommendation()
+  │
+  ├── 2. calculateCronometerRecommendation()
+  │     ├── If V2 enabled:
+  │     │     ├── Call MacroAbsorptionEngine.generateEntries()
+  │     │     │     ├── Gamma curve for carbs
+  │     │     │     ├── Sigmoid curve for protein gluconeogenesis
+  │     │     │     ├── Normalized Gaussian for fat insulin resistance
+  │     │     │     └── insulinDemandFactor scales all entries
+  │     │     ├── Extract upfrontCarbs, upfrontPercent from result
+  │     │     ├── Compute FPU carb equivalents from future entries
+  │     │     └── Set FPU duration from safe window + curve duration
+  │     └── If V2 disabled: V1 Warsaw FPU math (legacy path)
+  │
+  ├── 3. CronometerMealRecommendationView displays recommendation
+  │     ├── Shows carbs, fat, protein, demand factor
+  │     ├── Shows upfront bolus vs extended entries
+  │     └── User reviews and taps "Apply"
+  │
+  └── 4. applyCronometerRecommendation()
+        ├── Create carb entries via CarbsStorage (also uses V2 engine)
+        ├── If V2 + outcome learning enabled:
+        │     ├── Create V2MealOutcome with:
+        │     │     ├── Meal macros, curve parameters
+        │     │     ├── Garmin snapshot, demand factor
+        │     │     ├── BG at meal time, CR, ISF
+        │     │     └── BG checkpoints at 2h, 4h, 6h, 8h
+        │     └── Save to V2OutcomeLearningStore
+        └── Apply insulin recommendation
+```
+
+### CarbsStorage Integration (Entry Generation)
+
+When CarbsStorage.processFPU() creates entries, it also uses V2:
+
+```
+processFPU() in CarbsStorage
+  ├── If V2 enabled:
+  │     ├── If Garmin enabled + signed in:
+  │     │     ├── Fetch GarminContextSnapshot
+  │     │     └── Compute insulinDemandFactor
+  │     │     (else demandFactor = 1.0)
+  │     └── Call MacroAbsorptionEngine.generateEntries()
+  │           ├── insulinDemandFactor applied to all entries
+  │           └── Returns curve-shaped CarbEntryStored array
+  └── If V2 disabled: V1 linear FPU distribution
+```
+
+### Dual Integration Points
+
+The V2 engine is called in TWO places, both with Garmin sensitivity:
+
+1. **CarbsStorage.processFPU()** — Creates the actual carb entries stored in the database. This is the "write path" that oref sees.
+2. **TreatmentsStateModel.calculateCronometerRecommendation()** — Calculates the recommendation displayed to the user. This is the "preview path" shown before the user commits.
+
+Both paths use the same `MacroAbsorptionEngine.generateEntries()` with the same Garmin `insulinDemandFactor`, ensuring what the user sees in the recommendation matches what actually gets stored.
+
+---
+
+## Cloud Function Field Mappings
+
+The Cloud Function that processes Garmin Health API webhooks transforms raw field names before storing in Firestore. The `GarminFirestoreService` maps these Firestore field names to the internal `GarminContextSnapshot` model.
+
+### Firestore Path Structure
+
+```
+users/{uid}/garminData/
+  ├── dailySummaries/dates/{YYYY-MM-DD}    (daily activity, stress, heart rate)
+  ├── sleep/dates/{YYYY-MM-DD}              (sleep stages, duration, score)
+  ├── stressDetails/dates/{YYYY-MM-DD}      (stress/body battery timelines)
+  ├── hrv/dates/{YYYY-MM-DD}                (heart rate variability)
+  └── userMetrics/dates/{YYYY-MM-DD}        (VO2 max, fitness age)
+```
+
+All document paths are 6 segments (valid Firestore document paths). The "dates" subcollection under each data type contains documents keyed by calendar date (YYYY-MM-DD).
+
+### Daily Summaries Field Mapping
+
+| Firestore Field | GarminContextSnapshot Field | Notes |
+|-----------------|---------------------------|-------|
+| `restingHeartRate` | `restingHeartRateInBeatsPerMinute` | Cloud Function shortens name |
+| `averageHeartRate` | `averageHeartRateInBeatsPerMinute` | |
+| `stressAverage` | `averageStressLevel` | Renamed |
+| `stressMax` | `maxStressLevel` | |
+| `stressDurationSeconds` | `stressDurationInSeconds` | |
+| `restStressDurationSeconds` | `restStressDurationInSeconds` | |
+| `lowStressDurationSeconds` | `lowStressDurationInSeconds` | |
+| `mediumStressDurationSeconds` | `mediumStressDurationInSeconds` | |
+| `highStressDurationSeconds` | `highStressDurationInSeconds` | |
+| `stressQualifier` | `stressQualifier` | Unchanged |
+| `steps` | `steps` | Unchanged |
+| `activeCalories` | `activeKilocalories` | Renamed |
+| `moderateIntensitySeconds` | `moderateIntensityDurationInSeconds` | |
+| `vigorousIntensitySeconds` | `vigorousIntensityDurationInSeconds` | |
+| `bodyBatteryCharged` | `bodyBatteryChargedValue` | |
+| `bodyBatteryDrained` | `bodyBatteryDrainedValue` | |
+
+### Sleep Field Mapping
+
+| Firestore Field | GarminContextSnapshot Field | Notes |
+|-----------------|---------------------------|-------|
+| `totalMinutes` | `sleepDurationInSeconds` | **Converted: minutes → seconds** |
+| `deepSleepMinutes` | `deepSleepDurationInSeconds` | **Converted: minutes → seconds** |
+| `lightSleepMinutes` | `lightSleepDurationInSeconds` | **Converted: minutes → seconds** |
+| `remSleepMinutes` | `remSleepInSeconds` | **Converted: minutes → seconds** |
+| `awakeMinutes` | `awakeDurationInSeconds` | **Converted: minutes → seconds** |
+| `garminSleepScore` | `sleepScoreValue` | Not `overallSleepScore.value` |
+| `validation` | `sleepValidation` | `AUTO_FINAL`, `ENHANCED_FINAL`, etc. |
+
+### Stress Details (Timeline Extraction)
+
+Stress and body battery are stored as arrays of time-offset objects, not simple values:
+
+```json
+{
+  "stressTimeline": [
+    {"offsetSeconds": 0, "level": 25},
+    {"offsetSeconds": 180, "level": 42},
+    ...
+  ],
+  "bodyBatteryTimeline": [
+    {"offsetSeconds": 0, "value": 85},
+    {"offsetSeconds": 180, "value": 83},
+    ...
+  ]
+}
+```
+
+- **currentBodyBattery**: Last entry (highest offsetSeconds) in `bodyBatteryTimeline`
+- **bodyBatteryAtWake**: First entry (lowest offsetSeconds) in `bodyBatteryTimeline`
+- **currentStressLevel**: Most recent positive (>0) entry in `stressTimeline` (negative values = off-wrist/motion/etc.)
+
+### HRV and User Metrics
+
+| Firestore Field | GarminContextSnapshot Field | Notes |
+|-----------------|---------------------------|-------|
+| `lastNightAvg` | `lastNightAvg` | HRV RMSSD in ms |
+| `lastNight5MinHigh` | `lastNight5MinHigh` | Peak 5-min HRV window |
+| `vo2Max` | `vo2Max` | Double |
+| `fitnessAge` | `fitnessAge` | Int |
+
+---
+
 ## File Reference
 
 ### New Files (V2)
@@ -2186,21 +2480,33 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 | `Trio/Sources/Models/MacroAbsorptionResult.swift` | A | Result struct: upfront carbs, future entries, curve metadata |
 | `Trio/Sources/Services/MacroAdaptiveService.swift` | B | BG-adaptive loop: predicted vs actual, entry scaling, runs BEFORE oref |
 | `Trio/Sources/Models/MealModeState.swift` | B | Meal-mode SMB evaluation with safety gates |
-| `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` | C | Firestore queries for Garmin health data |
-| `Trio/Sources/Models/GarminContextSnapshot.swift` | C | Structured Garmin data at meal time |
+| `Trio/Sources/Services/Garmin/GarminFirestoreService.swift` | C | Firestore queries, GarminFirebaseManager (secondary FirebaseApp + auth) |
+| `Trio/Sources/Services/Garmin/GarminFirebaseConfig.swift` | C | Build-time placeholder config (replaced by GitHub secrets during CI) |
+| `Trio/Sources/Models/GarminContextSnapshot.swift` | C | Structured Garmin data at meal time (Garmin Health API v1.2.3 field names) |
 | `Trio/Sources/Models/GarminSensitivityModel.swift` | D | Rule-based sensitivity factor from Garmin context |
 | `Trio/Sources/Models/MacrosOnBoardTracker.swift` | E | MOB state machine, active meal tracking, dosing state, double-dose protection |
 | `Trio/Sources/Modules/Treatments/View/MealDetectedBannerView.swift` | E | In-app recommendation banner with split dosing display |
 | `Trio/Sources/Modules/Treatments/View/BolusAdjustSliderView.swift` | E | Upfront % slider and meal SMB multiplier slider |
 | `Trio/Sources/Services/AI/SensitivityRecalibrationService.swift` | G | Claude weekly recalibration |
+| `Trio/Sources/Modules/Settings/View/Subviews/GarminFirestoreStatusView.swift` | C | Connection status test UI (config / auth / data checks) |
+| `Trio/Sources/Services/V2CurveOutcomeLearning.swift` | F | V2MealOutcome, V2BGCheckpoint, V2OutcomeLearningStore persistence |
+| `Trio/Sources/Modules/Settings/View/Subviews/V2MacroDosingSettingsView.swift` | H | All V2 settings: engine, SMB, Garmin, learning, parameters |
+| `Trio/Sources/Modules/Settings/View/Subviews/V2OutcomeAnalysisView.swift` | H | Predicted vs actual BG outcome accuracy analysis |
 
 ### Modified Files (V2)
 
 | File | Phase | Change |
 |------|-------|--------|
-| `Trio/Sources/APS/Storage/CarbsStorage.swift` | A, B | `processFPU()` calls `MacroAbsorptionEngine`; method to update future entries by mealID |
+| `Trio/Sources/APS/Storage/CarbsStorage.swift` | A, D | `processFPU()` calls `MacroAbsorptionEngine`; Garmin demand factor wired into entry generation |
 | `Trio/Sources/APS/OpenAPS/OpenAPS.swift` | B | Hook adaptive service BEFORE oref in loop cycle; pass effectiveMaxSMB |
-| `Trio/Sources/Modules/Treatments/TreatmentsStateModel.swift` | D, E | Query Garmin, wire MOB tracker, display sensitivity info |
+| `Trio/Sources/Application/AppDelegate.swift` | C | Call `GarminFirebaseManager.configureAndSignIn()` after default Firebase init |
+| `.github/workflows/build_trio.yml` | C | "Inject Garmin Firebase Config" step: `sed` replaces placeholders from 8 GitHub secrets |
+| `Trio/Sources/Router/Screen.swift` | C, H | Added `.garminFirestoreStatus`, `.v2MacroDosingSettings`, `.v2OutcomeAnalysis` routes |
+| `Trio/Sources/Modules/Settings/View/Subviews/ServicesView.swift` | C | Added Garmin Health Data row with connection status indicator |
+| `Trio/Sources/Models/TrioSettings.swift` | All | V2 settings: `useV2MacroAbsorption`, `insulinType`, `garminEnabled`, etc. |
+| `Trio/Sources/Modules/Treatments/TreatmentsStateModel.swift` | A, D, F | V2 engine in Crono recommendation, Garmin demand factor fetch, V2MealOutcome recording |
+| `Trio/Sources/Modules/Settings/SettingsStateModel.swift` | H | @Published V2 properties with subscribeSetting() bindings |
+| `Trio/Sources/Modules/Settings/View/Subviews/AlgorithmSettings.swift` | H | Added "V2 Macro Dosing" navigation section |
 | `Trio/Sources/Services/HealthKit/NutritionHealthService.swift` | E | Trigger MOB on observer fire |
 | `Trio/Sources/Modules/Home/HomeRootView.swift` | E | Display meal detection banner, double-dose warnings |
 | `Trio/Sources/Models/CronometerRecommendation.swift` | F | Store curve params + Garmin context + split dosing info |
@@ -2256,9 +2562,11 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 ### 7. Firestore for Garmin Data (Not HealthKit)
 
-**Decision:** Read Garmin data from existing Firestore database rather than Apple HealthKit.
+**Decision:** Read Garmin data from the user's existing Firestore database via a secondary Firebase app, rather than Apple HealthKit.
 
-**Reason:** HealthKit only receives a subset of Garmin data (steps, HR samples, sleep duration, workouts). The most important signals for sensitivity — Body Battery, stress scores, HRV status, training load, detailed sleep stages — are Garmin-proprietary and never reach HealthKit. The Firestore database already has all of this via the Garmin Health API, structured and queryable.
+**Reason:** HealthKit only receives a subset of Garmin data (steps, HR samples, sleep duration, workouts). The most important signals for sensitivity — Body Battery, stress scores, HRV status, training load, detailed sleep stages — are Garmin-proprietary and never reach HealthKit. The Firestore database already has all of this via the Garmin Health API v1.2.3, structured and queryable.
+
+**Implementation:** Since Trio already uses Firebase for Crashlytics, we use `FirebaseApp.configure(name: "garmin", options:)` to create a secondary app instance pointing to the user's personal Firebase project. Firebase config values are injected at build time from GitHub secrets via `sed` replacement in the CI workflow. Authentication uses email/password (`Auth.auth(app:).signIn(withEmail:password:)`) at app launch. If secrets are not configured, the entire Garmin integration is a no-op.
 
 ### 8. Curve-Driven Split Dosing (Not Full Upfront Bolus)
 
@@ -2371,6 +2679,23 @@ V2 builds on V1's infrastructure — it does NOT replace it. The V1 components r
 | CronometerMealRecommendation | **Extended** with curve params + Garmin context + split dosing info |
 | Outcome backfill | **Extended** with per-curve error analysis |
 | Late dosing / meal picker | **Kept** — still useful for forgotten doses |
-| Crono button / recommendation view | **Enhanced** with split dosing display + sensitivity info + sliders |
+| Crono button / recommendation view | **Enhanced** with V2 engine, Garmin demand factor, outcome recording |
+| V1 Warsaw FPU math | **Replaced** by three-curve engine when V2 enabled (V1 path still available as fallback) |
 
 The V1 document (`CRONOMETER_INTEGRATION_AND_AUTO_DOSING_VISION.md`) remains the reference for Phases 1-5b. This V2 document covers the next generation.
+
+### V2 Integration Summary (v2.5)
+
+All V2 components are now wired together through the existing Crono dosing flow:
+
+| Component | Integration Point | Status |
+|-----------|------------------|--------|
+| MacroAbsorptionEngine | CarbsStorage.processFPU() + TreatmentsStateModel.calculateCronometerRecommendation() | **Wired** |
+| GarminSensitivityModel | CarbsStorage (entry generation) + TreatmentsStateModel (Crono preview) | **Wired** |
+| GarminFirestoreService | Fetched before both CarbsStorage and Crono recommendation | **Wired** |
+| V2OutcomeLearningStore | TreatmentsStateModel.applyCronometerRecommendation() records V2MealOutcome | **Wired** |
+| V2MacroDosingSettingsView | Settings → Algorithm → V2 Macro Dosing | **Wired** |
+| V2OutcomeAnalysisView | Settings → Algorithm → V2 Macro Dosing → Analysis | **Wired** |
+| MacroAdaptiveService | Loop cycle (BEFORE oref) | Coded, not yet wired |
+| MacrosOnBoardTracker | HK observer → banner display | Coded, not yet wired |
+| SensitivityRecalibrationService | Weekly Claude analysis | Coded, not yet wired |

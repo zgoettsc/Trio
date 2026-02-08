@@ -36,7 +36,9 @@ struct MacroAbsorptionResult {
 
 /// Insulin type affects the default safe window for split dosing.
 /// Faster insulins need shorter windows to avoid outpacing carb absorption.
-enum InsulinType: String, Codable {
+/// V2 insulin type classification for safe window calculation.
+/// Named V2InsulinType to avoid collision with LoopKit.InsulinType.
+enum V2InsulinType: String, Codable {
     case ultraRapid    // Fiasp, Lyumjev — peaks at 30-45 min
     case rapidActing   // Humalog, Novolog — peaks at 60-90 min
 
@@ -78,7 +80,7 @@ struct MacroAbsorptionEngine {
         mealTime: Date,
         insulinDemandFactor: Double = 1.0,
         upfrontPercent: Double? = nil,
-        insulinType: InsulinType = .rapidActing,
+        insulinType: V2InsulinType = .rapidActing,
         individualAdjustmentFactor: Double = 0.5,
         safeWindowOverride: Int? = nil
     ) -> MacroAbsorptionResult {

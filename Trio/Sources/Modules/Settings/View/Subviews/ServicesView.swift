@@ -27,6 +27,25 @@ struct ServicesView: BaseView {
                     if HKHealthStore.isHealthDataAvailable() {
                         Text("Apple Health").navigationLink(to: .healthkit, from: self)
                     }
+                    HStack {
+                        Text("Garmin Health Data")
+                        Spacer()
+                        ZStack {
+                            if GarminFirebaseConstants.isConfigured, GarminFirebaseManager.isSignedIn {
+                                Image(systemName: "network")
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green).font(.caption2)
+                                    .offset(x: 9, y: 6)
+                            } else if GarminFirebaseConstants.isConfigured {
+                                Image(systemName: "network")
+                                Image(systemName: "questionmark.circle.fill")
+                                    .foregroundColor(.orange).font(.caption2)
+                                    .offset(x: 9, y: 6)
+                            } else {
+                                Image(systemName: "network.slash")
+                            }
+                        }
+                    }.navigationLink(to: .garminFirestoreStatus, from: self)
                 }
             )
             .listRowBackground(Color.chart)

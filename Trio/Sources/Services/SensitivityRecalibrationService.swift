@@ -214,11 +214,11 @@ final class SensitivityRecalibrationService {
             // Garmin context
             if let garmin = outcome.garminSnapshot {
                 var garminParts: [String] = []
-                if let sleep = garmin.sleepScore { garminParts.append("sleep:\(sleep)") }
+                if let sleep = garmin.sleepScoreValue { garminParts.append("sleep:\(sleep)") }
                 if let bb = garmin.currentBodyBattery { garminParts.append("BB:\(bb)") }
-                if let stress = garmin.currentStress { garminParts.append("stress:\(stress)") }
-                if let steps = garmin.stepsYesterday { garminParts.append("stepsYest:\(steps)") }
-                if let cal = garmin.activeCaloriesYesterday { garminParts.append("calYest:\(cal)") }
+                if let stress = garmin.currentStressLevel { garminParts.append("stress:\(stress)") }
+                if let steps = garmin.yesterdaySteps { garminParts.append("stepsYest:\(steps)") }
+                if let cal = garmin.yesterdayActiveKilocalories { garminParts.append("calYest:\(cal)") }
                 if !garminParts.isEmpty {
                     prompt += "Garmin: \(garminParts.joined(separator: ", "))\n"
                 }

@@ -17,6 +17,16 @@ extension Settings {
         @Published var serviceUIType: ServiceUI.Type?
         @Published var setupTidepool = false
 
+        // V2 Macro Absorption Engine
+        @Published var useV2MacroAbsorption = false
+        @Published var insulinType = "rapidActing"
+        @Published var v2SafeWindowOverride: Int?
+        @Published var mealModeSMBMultiplier: Decimal = 2.0
+        @Published var mealModeBGFloor: Decimal = 90
+        @Published var garminEnabled = false
+        @Published var v2OutcomeLearningEnabled = true
+        @Published var claudeRecalibrationEnabled = true
+
         private(set) var buildNumber = ""
         private(set) var versionNumber = ""
         private(set) var branch = ""
@@ -27,6 +37,16 @@ extension Settings {
 
             subscribeSetting(\.debugOptions, on: $debugOptions) { debugOptions = $0 }
             subscribeSetting(\.closedLoop, on: $closedLoop) { closedLoop = $0 }
+
+            // V2 Macro Absorption Engine settings
+            subscribeSetting(\.useV2MacroAbsorption, on: $useV2MacroAbsorption) { useV2MacroAbsorption = $0 }
+            subscribeSetting(\.insulinType, on: $insulinType) { insulinType = $0 }
+            subscribeSetting(\.v2SafeWindowMinutes, on: $v2SafeWindowOverride) { v2SafeWindowOverride = $0 }
+            subscribeSetting(\.mealModeSMBMultiplier, on: $mealModeSMBMultiplier) { mealModeSMBMultiplier = $0 }
+            subscribeSetting(\.mealModeBGFloor, on: $mealModeBGFloor) { mealModeBGFloor = $0 }
+            subscribeSetting(\.garminEnabled, on: $garminEnabled) { garminEnabled = $0 }
+            subscribeSetting(\.v2OutcomeLearningEnabled, on: $v2OutcomeLearningEnabled) { v2OutcomeLearningEnabled = $0 }
+            subscribeSetting(\.claudeRecalibrationEnabled, on: $claudeRecalibrationEnabled) { claudeRecalibrationEnabled = $0 }
 
             broadcaster.register(SettingsObserver.self, observer: self)
 
