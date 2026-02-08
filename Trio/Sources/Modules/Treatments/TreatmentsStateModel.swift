@@ -793,9 +793,13 @@ extension Treatments {
                         carbs: appliedCarbs,
                         fat: appliedFat,
                         protein: appliedProtein,
+                        fiber: 0,
                         tauCarb: outcomeParams.effectiveCarbTau,
                         proteinFactor: outcomeParams.effectiveProteinFactor,
-                        fatTotalEquiv: appliedFat * outcomeParams.effectiveFatTotalCoeff,
+                        fatTotalEquiv: MacroAbsorptionEngine.fatCarbEquivalent(
+                            fatGrams: appliedFat,
+                            maxCoeff: outcomeParams.effectiveFatTotalCoeff
+                        ),
                         upfrontPercent: upfrontPct ?? 0.65,
                         curveSuggestedPercent: upfrontPct ?? 0.65,
                         insulinDemandFactor: demandFactor,
@@ -807,12 +811,12 @@ extension Treatments {
                         mealSMBMultiplier: smbMultiplier,
                         mealModeWasActive: true,
                         adaptiveAdjustments: [],
-                        checkpoints: [
-                            V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
-                            V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true, curvePhase: .protein),
-                            V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true, curvePhase: .fat),
-                            V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true, curvePhase: .fat),
-                        ],
+                        checkpoints: V2BGCheckpoint.computePhases(
+                            carbs: appliedCarbs,
+                            fat: appliedFat,
+                            protein: appliedProtein,
+                            proteinThreshold: outcomeParams.effectiveProteinThreshold
+                        ),
                         hasConfoundingMeal: false
                     )
                     V2OutcomeLearningStore.shared.save(outcome)
