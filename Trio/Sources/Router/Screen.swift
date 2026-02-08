@@ -54,6 +54,8 @@ enum Screen: Identifiable, Hashable {
     case therapyProfileEditor(profile: TherapyProfile, isNew: Bool)
     case nutritionAnalysis
     case garminFirestoreStatus
+    case v2MacroDosingSettings
+    case v2OutcomeAnalysis
 
     var id: Int { String(reflecting: self).hashValue }
 }
@@ -177,6 +179,10 @@ extension Screen {
             NutritionAnalysisView(resolver: resolver)
         case .garminFirestoreStatus:
             GarminFirestoreStatusView()
+        case .v2MacroDosingSettings:
+            V2MacroDosingSettingsView(resolver: resolver, state: Settings.StateModel())
+        case .v2OutcomeAnalysis:
+            V2OutcomeAnalysisView()
         }
     }
 

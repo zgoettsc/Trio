@@ -218,12 +218,22 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                 let adjustmentFactor = Double(truncating: trioSettings.individualAdjustmentFactor as NSDecimalNumber)
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
 
+                // Fetch Garmin sensitivity factor if enabled
+                var demandFactor = 1.0
+                if trioSettings.garminEnabled, GarminFirebaseManager.isSignedIn {
+                    let service = GarminFirestoreService()
+                    let snapshot = await service.fetchContext()
+                    let sensitivityResult = GarminSensitivityModel.computeDemandFactor(from: snapshot)
+                    demandFactor = sensitivityResult.insulinDemandFactor
+                    debug(.service, "Garmin demand factor: \(demandFactor) (\(sensitivityResult.contributions.count) contributions)")
+                }
+
                 let result = MacroAbsorptionEngine.generateEntries(
                     carbs: carbsValue,
                     fat: fatValue,
                     protein: proteinValue,
                     mealTime: lastEntry.actualDate ?? lastEntry.createdAt,
-                    insulinDemandFactor: 1.0, // Garmin factor applied at meal detection time, not here
+                    insulinDemandFactor: demandFactor,
                     upfrontPercent: nil, // Use curve-calculated default
                     insulinType: insulinType,
                     individualAdjustmentFactor: adjustmentFactor,

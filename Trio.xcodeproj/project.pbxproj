@@ -558,6 +558,8 @@
 		DD1745192C543B5700211FAC /* NotificationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1745182C543B5700211FAC /* NotificationsView.swift */; };
 		DD17451D2C543C5F00211FAC /* ServicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD17451C2C543C5F00211FAC /* ServicesView.swift */; };
 		V2B00C0000000000000000C /* GarminFirestoreStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00C0000000000000000C /* GarminFirestoreStatusView.swift */; };
+		V2B00D00000000000000000D /* V2MacroDosingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00D00000000000000000D /* V2MacroDosingSettingsView.swift */; };
+		V2B00E00000000000000000E /* V2OutcomeAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00E00000000000000000E /* V2OutcomeAnalysisView.swift */; };
 		DD1745202C55523E00211FAC /* SMBSettingsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD17451F2C55523E00211FAC /* SMBSettingsDataFlow.swift */; };
 		DD1745222C55524800211FAC /* SMBSettingsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1745212C55524800211FAC /* SMBSettingsProvider.swift */; };
 		DD1745242C55526000211FAC /* SMBSettingsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1745232C55526000211FAC /* SMBSettingsStateModel.swift */; };
@@ -1439,6 +1441,8 @@
 		DD1745182C543B5700211FAC /* NotificationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsView.swift; sourceTree = "<group>"; };
 		DD17451C2C543C5F00211FAC /* ServicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServicesView.swift; sourceTree = "<group>"; };
 		V2F00C0000000000000000C /* GarminFirestoreStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminFirestoreStatusView.swift; sourceTree = "<group>"; };
+		V2F00D00000000000000000D /* V2MacroDosingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2MacroDosingSettingsView.swift; sourceTree = "<group>"; };
+		V2F00E00000000000000000E /* V2OutcomeAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2OutcomeAnalysisView.swift; sourceTree = "<group>"; };
 		DD17451F2C55523E00211FAC /* SMBSettingsDataFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsDataFlow.swift; sourceTree = "<group>"; };
 		DD1745212C55524800211FAC /* SMBSettingsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsProvider.swift; sourceTree = "<group>"; };
 		DD1745232C55526000211FAC /* SMBSettingsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsStateModel.swift; sourceTree = "<group>"; };
@@ -3493,6 +3497,8 @@
 				DD1745182C543B5700211FAC /* NotificationsView.swift */,
 				DD17451C2C543C5F00211FAC /* ServicesView.swift */,
 				V2F00C0000000000000000C /* GarminFirestoreStatusView.swift */,
+				V2F00D00000000000000000D /* V2MacroDosingSettingsView.swift */,
+				V2F00E00000000000000000E /* V2OutcomeAnalysisView.swift */,
 				DD1745362C55B74200211FAC /* AlgorithmSettings.swift */,
 			);
 			path = Subviews;
@@ -4647,6 +4653,8 @@
 				583684082BD195A700070A60 /* Determination.swift in Sources */,
 				DD17451D2C543C5F00211FAC /* ServicesView.swift in Sources */,
 				V2B00C0000000000000000C /* GarminFirestoreStatusView.swift in Sources */,
+				V2B00D00000000000000000D /* V2MacroDosingSettingsView.swift in Sources */,
+				V2B00E00000000000000000E /* V2OutcomeAnalysisView.swift in Sources */,
 				38BF021B25E7D06400579895 /* PumpSettingsView.swift in Sources */,
 				3811DEEA25CA063400A708ED /* SyncAccess.swift in Sources */,
 				190EBCC829FF13AA00BA767D /* UserInterfaceSettingsStateModel.swift in Sources */,

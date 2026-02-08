@@ -28,6 +28,13 @@ struct AlgorithmSettings: BaseView {
                     Text("Additionals").navigationLink(to: .algorithmAdvancedSettings, from: self)
                 }
             ).listRowBackground(Color.chart)
+
+            Section(
+                header: Text("V2 Macro Dosing"),
+                content: {
+                    Text("V2 Macro Dosing").navigationLink(to: .v2MacroDosingSettings, from: self)
+                }
+            ).listRowBackground(Color.chart)
         }
         .scrollContentBackground(.hidden)
         .background(appState.trioBackgroundColor(for: colorScheme))
