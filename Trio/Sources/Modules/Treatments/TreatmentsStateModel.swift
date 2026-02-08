@@ -707,45 +707,56 @@ extension Treatments {
             let trioSettings = settingsManager.settings
             if trioSettings.useV2MacroAbsorption, trioSettings.v2OutcomeLearningEnabled {
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
-                let adjustment = NSDecimalNumber(decimal: trioSettings.individualAdjustmentFactor).doubleValue
 
-                // Retrieve Garmin snapshot (cached from recommendation fetch)
-                var garminSnapshot: GarminContextSnapshot?
-                if trioSettings.garminEnabled, GarminFirebaseManager.isSignedIn {
-                    let service = GarminFirestoreService()
-                    garminSnapshot = await service.fetchContext() // uses cache
+                // Capture values for the async block
+                let demandFactor = v2DemandFactor
+                let upfrontPct = v2UpfrontPercent
+                let safeWindow = trioSettings.v2SafeWindowMinutes ?? insulinType.defaultSafeWindowMinutes
+                let smbMultiplier = NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue
+                let bgAtMeal = Int(NSDecimalNumber(decimal: currentBG).intValue)
+                let crAtMeal = NSDecimalNumber(decimal: currentCarbRatio).doubleValue
+                let isfAtMeal = NSDecimalNumber(decimal: currentISF).doubleValue
+                let garminEnabled = trioSettings.garminEnabled
+
+                Task {
+                    // Retrieve Garmin snapshot (cached from recommendation fetch)
+                    var garminSnapshot: GarminContextSnapshot?
+                    if garminEnabled, GarminFirebaseManager.isSignedIn {
+                        let service = GarminFirestoreService()
+                        garminSnapshot = await service.fetchContext() // uses cache
+                    }
+
+                    let outcome = V2MealOutcome(
+                        id: UUID(),
+                        date: Date(),
+                        mealID: UUID().uuidString,
+                        carbs: appliedCarbs,
+                        fat: appliedFat,
+                        protein: appliedProtein,
+                        tauCarb: 35, // base, will be personalized
+                        proteinFactor: 0.35,
+                        fatTotalEquiv: appliedFat * 0.69,
+                        upfrontPercent: upfrontPct ?? 0.65,
+                        curveSuggestedPercent: upfrontPct ?? 0.65,
+                        insulinDemandFactor: demandFactor,
+                        safeWindowMinutes: safeWindow,
+                        garminSnapshot: garminSnapshot,
+                        bgAtMeal: bgAtMeal,
+                        carbRatioAtMeal: crAtMeal,
+                        isfAtMeal: isfAtMeal,
+                        mealSMBMultiplier: smbMultiplier,
+                        mealModeWasActive: true,
+                        adaptiveAdjustments: [],
+                        checkpoints: [
+                            V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
+                            V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true, curvePhase: .protein),
+                            V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true, curvePhase: .fat),
+                            V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true, curvePhase: .fat),
+                        ],
+                        hasConfoundingMeal: false
+                    )
+                    V2OutcomeLearningStore.shared.save(outcome)
                 }
-
-                let outcome = V2MealOutcome(
-                    id: UUID(),
-                    date: Date(),
-                    mealID: UUID().uuidString,
-                    carbs: appliedCarbs,
-                    fat: appliedFat,
-                    protein: appliedProtein,
-                    tauCarb: 35, // base, will be personalized
-                    proteinFactor: 0.35,
-                    fatTotalEquiv: appliedFat * 0.69,
-                    upfrontPercent: v2UpfrontPercent ?? 0.65,
-                    curveSuggestedPercent: v2UpfrontPercent ?? 0.65,
-                    insulinDemandFactor: v2DemandFactor,
-                    safeWindowMinutes: trioSettings.v2SafeWindowMinutes ?? insulinType.defaultSafeWindowMinutes,
-                    garminSnapshot: garminSnapshot,
-                    bgAtMeal: Int(NSDecimalNumber(decimal: currentBG).intValue),
-                    carbRatioAtMeal: NSDecimalNumber(decimal: currentCarbRatio).doubleValue,
-                    isfAtMeal: NSDecimalNumber(decimal: currentISF).doubleValue,
-                    mealSMBMultiplier: NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue,
-                    mealModeWasActive: true,
-                    adaptiveAdjustments: [],
-                    checkpoints: [
-                        V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
-                        V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true, curvePhase: .protein),
-                        V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true, curvePhase: .fat),
-                        V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true, curvePhase: .fat),
-                    ],
-                    hasConfoundingMeal: false
-                )
-                V2OutcomeLearningStore.shared.save(outcome)
             }
 
             // Dismiss the sheet
