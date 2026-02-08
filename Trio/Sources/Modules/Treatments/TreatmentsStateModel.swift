@@ -449,6 +449,11 @@ extension Treatments {
                 let _ = store.recalculateFactorFromOutcomes(
                     currentCarbRatio: NSDecimalNumber(decimal: currentCarbRatio).doubleValue
                 )
+
+                // V2 outcome backfill: fill BG checkpoints for V2 meal outcomes
+                await V2OutcomeLearningStore.shared.backfillOutcomes(
+                    context: CoreDataStack.shared.newTaskContext()
+                )
             }
 
             isFetchingCronometerMeal = false
@@ -665,6 +670,11 @@ extension Treatments {
                 await store.backfillOutcomes(context: CoreDataStack.shared.newTaskContext())
                 let _ = store.recalculateFactorFromOutcomes(
                     currentCarbRatio: NSDecimalNumber(decimal: currentCarbRatio).doubleValue
+                )
+
+                // V2 outcome backfill: fill BG checkpoints for V2 meal outcomes
+                await V2OutcomeLearningStore.shared.backfillOutcomes(
+                    context: CoreDataStack.shared.newTaskContext()
                 )
             }
 

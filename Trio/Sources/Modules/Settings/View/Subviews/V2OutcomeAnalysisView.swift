@@ -97,7 +97,15 @@ struct V2OutcomeAnalysisView: View {
         .navigationTitle("Outcome Accuracy")
         .navigationBarTitleDisplayMode(.automatic)
         .onAppear {
-            outcomes = V2OutcomeLearningStore.shared.loadAll()
+            // Backfill BG checkpoints first, then reload
+            Task {
+                await V2OutcomeLearningStore.shared.backfillOutcomes(
+                    context: CoreDataStack.shared.newTaskContext()
+                )
+                await MainActor.run {
+                    outcomes = V2OutcomeLearningStore.shared.loadAll()
+                }
+            }
         }
     }
 
