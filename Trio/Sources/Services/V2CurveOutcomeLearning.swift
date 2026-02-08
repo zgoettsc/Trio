@@ -503,11 +503,46 @@ final class V2OutcomeLearningStore {
     // MARK: - Comprehensive Data Export
 
     /// Build a full data export for every recorded meal: pre-meal BG trace,
-    /// all V2 engine inputs, all curve parameters, Garmin context, adaptive
-    /// adjustments, scheduled dosing entries, and BG outcomes at every checkpoint.
+    /// all V2 engine inputs, all curve parameters, Garmin context with contribution
+    /// breakdown, user settings, scheduled dosing entries, and BG outcomes.
     func buildComprehensiveExport(context: NSManagedObjectContext) async -> V2ComprehensiveExport {
         let outcomes = loadAll()
         let params = loadParameters()
+
+        // Snapshot current user settings at export time
+        let storage = BaseFileStorage()
+        let trioSettings = storage.retrieve(OpenAPS.Trio.settings, as: TrioSettings.self)
+            ?? TrioSettings()
+        let preferences = storage.retrieve(OpenAPS.Settings.preferences, as: Preferences.self)
+            ?? Preferences()
+
+        let settingsSnapshot = V2UserSettingsSnapshot(
+            // V2 engine settings
+            useV2MacroAbsorption: trioSettings.useV2MacroAbsorption,
+            insulinType: trioSettings.insulinType,
+            v2SafeWindowMinutesOverride: trioSettings.v2SafeWindowMinutes,
+            mealModeSMBMultiplier: Double(truncating: trioSettings.mealModeSMBMultiplier as NSDecimalNumber),
+            mealModeBGFloor: Double(truncating: trioSettings.mealModeBGFloor as NSDecimalNumber),
+            garminEnabled: trioSettings.garminEnabled,
+            v2OutcomeLearningEnabled: trioSettings.v2OutcomeLearningEnabled,
+            claudeRecalibrationEnabled: trioSettings.claudeRecalibrationEnabled,
+            // OpenAPS/oref settings that affect dosing
+            maxIOB: Double(truncating: preferences.maxIOB as NSDecimalNumber),
+            maxSMBBasalMinutes: Double(truncating: preferences.maxSMBBasalMinutes as NSDecimalNumber),
+            maxUAMSMBBasalMinutes: Double(truncating: preferences.maxUAMSMBBasalMinutes as NSDecimalNumber),
+            smbDeliveryRatio: Double(truncating: preferences.smbDeliveryRatio as NSDecimalNumber),
+            smbInterval: Double(truncating: preferences.smbInterval as NSDecimalNumber),
+            insulinCurve: preferences.curve.rawValue,
+            insulinPeakTime: Double(truncating: preferences.insulinPeakTime as NSDecimalNumber),
+            useCustomPeakTime: preferences.useCustomPeakTime,
+            maxCOB: Double(truncating: preferences.maxCOB as NSDecimalNumber),
+            enableSMBAlways: preferences.enableSMBAlways,
+            enableSMBWithCOB: preferences.enableSMBWithCOB,
+            enableSMBAfterCarbs: preferences.enableSMBAfterCarbs,
+            enableUAM: preferences.enableUAM,
+            autosensMax: Double(truncating: preferences.autosensMax as NSDecimalNumber),
+            autosensMin: Double(truncating: preferences.autosensMin as NSDecimalNumber)
+        )
 
         var mealExports: [V2MealExportRecord] = []
 
@@ -534,11 +569,42 @@ final class V2OutcomeLearningStore {
                 context: context
             )
 
+            // Re-derive Garmin sensitivity contributions from stored snapshot
+            let garminResult = GarminSensitivityModel.computeDemandFactor(from: outcome.garminSnapshot)
+            let garminContributions = garminResult.contributions.map {
+                V2GarminContribution(
+                    metric: $0.metric,
+                    value: $0.value,
+                    impact: $0.impact,
+                    description: $0.description
+                )
+            }
+
+            // Compute dosing summary from stored outcome fields
+            let upfrontCarbs = outcome.carbs * outcome.upfrontPercent * outcome.insulinDemandFactor
+            let proteinEquiv = outcome.protein * outcome.proteinFactor
+            let futureEntrySum = scheduled.reduce(0.0) { $0 + $1.carbEquivalent }
+            let totalEffectiveCarbs = upfrontCarbs + futureEntrySum
+
+            let dosingSummary = V2DosingSummary(
+                upfrontCarbsForBolus: upfrontCarbs,
+                upfrontInsulin: outcome.carbRatioAtMeal > 0
+                    ? upfrontCarbs / outcome.carbRatioAtMeal : 0,
+                proteinGlucoEquivalent: proteinEquiv,
+                fatCarbEquivalent: outcome.fatTotalEquiv,
+                totalEffectiveCarbs: totalEffectiveCarbs,
+                totalScheduledEntries: scheduled.count,
+                pendingEntries: scheduled.filter { !$0.isAbsorbed }.count,
+                absorbedEntries: scheduled.filter { $0.isAbsorbed }.count
+            )
+
             let record = V2MealExportRecord(
                 outcome: outcome,
                 preMealBGTrace: preMealBG,
                 postMealBGTrace: postMealBG,
-                scheduledEntries: scheduled
+                scheduledEntries: scheduled,
+                garminContributions: garminContributions,
+                dosingSummary: dosingSummary
             )
             mealExports.append(record)
         }
@@ -548,6 +614,7 @@ final class V2OutcomeLearningStore {
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
             totalMeals: outcomes.count,
             currentParameters: params,
+            userSettings: settingsSnapshot,
             meals: mealExports
         )
     }
@@ -639,9 +706,59 @@ struct V2ScheduledEntry: Codable {
     let isFPU: Bool             // true for V2 curve entries (protein/fat/split-carb)
 }
 
+/// Garmin sensitivity contribution — one metric's effect on insulin demand.
+struct V2GarminContribution: Codable {
+    let metric: String          // e.g. "Sleep Score", "Body Battery", "Stress"
+    let value: String           // e.g. "42/100", "< 15"
+    let impact: Double          // e.g. -0.22 (negative = more resistant)
+    let description: String     // e.g. "Terrible sleep: 22% more resistant"
+}
+
+/// Computed dosing summary — what the V2 engine actually decided for this meal.
+struct V2DosingSummary: Codable {
+    let upfrontCarbsForBolus: Double    // carbs * upfrontPercent * demandFactor
+    let upfrontInsulin: Double          // upfrontCarbs / carbRatio (units)
+    let proteinGlucoEquivalent: Double  // protein * proteinFactor (grams carb-equiv)
+    let fatCarbEquivalent: Double       // from nonlinear ramp (grams carb-equiv)
+    let totalEffectiveCarbs: Double     // upfront + all scheduled entries
+    let totalScheduledEntries: Int      // count of entries in Core Data
+    let pendingEntries: Int             // entries still in the future
+    let absorbedEntries: Int            // entries already past
+}
+
+/// User settings snapshot at export time — all settings that affect V2 dosing.
+struct V2UserSettingsSnapshot: Codable {
+    // V2 engine settings
+    let useV2MacroAbsorption: Bool
+    let insulinType: String             // "rapidActing" or "ultraRapid"
+    let v2SafeWindowMinutesOverride: Int?
+    let mealModeSMBMultiplier: Double
+    let mealModeBGFloor: Double
+    let garminEnabled: Bool
+    let v2OutcomeLearningEnabled: Bool
+    let claudeRecalibrationEnabled: Bool
+
+    // OpenAPS/oref settings that affect insulin delivery
+    let maxIOB: Double
+    let maxSMBBasalMinutes: Double
+    let maxUAMSMBBasalMinutes: Double
+    let smbDeliveryRatio: Double
+    let smbInterval: Double             // minutes between SMBs
+    let insulinCurve: String            // "rapidActing", "ultraRapid", "bilinear"
+    let insulinPeakTime: Double         // minutes
+    let useCustomPeakTime: Bool
+    let maxCOB: Double
+    let enableSMBAlways: Bool
+    let enableSMBWithCOB: Bool
+    let enableSMBAfterCarbs: Bool
+    let enableUAM: Bool
+    let autosensMax: Double
+    let autosensMin: Double
+}
+
 /// Complete export record for one meal — everything the system knew and did.
 struct V2MealExportRecord: Codable {
-    // The full outcome record (macros, params, Garmin, checkpoints, adjustments)
+    // The full outcome record (macros, params, Garmin snapshot, checkpoints, adjustments)
     let outcome: V2MealOutcome
 
     // 2h pre-meal BG trace — every CGM reading from meal-2h to meal time
@@ -651,9 +768,15 @@ struct V2MealExportRecord: Codable {
     let postMealBGTrace: [V2BGReading]
 
     // All scheduled dosing entries for this meal — past (absorbed) and future (pending).
-    // Shows exactly what the V2 engine wrote to Core Data for oref to process:
-    // carb split entries, protein gluconeogenesis entries, fat resistance entries.
+    // Shows exactly what the V2 engine wrote to Core Data for oref to process.
     let scheduledEntries: [V2ScheduledEntry]
+
+    // Garmin sensitivity breakdown — which metrics affected the demand factor and by how much.
+    // Re-derived from the stored GarminContextSnapshot at export time.
+    let garminContributions: [V2GarminContribution]
+
+    // Computed dosing summary — what the engine decided (upfront insulin, effective carbs, etc.)
+    let dosingSummary: V2DosingSummary
 }
 
 /// Top-level comprehensive export — the whole system picture.
@@ -662,5 +785,6 @@ struct V2ComprehensiveExport: Codable {
     let appVersion: String
     let totalMeals: Int
     let currentParameters: V2PersonalCurveParameters
+    let userSettings: V2UserSettingsSnapshot
     let meals: [V2MealExportRecord]
 }
