@@ -9,6 +9,7 @@ public extension CarbEntryStored {
     @NSManaged var carbs: Double
     @NSManaged var date: Date?
     @NSManaged var fat: Double
+    @NSManaged var fiber: Double
     @NSManaged var fpuID: UUID?
     @NSManaged var id: UUID?
     @NSManaged var isFPU: Bool

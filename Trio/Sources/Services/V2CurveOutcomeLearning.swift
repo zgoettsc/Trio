@@ -152,6 +152,7 @@ struct V2PersonalCurveParameters: Codable {
     var proteinPlateau: Double?     // base: 40g, learned
     var proteinFactor: Double?      // base: 0.35, learned
     var fatTotalCoeff: Double?      // base: 0.69, learned
+    var fiberCoefficient: Double?   // base: 0.30 min/g, user-adjustable
 
     // Garmin sensitivity rule weights (nil = use defaults)
     var sleepWeight: Double?
@@ -169,6 +170,7 @@ struct V2PersonalCurveParameters: Codable {
     var effectiveProteinPlateau: Double { proteinPlateau ?? 40 }
     var effectiveProteinFactor: Double { proteinFactor ?? 0.35 }
     var effectiveFatTotalCoeff: Double { fatTotalCoeff ?? 0.69 }
+    var effectiveFiberCoefficient: Double { fiberCoefficient ?? 0.30 }
 }
 
 // MARK: - Outcome Learning Store

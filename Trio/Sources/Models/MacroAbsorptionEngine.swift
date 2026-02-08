@@ -96,7 +96,7 @@ struct MacroAbsorptionEngine {
         let safeWindowMinutes = safeWindowOverride ?? insulinType.defaultSafeWindowMinutes
 
         // --- Curve 1: Carbohydrate absorption (gamma-shaped) ---
-        let tauCarb = carbTau(baseTau: params.effectiveCarbTau, fatGrams: fat, fiberGrams: fiber)
+        let tauCarb = carbTau(baseTau: params.effectiveCarbTau, fatGrams: fat, fiberGrams: fiber, fiberCoefficient: params.effectiveFiberCoefficient)
         let curveSuggestedPercent = gammaCDFValue(tau: tauCarb, atMinutes: Double(safeWindowMinutes))
         let effectivePercent = upfrontPercent ?? curveSuggestedPercent
 
@@ -244,13 +244,12 @@ struct MacroAbsorptionEngine {
     /// (Torsdottir 1991, Jenkins 1978). The 0.3 min/g coefficient is conservative;
     /// fiber's effect is real but smaller than fat's. The 5g threshold avoids
     /// adjusting for trace amounts.
-    static func carbTau(baseTau: Double, fatGrams: Double, fiberGrams: Double = 0) -> Double {
+    static func carbTau(baseTau: Double, fatGrams: Double, fiberGrams: Double = 0, fiberCoefficient: Double = 0.3) -> Double {
         let fatSlowingCoefficient = 0.8   // minutes per gram of fat
-        let fiberSlowingCoefficient = 0.3 // minutes per gram of fiber above threshold
         let fiberThreshold = 5.0          // below this, fiber effect is negligible
 
         let fatDelay = fatGrams * fatSlowingCoefficient
-        let fiberDelay = max(0, fiberGrams - fiberThreshold) * fiberSlowingCoefficient
+        let fiberDelay = max(0, fiberGrams - fiberThreshold) * fiberCoefficient
 
         return baseTau + fatDelay + fiberDelay
     }

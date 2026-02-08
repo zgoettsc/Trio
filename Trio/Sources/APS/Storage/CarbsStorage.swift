@@ -237,6 +237,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                 let carbsValue = v2FullCarbsForEngine ?? Double(truncating: lastEntry.carbs as NSDecimalNumber)
                 let fatValue = Double(truncating: fat as NSDecimalNumber)
                 let proteinValue = Double(truncating: protein as NSDecimalNumber)
+                let fiberValue = Double(truncating: NSDecimalNumber(decimal: lastEntry.fiber ?? 0))
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
                 let curveParams = V2OutcomeLearningStore.shared.loadParameters()
 
@@ -259,6 +260,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     carbs: carbsValue,
                     fat: fatValue,
                     protein: proteinValue,
+                    fiber: fiberValue,
                     mealTime: lastEntry.actualDate ?? lastEntry.createdAt,
                     insulinDemandFactor: demandFactor,
                     upfrontPercent: upfrontOverride,
@@ -303,6 +305,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
             newItem.carbs = Double(truncating: NSDecimalNumber(decimal: entry.carbs))
             newItem.fat = Double(truncating: NSDecimalNumber(decimal: entry.fat ?? 0))
             newItem.protein = Double(truncating: NSDecimalNumber(decimal: entry.protein ?? 0))
+            newItem.fiber = Double(truncating: NSDecimalNumber(decimal: entry.fiber ?? 0))
             newItem.note = entry.note
             newItem.id = UUID()
             newItem.isFPU = false

@@ -36,7 +36,7 @@ public enum AppleHealthConfig {
         Set([healthBGObject, healthCarbObject, healthFatObject, healthProteinObject, healthInsulinObject].compactMap { $0 }) }
 
     static var nutritionReadPermissions: Set<HKObjectType> {
-        Set([healthCarbObject, healthFatObject, healthProteinObject].compactMap { $0 })
+        Set([healthCarbObject, healthFatObject, healthProteinObject, healthFiberObject].compactMap { $0 })
     }
 
     // link to object in HealthKit
@@ -44,6 +44,7 @@ public enum AppleHealthConfig {
     static let healthCarbObject = HKObjectType.quantityType(forIdentifier: .dietaryCarbohydrates)
     static let healthFatObject = HKObjectType.quantityType(forIdentifier: .dietaryFatTotal)
     static let healthProteinObject = HKObjectType.quantityType(forIdentifier: .dietaryProtein)
+    static let healthFiberObject = HKObjectType.quantityType(forIdentifier: .dietaryFiber)
     static let healthInsulinObject = HKObjectType.quantityType(forIdentifier: .insulinDelivery)
 
     // MetaDataKey of Trio data in HealthStore

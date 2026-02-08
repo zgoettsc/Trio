@@ -87,6 +87,7 @@ extension Treatments {
         var carbs: Decimal = 0
         var fat: Decimal = 0
         var protein: Decimal = 0
+        var fiber: Decimal = 0
         var note: String = ""
 
         var date = Date()
@@ -111,6 +112,7 @@ extension Treatments {
         var cronometerRecommendedCarbs: Double = 0
         var cronometerRecommendedFat: Double = 0
         var cronometerRecommendedProtein: Double = 0
+        var cronometerRecommendedFiber: Double = 0
         var cronometerAdjustmentFactor: Double = 0.5
         var cronometerFactorLocked: Bool = false
         var cronometerFPUCarbEquivalents: Double = 0
@@ -475,12 +477,14 @@ extension Treatments {
                 cronometerRecommendedCarbs = meal.carbsDelta * cronometerAdjustmentFactor
                 cronometerRecommendedFat = meal.fatDelta * (prediction.suggestedFatFactor ?? 1.0)
                 cronometerRecommendedProtein = meal.proteinDelta * (prediction.suggestedProteinFactor ?? 1.0)
+                cronometerRecommendedFiber = meal.fiberDelta // fiber passes through 1:1 (not adjusted)
             } else {
                 // No prediction data yet — use learned factors from outcome store
                 let store = CronometerRecommendationStore.shared
                 cronometerRecommendedCarbs = meal.carbsDelta * cronometerAdjustmentFactor
                 cronometerRecommendedFat = meal.fatDelta * store.personalFatFactor()
                 cronometerRecommendedProtein = meal.proteinDelta * store.personalProteinFactor()
+                cronometerRecommendedFiber = meal.fiberDelta // fiber passes through 1:1 (not adjusted)
             }
 
             let trioSettings = settingsManager.settings
@@ -494,6 +498,7 @@ extension Treatments {
                     carbs: cronometerRecommendedCarbs,
                     fat: cronometerRecommendedFat,
                     protein: cronometerRecommendedProtein,
+                    fiber: cronometerRecommendedFiber,
                     mealTime: meal.detectedAt,
                     insulinDemandFactor: v2DemandFactor,
                     upfrontPercent: nil,
@@ -721,7 +726,7 @@ extension Treatments {
         }
 
         /// Called when user taps Apply — populates carb/fat/protein fields and logs the recommendation
-        @MainActor func applyCronometerRecommendation(carbs appliedCarbs: Double, fat appliedFat: Double, protein appliedProtein: Double) {
+        @MainActor func applyCronometerRecommendation(carbs appliedCarbs: Double, fat appliedFat: Double, protein appliedProtein: Double, fiber appliedFiber: Double = 0) {
             guard let meal = cronometerMeal else { return }
 
             let trioSettings = settingsManager.settings
@@ -733,6 +738,7 @@ extension Treatments {
                 self.carbs = Decimal(upfrontCarbs)
                 self.fat = Decimal(appliedFat)
                 self.protein = Decimal(appliedProtein)
+                self.fiber = Decimal(appliedFiber)
 
                 // Thread full carbs and upfront override to CarbsStorage for the engine
                 carbsStorage.v2FullCarbsForEngine = fullCarbs
@@ -742,6 +748,7 @@ extension Treatments {
                 self.carbs = Decimal(appliedCarbs)
                 self.fat = Decimal(appliedFat)
                 self.protein = Decimal(appliedProtein)
+                self.fiber = Decimal(appliedFiber)
             }
 
             // Log the recommendation for outcome tracking
@@ -785,7 +792,7 @@ extension Treatments {
                     carbs: appliedCarbs,
                     fat: appliedFat,
                     protein: appliedProtein,
-                    fiber: 0,
+                    fiber: appliedFiber,
                     tauCarb: outcomeParams.effectiveCarbTau,
                     proteinFactor: outcomeParams.effectiveProteinFactor,
                     fatTotalEquiv: MacroAbsorptionEngine.fatCarbEquivalent(
@@ -1175,6 +1182,7 @@ extension Treatments {
                     carbs: carbs,
                     fat: fat,
                     protein: protein,
+                    fiber: fiber,
                     note: note,
                     enteredBy: CarbsEntry.local,
                     isFPU: false,

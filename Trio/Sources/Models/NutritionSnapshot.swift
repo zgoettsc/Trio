@@ -10,6 +10,7 @@ struct NutritionSnapshot: JSON, Identifiable, Equatable {
     let cumulativeCarbs: Double
     let cumulativeFat: Double
     let cumulativeProtein: Double
+    let cumulativeFiber: Double
     let forDate: Date // The calendar day these totals apply to
 
     init(
@@ -18,6 +19,7 @@ struct NutritionSnapshot: JSON, Identifiable, Equatable {
         cumulativeCarbs: Double,
         cumulativeFat: Double,
         cumulativeProtein: Double,
+        cumulativeFiber: Double = 0,
         forDate: Date
     ) {
         self.id = id
@@ -25,6 +27,7 @@ struct NutritionSnapshot: JSON, Identifiable, Equatable {
         self.cumulativeCarbs = cumulativeCarbs
         self.cumulativeFat = cumulativeFat
         self.cumulativeProtein = cumulativeProtein
+        self.cumulativeFiber = cumulativeFiber
         self.forDate = forDate
     }
 }
@@ -39,19 +42,22 @@ struct InferredMealEvent: Identifiable, Equatable {
     let carbsDelta: Double
     let fatDelta: Double
     let proteinDelta: Double
+    let fiberDelta: Double
 
     init(
         id: UUID = UUID(),
         detectedAt: Date,
         carbsDelta: Double,
         fatDelta: Double,
-        proteinDelta: Double
+        proteinDelta: Double,
+        fiberDelta: Double = 0
     ) {
         self.id = id
         self.detectedAt = detectedAt
         self.carbsDelta = carbsDelta
         self.fatDelta = fatDelta
         self.proteinDelta = proteinDelta
+        self.fiberDelta = fiberDelta
     }
 
     var totalCalories: Double {
@@ -487,7 +493,7 @@ final class NutritionSnapshotStore {
         guard snapshots.count >= 2 else { return [] }
 
         // First pass: compute raw deltas between consecutive snapshots
-        var rawEvents: [(detectedAt: Date, carbsDelta: Double, fatDelta: Double, proteinDelta: Double)] = []
+        var rawEvents: [(detectedAt: Date, carbsDelta: Double, fatDelta: Double, proteinDelta: Double, fiberDelta: Double)] = []
 
         for i in 1 ..< snapshots.count {
             let prev = snapshots[i - 1]
@@ -495,6 +501,7 @@ final class NutritionSnapshotStore {
             let carbDelta = curr.cumulativeCarbs - prev.cumulativeCarbs
             let fatDelta = curr.cumulativeFat - prev.cumulativeFat
             let proteinDelta = curr.cumulativeProtein - prev.cumulativeProtein
+            let fiberDelta = curr.cumulativeFiber - prev.cumulativeFiber
 
             // Only include meaningful changes (> 1g of any macro)
             if carbDelta > 1 || fatDelta > 1 || proteinDelta > 1 {
@@ -502,7 +509,8 @@ final class NutritionSnapshotStore {
                     detectedAt: curr.timestamp,
                     carbsDelta: max(0, carbDelta),
                     fatDelta: max(0, fatDelta),
-                    proteinDelta: max(0, proteinDelta)
+                    proteinDelta: max(0, proteinDelta),
+                    fiberDelta: max(0, fiberDelta)
                 ))
             }
         }
@@ -514,6 +522,7 @@ final class NutritionSnapshotStore {
         var currentCarbs = rawEvents[0].carbsDelta
         var currentFat = rawEvents[0].fatDelta
         var currentProtein = rawEvents[0].proteinDelta
+        var currentFiber = rawEvents[0].fiberDelta
         var currentTime = rawEvents[0].detectedAt
 
         for i in 1 ..< rawEvents.count {
@@ -524,6 +533,7 @@ final class NutritionSnapshotStore {
                 currentCarbs += rawEvents[i].carbsDelta
                 currentFat += rawEvents[i].fatDelta
                 currentProtein += rawEvents[i].proteinDelta
+                currentFiber += rawEvents[i].fiberDelta
                 currentTime = rawEvents[i].detectedAt
             } else {
                 // New meal — save the accumulated meal and start fresh
@@ -531,11 +541,13 @@ final class NutritionSnapshotStore {
                     detectedAt: currentTime,
                     carbsDelta: currentCarbs,
                     fatDelta: currentFat,
-                    proteinDelta: currentProtein
+                    proteinDelta: currentProtein,
+                    fiberDelta: currentFiber
                 ))
                 currentCarbs = rawEvents[i].carbsDelta
                 currentFat = rawEvents[i].fatDelta
                 currentProtein = rawEvents[i].proteinDelta
+                currentFiber = rawEvents[i].fiberDelta
                 currentTime = rawEvents[i].detectedAt
             }
         }
@@ -545,7 +557,8 @@ final class NutritionSnapshotStore {
             detectedAt: currentTime,
             carbsDelta: currentCarbs,
             fatDelta: currentFat,
-            proteinDelta: currentProtein
+            proteinDelta: currentProtein,
+            fiberDelta: currentFiber
         ))
 
         return meals
@@ -565,7 +578,8 @@ final class NutritionSnapshotStore {
     func recordAndComputeLatestMeal(
         currentCarbs: Double,
         currentFat: Double,
-        currentProtein: Double
+        currentProtein: Double,
+        currentFiber: Double = 0
     ) -> InferredMealEvent? {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -576,6 +590,7 @@ final class NutritionSnapshotStore {
             cumulativeCarbs: currentCarbs,
             cumulativeFat: currentFat,
             cumulativeProtein: currentProtein,
+            cumulativeFiber: currentFiber,
             forDate: today
         )
         saveSnapshot(freshSnapshot)
@@ -616,6 +631,7 @@ final class NutritionSnapshotStore {
                 cumulativeCarbs: 0,
                 cumulativeFat: 0,
                 cumulativeProtein: 0,
+                cumulativeFiber: 0,
                 forDate: today
             )
         }
@@ -623,6 +639,7 @@ final class NutritionSnapshotStore {
         let carbDelta = currentCarbs - prev.cumulativeCarbs
         let fatDelta = currentFat - prev.cumulativeFat
         let proteinDelta = currentProtein - prev.cumulativeProtein
+        let fiberDelta = currentFiber - prev.cumulativeFiber
 
         // Only return a meal if there's a meaningful change
         guard carbDelta > 1 || fatDelta > 1 || proteinDelta > 1 else { return nil }
@@ -631,7 +648,8 @@ final class NutritionSnapshotStore {
             detectedAt: Date(),
             carbsDelta: max(0, carbDelta),
             fatDelta: max(0, fatDelta),
-            proteinDelta: max(0, proteinDelta)
+            proteinDelta: max(0, proteinDelta),
+            fiberDelta: max(0, fiberDelta)
         )
     }
 
