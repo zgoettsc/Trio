@@ -754,7 +754,6 @@ extension Treatments {
             CronometerRecommendationStore.shared.save(recommendation)
 
             // V2 outcome learning: record meal with curve parameters and Garmin context
-            let trioSettings = settingsManager.settings
             if trioSettings.useV2MacroAbsorption, trioSettings.v2OutcomeLearningEnabled {
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
 

@@ -83,7 +83,7 @@ Only appears when V2 Macro Absorption Engine is enabled in settings. Controls ho
 
 The V2 engine uses a Gamma(2, tau) CDF to determine what fraction of carbs will be absorbed within the "safe window" (30 min for ultra-rapid insulin, 45 min for rapid-acting). This fraction becomes the upfront bolus; the rest is delivered via SMBs as future carb entries for oref.
 
-Fat slows gastric emptying: each gram of fat adds 0.8 minutes to the base tau (35 min). A 30g fat meal shifts tau from 35 to 59 min, reducing the upfront % and spreading more carbs into the future.
+Fat slows gastric emptying: each gram of fat adds 0.8 minutes to the base tau. The base tau is tunable in V2 settings (default 35 min). A 30g fat meal with default tau shifts from 35 to 59 min, reducing the upfront % and spreading more carbs into the future.
 
 ---
 
@@ -104,19 +104,23 @@ The V2 engine models three distinct physiological pathways:
 
 **Curve 1 — Carbohydrate Absorption (Gamma-shaped):**
 - Gamma(2, tau) distribution where tau is fat-modified
+- Base tau tunable via **Carb Tau** slider (default 35 min, range 20–60)
 - Duration: tau * 4.74 minutes to 95% absorption
 - Entries generated every 10 minutes after the safe window
 
 **Curve 2 — Protein Gluconeogenesis (Delayed Sigmoid):**
 - Onset at ~3 hours (sigmoid center), peak at ~5 hours, decay after
 - Smooth ramp: 0% conversion at ≤threshold, linear to max factor at plateau
-- Default: 0% at ≤15g, ramps to 35% conversion at 40g
+- All three parameters tunable via sliders:
+  - **Protein Factor**: peak conversion rate (default 0.35, range 0.10–0.80)
+  - **Protein Threshold**: minimum grams for effect (default 15g, range 5–30g)
+  - **Protein Plateau**: grams at which conversion maxes out (default 40g, range 20–80g)
 - Entries generated every 15 minutes from 90–480 min (1.5–8h)
 
 **Curve 3 — Fat Insulin Resistance (Normalized Gaussian):**
 - Gaussian centered at 6 hours, sigma = 90 minutes
 - No effect before 2 hours (FFA elevation hasn't started)
-- Default coefficient: 0.69 g-carb-equivalent per g-fat
+- **Fat Coefficient** tunable via slider (default 0.69, range 0.30–2.00 g-carb-equiv per g-fat)
 - Entries generated every 15 minutes from 120–540 min (2–9h)
 
 ### Protein and Fat Coefficients — Literature Basis
@@ -192,6 +196,10 @@ When outcome learning is enabled, these values are refined automatically from yo
 - **Late error (4–9h)** adjusts fat coefficient
 
 Manual slider adjustments set a starting point; the learning system fine-tunes from there.
+
+The settings page also includes a **live example calculation** section that shows how the current slider values would process a reference meal (65g carbs, 28g fat, 35g protein). This updates in real-time as you adjust sliders, showing protein glucose-equivalent, fat carb-equivalent, total delayed impact, and fat-modified tau.
+
+A **Reset Curve Parameters to Defaults** button clears all learned/manual values back to the research defaults.
 
 ---
 
