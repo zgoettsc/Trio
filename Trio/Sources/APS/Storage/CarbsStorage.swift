@@ -232,8 +232,8 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                 let carbsValue = v2FullCarbsForEngine ?? Double(truncating: lastEntry.carbs as NSDecimalNumber)
                 let fatValue = Double(truncating: fat as NSDecimalNumber)
                 let proteinValue = Double(truncating: protein as NSDecimalNumber)
-                let adjustmentFactor = Double(truncating: trioSettings.individualAdjustmentFactor as NSDecimalNumber)
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+                let curveParams = V2OutcomeLearningStore.shared.loadParameters()
 
                 // Clear V2 overrides after reading (single-use per storeCarbs call)
                 let upfrontOverride = v2UpfrontPercentOverride
@@ -258,7 +258,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     insulinDemandFactor: demandFactor,
                     upfrontPercent: upfrontOverride,
                     insulinType: insulinType,
-                    individualAdjustmentFactor: adjustmentFactor,
+                    curveParameters: curveParams,
                     safeWindowOverride: trioSettings.v2SafeWindowMinutes
                 )
 
