@@ -169,6 +169,7 @@ struct V2MacroDosingSettingsView: BaseView {
         .background(appState.trioBackgroundColor(for: colorScheme))
         .navigationTitle("V2 Macro Dosing")
         .navigationBarTitleDisplayMode(.automatic)
+        .onAppear(perform: configureView)
     }
 
     // MARK: - Helpers
