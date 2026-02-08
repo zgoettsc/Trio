@@ -145,6 +145,7 @@ extension Treatments {
         var v2FatTotalEquiv: Double?              // fat carb-equivalent for display
         var v2SafeWindowMinutes: Int?             // safe window used for display
         var showV2AdjustSlider: Bool = false       // show/hide inline slider
+        var v2PendingOutcome: V2MealOutcome?       // outcome to save after saveMeal() sets the engine mealID
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
         var preprocessedData: [(id: UUID, forecast: Forecast, forecastValue: ForecastValue)] = []
@@ -763,11 +764,11 @@ extension Treatments {
             )
             CronometerRecommendationStore.shared.save(recommendation)
 
-            // V2 outcome learning: record meal with curve parameters and Garmin context
+            // V2 outcome learning: prepare outcome with a placeholder mealID.
+            // The real mealID (fpuID) is assigned by the engine inside CarbsStorage.saveCarbEquivalents,
+            // so we defer the save until after saveMeal() completes in invokeTreatmentsTask().
             if trioSettings.useV2MacroAbsorption, trioSettings.v2OutcomeLearningEnabled {
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
-
-                // Capture values for the async block
                 let demandFactor = v2DemandFactor
                 let upfrontPct = v2UpfrontPercent
                 let safeWindow = trioSettings.v2SafeWindowMinutes ?? insulinType.defaultSafeWindowMinutes
@@ -775,52 +776,41 @@ extension Treatments {
                 let bgAtMeal = Int(NSDecimalNumber(decimal: currentBG).intValue)
                 let crAtMeal = NSDecimalNumber(decimal: currentCarbRatio).doubleValue
                 let isfAtMeal = NSDecimalNumber(decimal: currentISF).doubleValue
-                let garminEnabled = trioSettings.garminEnabled
+                let outcomeParams = V2OutcomeLearningStore.shared.loadParameters()
 
-                Task {
-                    // Retrieve Garmin snapshot (cached from recommendation fetch)
-                    var garminSnapshot: GarminContextSnapshot?
-                    if garminEnabled, GarminFirebaseManager.isSignedIn {
-                        let service = GarminFirestoreService()
-                        garminSnapshot = await service.fetchContext() // uses cache
-                    }
-
-                    let outcomeParams = V2OutcomeLearningStore.shared.loadParameters()
-                    let outcome = V2MealOutcome(
-                        id: UUID(),
-                        date: Date(),
-                        mealID: UUID().uuidString,
+                v2PendingOutcome = V2MealOutcome(
+                    id: UUID(),
+                    date: Date(),
+                    mealID: "pending", // replaced with engine mealID after saveMeal()
+                    carbs: appliedCarbs,
+                    fat: appliedFat,
+                    protein: appliedProtein,
+                    fiber: 0,
+                    tauCarb: outcomeParams.effectiveCarbTau,
+                    proteinFactor: outcomeParams.effectiveProteinFactor,
+                    fatTotalEquiv: MacroAbsorptionEngine.fatCarbEquivalent(
+                        fatGrams: appliedFat,
+                        maxCoeff: outcomeParams.effectiveFatTotalCoeff
+                    ),
+                    upfrontPercent: upfrontPct ?? 0.65,
+                    curveSuggestedPercent: upfrontPct ?? 0.65,
+                    insulinDemandFactor: demandFactor,
+                    safeWindowMinutes: safeWindow,
+                    garminSnapshot: nil, // filled in async before save
+                    bgAtMeal: bgAtMeal,
+                    carbRatioAtMeal: crAtMeal,
+                    isfAtMeal: isfAtMeal,
+                    mealSMBMultiplier: smbMultiplier,
+                    mealModeWasActive: true,
+                    adaptiveAdjustments: [],
+                    checkpoints: V2BGCheckpoint.computePhases(
                         carbs: appliedCarbs,
                         fat: appliedFat,
                         protein: appliedProtein,
-                        fiber: 0,
-                        tauCarb: outcomeParams.effectiveCarbTau,
-                        proteinFactor: outcomeParams.effectiveProteinFactor,
-                        fatTotalEquiv: MacroAbsorptionEngine.fatCarbEquivalent(
-                            fatGrams: appliedFat,
-                            maxCoeff: outcomeParams.effectiveFatTotalCoeff
-                        ),
-                        upfrontPercent: upfrontPct ?? 0.65,
-                        curveSuggestedPercent: upfrontPct ?? 0.65,
-                        insulinDemandFactor: demandFactor,
-                        safeWindowMinutes: safeWindow,
-                        garminSnapshot: garminSnapshot,
-                        bgAtMeal: bgAtMeal,
-                        carbRatioAtMeal: crAtMeal,
-                        isfAtMeal: isfAtMeal,
-                        mealSMBMultiplier: smbMultiplier,
-                        mealModeWasActive: true,
-                        adaptiveAdjustments: [],
-                        checkpoints: V2BGCheckpoint.computePhases(
-                            carbs: appliedCarbs,
-                            fat: appliedFat,
-                            protein: appliedProtein,
-                            proteinThreshold: outcomeParams.effectiveProteinThreshold
-                        ),
-                        hasConfoundingMeal: false
-                    )
-                    V2OutcomeLearningStore.shared.save(outcome)
-                }
+                        proteinThreshold: outcomeParams.effectiveProteinThreshold
+                    ),
+                    hasConfoundingMeal: false
+                )
             }
 
             // Dismiss the sheet
@@ -961,6 +951,25 @@ extension Treatments {
 
                 if isCarbsPresent || isFatPresent || isProteinPresent {
                     await saveMeal()
+                }
+
+                // V2 outcome learning: save outcome now that saveMeal() has set the engine mealID
+                if var pendingOutcome = await MainActor.run(body: { self.v2PendingOutcome }) {
+                    // Link outcome to the engine's fpuID so export can find scheduled entries
+                    if let engineMealID = carbsStorage.v2LastEngineMealID {
+                        pendingOutcome = pendingOutcome.withMealID(engineMealID)
+                    }
+
+                    // Attach Garmin snapshot (cached from recommendation fetch)
+                    let trioSettings = await MainActor.run { settingsManager.settings }
+                    if trioSettings.garminEnabled, GarminFirebaseManager.isSignedIn {
+                        let service = GarminFirestoreService()
+                        let snapshot = await service.fetchContext()
+                        pendingOutcome = pendingOutcome.withGarminSnapshot(snapshot)
+                    }
+
+                    V2OutcomeLearningStore.shared.save(pendingOutcome)
+                    await MainActor.run { self.v2PendingOutcome = nil }
                 }
 
                 if isInsulinGiven {

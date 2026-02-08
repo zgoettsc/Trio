@@ -62,6 +62,38 @@ struct V2MealOutcome: Codable, Identifiable {
         let actualBG: Double
         let predictedBG: Double
     }
+
+    /// Return a copy with a different mealID (used to link outcome to engine-generated Core Data entries).
+    func withMealID(_ newMealID: String) -> V2MealOutcome {
+        V2MealOutcome(
+            id: id, date: date, mealID: newMealID,
+            carbs: carbs, fat: fat, protein: protein, fiber: fiber,
+            tauCarb: tauCarb, proteinFactor: proteinFactor, fatTotalEquiv: fatTotalEquiv,
+            upfrontPercent: upfrontPercent, curveSuggestedPercent: curveSuggestedPercent,
+            insulinDemandFactor: insulinDemandFactor, safeWindowMinutes: safeWindowMinutes,
+            garminSnapshot: garminSnapshot, bgAtMeal: bgAtMeal,
+            carbRatioAtMeal: carbRatioAtMeal, isfAtMeal: isfAtMeal,
+            mealSMBMultiplier: mealSMBMultiplier, mealModeWasActive: mealModeWasActive,
+            adaptiveAdjustments: adaptiveAdjustments, checkpoints: checkpoints,
+            hasConfoundingMeal: hasConfoundingMeal
+        )
+    }
+
+    /// Return a copy with a Garmin snapshot attached.
+    func withGarminSnapshot(_ snapshot: GarminContextSnapshot?) -> V2MealOutcome {
+        V2MealOutcome(
+            id: id, date: date, mealID: mealID,
+            carbs: carbs, fat: fat, protein: protein, fiber: fiber,
+            tauCarb: tauCarb, proteinFactor: proteinFactor, fatTotalEquiv: fatTotalEquiv,
+            upfrontPercent: upfrontPercent, curveSuggestedPercent: curveSuggestedPercent,
+            insulinDemandFactor: insulinDemandFactor, safeWindowMinutes: safeWindowMinutes,
+            garminSnapshot: snapshot, bgAtMeal: bgAtMeal,
+            carbRatioAtMeal: carbRatioAtMeal, isfAtMeal: isfAtMeal,
+            mealSMBMultiplier: mealSMBMultiplier, mealModeWasActive: mealModeWasActive,
+            adaptiveAdjustments: adaptiveAdjustments, checkpoints: checkpoints,
+            hasConfoundingMeal: hasConfoundingMeal
+        )
+    }
 }
 
 /// BG checkpoint for V2 outcome tracking with curve attribution.

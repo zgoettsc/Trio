@@ -21,6 +21,10 @@ protocol CarbsStorage {
     /// user's slider adjustment is passed to the absorption engine. nil = use curve default.
     var v2UpfrontPercentOverride: Double? { get set }
 
+    /// V2: After storeCarbs completes, this holds the mealID (fpuID) the engine assigned
+    /// to the future entries in Core Data. Used by outcome tracking to link meals to entries.
+    var v2LastEngineMealID: String? { get }
+
     func storeCarbs(_ carbs: [CarbsEntry], areFetchedFromRemote: Bool) async throws
     func deleteCarbsEntryStored(_ treatmentObjectID: NSManagedObjectID) async
     func syncDate() -> Date
@@ -47,6 +51,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
     // V2 split dosing: full meal carbs for engine (set before storeCarbs, cleared after)
     var v2FullCarbsForEngine: Double?
     var v2UpfrontPercentOverride: Double?
+    private(set) var v2LastEngineMealID: String?
 
     private let context: NSManagedObjectContext
 
@@ -261,6 +266,9 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     curveParameters: curveParams,
                     safeWindowOverride: trioSettings.v2SafeWindowMinutes
                 )
+
+                // Expose the engine's mealID so outcome tracking can link to these entries
+                v2LastEngineMealID = result.mealID
 
                 if !result.futureEntries.isEmpty {
                     await saveFPUToCoreDataAsBatchInsert(
