@@ -504,7 +504,7 @@ final class V2OutcomeLearningStore {
 
     /// Build a full data export for every recorded meal: pre-meal BG trace,
     /// all V2 engine inputs, all curve parameters, Garmin context, adaptive
-    /// adjustments, and BG outcomes at every checkpoint.
+    /// adjustments, scheduled dosing entries, and BG outcomes at every checkpoint.
     func buildComprehensiveExport(context: NSManagedObjectContext) async -> V2ComprehensiveExport {
         let outcomes = loadAll()
         let params = loadParameters()
@@ -528,10 +528,17 @@ final class V2OutcomeLearningStore {
                 context: context
             )
 
+            // Fetch all scheduled V2 dosing entries for this meal (past + future)
+            let scheduled = await fetchScheduledEntries(
+                mealID: outcome.mealID,
+                context: context
+            )
+
             let record = V2MealExportRecord(
                 outcome: outcome,
                 preMealBGTrace: preMealBG,
-                postMealBGTrace: postMealBG
+                postMealBGTrace: postMealBG,
+                scheduledEntries: scheduled
             )
             mealExports.append(record)
         }
@@ -572,6 +579,35 @@ final class V2OutcomeLearningStore {
             }
         }
     }
+
+    /// Fetch all scheduled carb entries (V2 split-dosing + fat/protein entries) for a meal.
+    /// Returns both past (absorbed) and future (pending) entries sorted by date.
+    private func fetchScheduledEntries(
+        mealID: String,
+        context: NSManagedObjectContext
+    ) async -> [V2ScheduledEntry] {
+        await context.perform {
+            guard let uuid = UUID(uuidString: mealID) else { return [] }
+
+            let request: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
+            request.predicate = NSPredicate(format: "fpuID == %@", uuid as CVarArg)
+            request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+
+            guard let results = try? context.fetch(request) else { return [] }
+            let now = Date()
+
+            return results.compactMap { entry in
+                guard let date = entry.date else { return nil }
+                return V2ScheduledEntry(
+                    date: date,
+                    carbEquivalent: entry.carbs,
+                    entryType: entry.note ?? "unknown",
+                    isAbsorbed: date <= now,
+                    isFPU: entry.isFPU
+                )
+            }
+        }
+    }
 }
 
 // MARK: - Export Format
@@ -593,6 +629,16 @@ struct V2BGReading: Codable {
     let direction: String?  // CGM trend arrow (e.g. "Flat", "FortyFiveUp")
 }
 
+/// A single scheduled carb entry from the V2 dosing engine.
+/// These are the actual entries written to Core Data that oref sees.
+struct V2ScheduledEntry: Codable {
+    let date: Date              // when this entry is scheduled to be "absorbed"
+    let carbEquivalent: Double  // grams of carb-equivalent (may be from protein/fat curve)
+    let entryType: String       // "carb", "protein-gluco", "fat-resistance", or "unknown"
+    let isAbsorbed: Bool        // true if date is in the past (already consumed by oref)
+    let isFPU: Bool             // true for V2 curve entries (protein/fat/split-carb)
+}
+
 /// Complete export record for one meal — everything the system knew and did.
 struct V2MealExportRecord: Codable {
     // The full outcome record (macros, params, Garmin, checkpoints, adjustments)
@@ -603,6 +649,11 @@ struct V2MealExportRecord: Codable {
 
     // Post-meal BG trace — every CGM reading from meal time through 8h (or now)
     let postMealBGTrace: [V2BGReading]
+
+    // All scheduled dosing entries for this meal — past (absorbed) and future (pending).
+    // Shows exactly what the V2 engine wrote to Core Data for oref to process:
+    // carb split entries, protein gluconeogenesis entries, fat resistance entries.
+    let scheduledEntries: [V2ScheduledEntry]
 }
 
 /// Top-level comprehensive export — the whole system picture.
