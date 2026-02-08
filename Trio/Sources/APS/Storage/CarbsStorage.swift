@@ -21,6 +21,10 @@ protocol CarbsStorage {
     /// user's slider adjustment is passed to the absorption engine. nil = use curve default.
     var v2UpfrontPercentOverride: Double? { get set }
 
+    /// V2: After storeCarbs completes, this holds the mealID (fpuID) the engine assigned
+    /// to the future entries in Core Data. Used by outcome tracking to link meals to entries.
+    var v2LastEngineMealID: String? { get }
+
     func storeCarbs(_ carbs: [CarbsEntry], areFetchedFromRemote: Bool) async throws
     func deleteCarbsEntryStored(_ treatmentObjectID: NSManagedObjectID) async
     func syncDate() -> Date
@@ -47,6 +51,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
     // V2 split dosing: full meal carbs for engine (set before storeCarbs, cleared after)
     var v2FullCarbsForEngine: Double?
     var v2UpfrontPercentOverride: Double?
+    private(set) var v2LastEngineMealID: String?
 
     private let context: NSManagedObjectContext
 
@@ -232,6 +237,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                 let carbsValue = v2FullCarbsForEngine ?? Double(truncating: lastEntry.carbs as NSDecimalNumber)
                 let fatValue = Double(truncating: fat as NSDecimalNumber)
                 let proteinValue = Double(truncating: protein as NSDecimalNumber)
+                let fiberValue = Double(truncating: NSDecimalNumber(decimal: lastEntry.fiber ?? 0))
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
                 let curveParams = V2OutcomeLearningStore.shared.loadParameters()
 
@@ -254,6 +260,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     carbs: carbsValue,
                     fat: fatValue,
                     protein: proteinValue,
+                    fiber: fiberValue,
                     mealTime: lastEntry.actualDate ?? lastEntry.createdAt,
                     insulinDemandFactor: demandFactor,
                     upfrontPercent: upfrontOverride,
@@ -261,6 +268,9 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     curveParameters: curveParams,
                     safeWindowOverride: trioSettings.v2SafeWindowMinutes
                 )
+
+                // Expose the engine's mealID so outcome tracking can link to these entries
+                v2LastEngineMealID = result.mealID
 
                 if !result.futureEntries.isEmpty {
                     await saveFPUToCoreDataAsBatchInsert(
@@ -295,6 +305,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
             newItem.carbs = Double(truncating: NSDecimalNumber(decimal: entry.carbs))
             newItem.fat = Double(truncating: NSDecimalNumber(decimal: entry.fat ?? 0))
             newItem.protein = Double(truncating: NSDecimalNumber(decimal: entry.protein ?? 0))
+            newItem.fiber = Double(truncating: NSDecimalNumber(decimal: entry.fiber ?? 0))
             newItem.note = entry.note
             newItem.id = UUID()
             newItem.isFPU = false

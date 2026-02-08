@@ -15,6 +15,11 @@ struct MealModeState {
     let isActive: Bool
     let effectiveMaxSMBMinutes: Decimal // user's maxSMBBasalMinutes, or enhanced value
 
+    /// Hysteresis flag for Gate 3 trend threshold.
+    /// Once the gate fails (trend drops below threshold), require trend to recover
+    /// to reEnableThreshold before re-enabling — prevents rapid toggling near CGM noise floor.
+    private static var gate3FailedLastCycle = false
+
     /// Evaluate all safety gates for meal-mode SMB enhancement.
     /// If ANY gate fails, maxSMB reverts to the user's base value instantly.
     static func evaluate(
@@ -22,6 +27,9 @@ struct MealModeState {
         currentBG: Double?,
         bgTrend: Double?,           // mg/dL per 5min, positive = rising
         cgmAgeSeconds: TimeInterval?,
+        currentIOB: Double,
+        remainingCarbsForActiveMeals: Double,
+        carbRatio: Double,
         userMaxSMBMinutes: Decimal,
         mealSMBMultiplier: Double,  // user setting, default 2.0
         bgFloor: Double             // user setting, default 90 mg/dL
@@ -34,11 +42,34 @@ struct MealModeState {
         // Gate 2: BG data available and above floor
         guard let bg = currentBG, bg > bgFloor else { return baseState }
 
-        // Gate 3: BG trend flat or rising (allow slight dip, not rapid fall)
-        guard let trend = bgTrend, trend >= -1.0 else { return baseState }
+        // Gate 3: BG trend flat or rising, with hysteresis (#7)
+        // Threshold of -3.0 matches whitepaper range; hysteresis prevents toggling near noise floor
+        let trendThreshold: Double = -3.0
+        let reEnableThreshold: Double = 0.0
+
+        if gate3FailedLastCycle {
+            // Once failed, require trend to recover to 0 before re-enabling
+            guard let trend = bgTrend, trend >= reEnableThreshold else {
+                gate3FailedLastCycle = true
+                return baseState
+            }
+            gate3FailedLastCycle = false
+        } else {
+            guard let trend = bgTrend, trend >= trendThreshold else {
+                gate3FailedLastCycle = true
+                return baseState
+            }
+        }
 
         // Gate 4: CGM data is fresh (< 10 minutes old)
         guard let age = cgmAgeSeconds, age < 600 else { return baseState }
+
+        // Gate 5: IOB should not exceed remaining predicted need (#5)
+        // Prevents insulin stacking where BG looks fine but IOB is accumulating
+        if carbRatio > 0, remainingCarbsForActiveMeals > 0 {
+            let remainingInsulinNeed = remainingCarbsForActiveMeals / carbRatio
+            guard currentIOB <= remainingInsulinNeed * 1.2 else { return baseState } // 20% buffer
+        }
 
         // All gates pass: enable meal-mode enhanced SMBs
         let enhancedMinutes = Decimal(Double(truncating: userMaxSMBMinutes as NSDecimalNumber) * mealSMBMultiplier)
@@ -46,6 +77,11 @@ struct MealModeState {
             isActive: true,
             effectiveMaxSMBMinutes: enhancedMinutes
         )
+    }
+
+    /// Reset hysteresis state (for testing)
+    static func resetHysteresis() {
+        gate3FailedLastCycle = false
     }
 }
 
@@ -103,6 +139,27 @@ final class MacroAdaptiveService {
     private var lastAdjustmentTime: Date?
     private var cumulativeScaling: [String: Double] = [:] // mealID -> cumulative factor
     private var adjustmentHistory: [AdaptiveAdjustment] = []
+    private var mealAttributedIOB: [String: Double] = [:] // mealID -> insulin attributed to this meal
+
+    // MARK: - Persistence Keys (for #9: survive app restart)
+
+    private static let cumulativeScalingKey = "V2CumulativeScaling"
+
+    /// Restore persisted cumulative scaling state on init.
+    init() {
+        if let data = UserDefaults.standard.data(forKey: Self.cumulativeScalingKey),
+           let restored = try? JSONDecoder().decode([String: Double].self, from: data)
+        {
+            cumulativeScaling = restored
+        }
+    }
+
+    /// Persist cumulative scaling to UserDefaults so it survives app restarts (#9).
+    private func persistCumulativeScaling() {
+        if let data = try? JSONEncoder().encode(cumulativeScaling) {
+            UserDefaults.standard.set(data, forKey: Self.cumulativeScalingKey)
+        }
+    }
 
     // MARK: - Main Loop Hook
 
@@ -117,6 +174,7 @@ final class MacroAdaptiveService {
     ///   - isf: Current insulin sensitivity factor (mg/dL per unit)
     ///   - cr: Current carb ratio (grams per unit)
     ///   - activeMealIDs: Set of mealIDs that have future entries
+    ///   - mealStartBGs: Map of mealID -> BG at meal start (from V2MealOutcome.bgAtMeal)
     ///   - context: Core Data context for fetching/updating entries
     ///   - userMaxSMBMinutes: User's configured maxSMBBasalMinutes
     ///   - mealSMBMultiplier: Meal-mode multiplier (default 2.0)
@@ -129,6 +187,7 @@ final class MacroAdaptiveService {
         isf: Double,
         cr: Double,
         activeMealIDs: Set<String>,
+        mealStartBGs: [String: Double] = [:],
         context: NSManagedObjectContext,
         userMaxSMBMinutes: Decimal,
         mealSMBMultiplier: Double = 2.0,
@@ -138,12 +197,22 @@ final class MacroAdaptiveService {
 
         let cgmAge: TimeInterval? = cgmTimestamp.map { Date().timeIntervalSince($0) }
 
+        // Compute total remaining carbs across all active meals for Gate 5 (#5)
+        var totalRemainingCarbs = 0.0
+        for mealID in activeMealIDs {
+            let info = await fetchAbsorbedAndRemainingCarbs(mealID: mealID, context: context)
+            totalRemainingCarbs += info.remaining
+        }
+
         // Always evaluate meal-mode state (independent of adaptive adjustments)
         let mealMode = MealModeState.evaluate(
             hasActiveMealEntries: hasActiveMeals,
             currentBG: currentBG,
             bgTrend: bgTrend,
             cgmAgeSeconds: cgmAge,
+            currentIOB: currentIOB,
+            remainingCarbsForActiveMeals: totalRemainingCarbs,
+            carbRatio: cr,
             userMaxSMBMinutes: userMaxSMBMinutes,
             mealSMBMultiplier: mealSMBMultiplier,
             bgFloor: bgFloor
@@ -151,7 +220,6 @@ final class MacroAdaptiveService {
 
         // Adaptive entry adjustment (only if we have data and active meals)
         guard let bg = currentBG,
-              let trend = bgTrend,
               let age = cgmAge,
               age < Self.maxCGMAge,
               hasActiveMeals
@@ -173,14 +241,13 @@ final class MacroAdaptiveService {
         // BG-Adaptive Real-Time Correction
         //
         // For each active meal, estimate the predicted BG impact from its curve entries
-        // and compare with actual BG. If reality diverges, scale remaining entries.
+        // and compare with actual CGM. If reality diverges, scale remaining entries.
         //
-        // Predicted BG impact = sum of carb entries already absorbed * (1/CR) * ISF
-        //   (how much BG should have risen from absorbed carbs minus IOB action)
-        // Actual BG delta = currentBG - BG at meal start (or baseline)
-        // Error = actual delta - predicted delta
-        //   Positive error: BG higher than expected → scale UP remaining entries
-        //   Negative error: BG lower than expected → scale DOWN remaining entries
+        // Change #1: Use meal-attributed IOB instead of total system IOB to avoid
+        // double-correcting when a prior correction bolus inflates total IOB.
+        //
+        // Change #2: Use cumulative BG delta (currentBG - mealStartBG) instead of
+        // trend extrapolation, which produces wildly inaccurate results.
 
         for mealID in activeMealIDs {
             // Compute absorbed carbs: sum of past entries for this meal
@@ -195,19 +262,17 @@ final class MacroAdaptiveService {
             // Skip if no entries have been absorbed yet
             guard absorbedCarbs > 0, remainingCarbs > 0 else { continue }
 
-            // Predicted BG impact: absorbed carbs → insulin needed → BG effect
-            // Each absorbed gram of carb-equivalent should raise BG by ISF/CR mg/dL
-            // IOB is working to bring it down. So predicted BG = baseline + (absorbed/CR)*ISF - IOB*ISF
-            let predictedBGImpact = (absorbedCarbs / cr) * isf - currentIOB * isf
+            // (#1) Use meal-attributed IOB instead of total system IOB
+            let mealIOB = getMealAttributedIOB(mealID: mealID)
 
-            // We don't know the pre-meal baseline BG, but we can use the trend:
-            // If actual BG is higher than predicted, the model is under-estimating the meal impact.
-            // The key signal: is BG rising faster/higher than the curve predicted?
-            //
-            // Simplified approach: use the BG error relative to predicted impact.
-            // error = (actual trend * minutes_since_first_entry / 5) vs predictedBGImpact
-            let trendBasedActual = trend * (absorbedAndRemaining.minutesSinceFirst / 5.0)
-            let error = trendBasedActual - predictedBGImpact
+            // Predicted BG impact: absorbed carbs raise BG, meal-attributed IOB lowers it
+            let predictedBGImpact = (absorbedCarbs / cr) * isf - mealIOB * isf
+
+            // (#2) Use cumulative BG delta instead of trend extrapolation
+            // This reflects what actually happened, not a linear projection of the current rate
+            let mealStartBG = mealStartBGs[mealID] ?? bg
+            let actualBGDelta = bg - mealStartBG
+            let error = actualBGDelta - predictedBGImpact
 
             // Only adjust if error exceeds threshold
             guard abs(error) > Self.errorThreshold else { continue }
@@ -215,7 +280,7 @@ final class MacroAdaptiveService {
             // Compute scaling factor: 1.0 + (error / scalingConstant)
             let rawScaling = 1.0 + (error / Self.scalingConstant)
 
-            // Blend: apply 50% of trend correction immediately (prevents overreaction)
+            // Blend: apply 50% of correction immediately (prevents overreaction)
             let blendedScaling = 1.0 + (rawScaling - 1.0) * 0.5
 
             // Scale future entries
@@ -229,9 +294,9 @@ final class MacroAdaptiveService {
             let adjustment = AdaptiveAdjustment(
                 timestamp: Date(),
                 actualBG: bg,
-                predictedBG: bg - error,
+                predictedBG: mealStartBG + predictedBGImpact,
                 error: error,
-                trendError: trend - (predictedBGImpact * 5.0 / max(1, absorbedAndRemaining.minutesSinceFirst)),
+                trendError: 0,
                 scalingFactor: blendedScaling,
                 cumulativeScaling: cumulativeScaling[mealID] ?? 1.0,
                 mealID: mealID
@@ -240,6 +305,18 @@ final class MacroAdaptiveService {
         }
 
         return mealMode
+    }
+
+    // MARK: - Meal-Attributed IOB Tracking (#1)
+
+    /// Record insulin attributed to a specific meal (upfront bolus + SMBs during meal entries).
+    func recordMealInsulin(mealID: String, units: Double) {
+        mealAttributedIOB[mealID] = (mealAttributedIOB[mealID] ?? 0) + units
+    }
+
+    /// Get the meal-attributed IOB for a specific meal.
+    func getMealAttributedIOB(mealID: String) -> Double {
+        return mealAttributedIOB[mealID] ?? 0
     }
 
     // MARK: - Entry Analysis
@@ -302,6 +379,7 @@ final class MacroAdaptiveService {
         guard abs(effectiveFactor - 1.0) > 0.01 else { return } // skip trivial adjustments
 
         cumulativeScaling[mealID] = finalCumulative
+        persistCumulativeScaling() // (#9) survive app restart
         lastAdjustmentTime = Date()
 
         await context.perform {
@@ -363,5 +441,7 @@ final class MacroAdaptiveService {
     /// Reset state for a completed meal.
     func mealCompleted(mealID: String) {
         cumulativeScaling.removeValue(forKey: mealID)
+        mealAttributedIOB.removeValue(forKey: mealID)
+        persistCumulativeScaling() // (#9) persist cleanup
     }
 }

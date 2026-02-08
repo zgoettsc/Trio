@@ -26,7 +26,7 @@ struct CronometerMealRecommendationView: View {
     let decayAdjustedCarbs: Double? // nil if fresh meal
 
     let isFactorLocked: Bool
-    let onApply: (Double, Double, Double) -> Void // (carbs, fat, protein) to populate
+    let onApply: (Double, Double, Double, Double) -> Void // (carbs, fat, protein, fiber) to populate
     let onAdjustFactor: (Double) -> Void
     let onToggleFactorLock: () -> Void
     let onDismiss: () -> Void
@@ -80,7 +80,7 @@ struct CronometerMealRecommendationView: View {
         v2SafeWindowMinutes: Int? = nil,
         v2DemandFactor: Double? = nil,
         v2CarbRatio: Double? = nil,
-        onApply: @escaping (Double, Double, Double) -> Void,
+        onApply: @escaping (Double, Double, Double, Double) -> Void,
         onAdjustFactor: @escaping (Double) -> Void,
         onToggleFactorLock: @escaping () -> Void = {},
         onAdjustV2Upfront: ((Double) -> Void)? = nil,
@@ -883,7 +883,7 @@ struct CronometerMealRecommendationView: View {
         VStack(spacing: 12) {
             Button(action: {
                 let scaledCarbs = meal.carbsDelta * editedFactor
-                onApply(scaledCarbs, recommendedFat, recommendedProtein)
+                onApply(scaledCarbs, recommendedFat, recommendedProtein, meal.fiberDelta)
             }) {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")

@@ -9,14 +9,16 @@ struct HealthNutritionEntry: JSON, Identifiable, Equatable {
     let carbs: Double
     let fat: Double
     let protein: Double
+    let fiber: Double
     let source: String
 
-    init(id: UUID = UUID(), date: Date, carbs: Double = 0, fat: Double = 0, protein: Double = 0, source: String = "") {
+    init(id: UUID = UUID(), date: Date, carbs: Double = 0, fat: Double = 0, protein: Double = 0, fiber: Double = 0, source: String = "") {
         self.id = id
         self.date = date
         self.carbs = carbs
         self.fat = fat
         self.protein = protein
+        self.fiber = fiber
         self.source = source
     }
 

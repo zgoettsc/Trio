@@ -16,6 +16,7 @@ struct V2MacroDosingSettingsView: BaseView {
     @State private var proteinThreshold: Double = 15
     @State private var proteinPlateau: Double = 40
     @State private var carbTau: Double = 35
+    @State private var fiberCoefficient: Double = 0.30
 
     // Track whether parameters have been customized (vs. defaults)
     @State private var paramsLoaded = false
@@ -197,8 +198,31 @@ struct V2MacroDosingSettingsView: BaseView {
                 }
                 .listRowBackground(Color.chart)
 
+                Section(header: Text("Fiber Effect")) {
+                    HStack {
+                        Text("Fiber Delay Coefficient")
+                        Spacer()
+                        Text(String(format: "%.2f min/g", fiberCoefficient))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $fiberCoefficient, in: 0.00 ... 1.00, step: 0.05)
+                        .onChange(of: fiberCoefficient) { _, newValue in
+                            saveCurveParameter { $0.fiberCoefficient = newValue }
+                        }
+
+                    insulinInfoBox(
+                        increase: "More delay per gram of fiber — use if high-fiber meals absorb much slower for you",
+                        decrease: "Less delay per gram of fiber — use if fiber doesn't noticeably slow your absorption"
+                    )
+
+                    Text("Fiber above 5g slows carb absorption by this many minutes per gram. At 0, fiber has no effect on tau.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.chart)
+
                 // MARK: - Example Calculation
-                Section(header: Text("Example: 65g Carbs, 28g Fat, 35g Protein")) {
+                Section(header: Text("Example: 65g Carbs, 28g Fat, 35g Protein, 12g Fiber")) {
                     let exProteinFactor = MacroAbsorptionEngine.proteinGlucoFactor(
                         proteinGrams: 35,
                         threshold: proteinThreshold,
@@ -206,8 +230,8 @@ struct V2MacroDosingSettingsView: BaseView {
                         maxFactor: proteinFactor
                     )
                     let exProteinEquiv = 35 * exProteinFactor
-                    let exFatEquiv = 28 * fatCoefficient
-                    let exTau = MacroAbsorptionEngine.carbTau(baseTau: carbTau, fatGrams: 28)
+                    let exFatEquiv = MacroAbsorptionEngine.fatCarbEquivalent(fatGrams: 28, maxCoeff: fatCoefficient)
+                    let exTau = MacroAbsorptionEngine.carbTau(baseTau: carbTau, fatGrams: 28, fiberGrams: 12, fiberCoefficient: fiberCoefficient)
 
                     HStack {
                         Text("Protein glucose-equiv")
@@ -231,13 +255,21 @@ struct V2MacroDosingSettingsView: BaseView {
                     }
 
                     HStack {
-                        Text("Fat-modified tau")
+                        Text("Fat+fiber-modified tau")
                         Spacer()
                         Text(String(format: "%.0f min", exTau))
                             .foregroundStyle(.secondary)
                     }
 
-                    Text("This shows how your current settings would calculate a meal with 65g carbs, 28g fat, and 35g protein.")
+                    let exFiberDelay = max(0, 12.0 - 5.0) * fiberCoefficient
+                    HStack {
+                        Text("Fiber delay contribution")
+                        Spacer()
+                        Text(String(format: "+%.1f min (from 12g fiber)", exFiberDelay))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("This shows how your current settings would calculate a meal with 65g carbs, 28g fat, 35g protein, and 12g fiber.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -340,6 +372,7 @@ struct V2MacroDosingSettingsView: BaseView {
         proteinThreshold = params.effectiveProteinThreshold
         proteinPlateau = params.effectiveProteinPlateau
         carbTau = params.effectiveCarbTau
+        fiberCoefficient = params.effectiveFiberCoefficient
         paramsLoaded = true
     }
 

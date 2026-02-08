@@ -23,6 +23,7 @@ struct V2MealOutcome: Codable, Identifiable {
     let carbs: Double
     let fat: Double
     let protein: Double
+    let fiber: Double  // (#15) dietary fiber for outcome tracking
 
     // V2 curve parameters used
     let tauCarb: Double
@@ -61,6 +62,38 @@ struct V2MealOutcome: Codable, Identifiable {
         let actualBG: Double
         let predictedBG: Double
     }
+
+    /// Return a copy with a different mealID (used to link outcome to engine-generated Core Data entries).
+    func withMealID(_ newMealID: String) -> V2MealOutcome {
+        V2MealOutcome(
+            id: id, date: date, mealID: newMealID,
+            carbs: carbs, fat: fat, protein: protein, fiber: fiber,
+            tauCarb: tauCarb, proteinFactor: proteinFactor, fatTotalEquiv: fatTotalEquiv,
+            upfrontPercent: upfrontPercent, curveSuggestedPercent: curveSuggestedPercent,
+            insulinDemandFactor: insulinDemandFactor, safeWindowMinutes: safeWindowMinutes,
+            garminSnapshot: garminSnapshot, bgAtMeal: bgAtMeal,
+            carbRatioAtMeal: carbRatioAtMeal, isfAtMeal: isfAtMeal,
+            mealSMBMultiplier: mealSMBMultiplier, mealModeWasActive: mealModeWasActive,
+            adaptiveAdjustments: adaptiveAdjustments, checkpoints: checkpoints,
+            hasConfoundingMeal: hasConfoundingMeal
+        )
+    }
+
+    /// Return a copy with a Garmin snapshot attached.
+    func withGarminSnapshot(_ snapshot: GarminContextSnapshot?) -> V2MealOutcome {
+        V2MealOutcome(
+            id: id, date: date, mealID: mealID,
+            carbs: carbs, fat: fat, protein: protein, fiber: fiber,
+            tauCarb: tauCarb, proteinFactor: proteinFactor, fatTotalEquiv: fatTotalEquiv,
+            upfrontPercent: upfrontPercent, curveSuggestedPercent: curveSuggestedPercent,
+            insulinDemandFactor: insulinDemandFactor, safeWindowMinutes: safeWindowMinutes,
+            garminSnapshot: snapshot, bgAtMeal: bgAtMeal,
+            carbRatioAtMeal: carbRatioAtMeal, isfAtMeal: isfAtMeal,
+            mealSMBMultiplier: mealSMBMultiplier, mealModeWasActive: mealModeWasActive,
+            adaptiveAdjustments: adaptiveAdjustments, checkpoints: checkpoints,
+            hasConfoundingMeal: hasConfoundingMeal
+        )
+    }
 }
 
 /// BG checkpoint for V2 outcome tracking with curve attribution.
@@ -76,6 +109,37 @@ struct V2BGCheckpoint: Codable {
         case protein    // 2-5h: protein gluconeogenesis onset
         case fat        // 4-9h: fat insulin resistance
         case overlap    // multiple curves active
+        case skip       // checkpoint not relevant for this meal's macros
+    }
+
+    /// Compute phase attribution dynamically based on actual meal macros (#3).
+    /// Prevents attributing errors to curves that weren't active for this meal.
+    static func computePhases(
+        carbs: Double,
+        fat: Double,
+        protein: Double,
+        proteinThreshold: Double
+    ) -> [V2BGCheckpoint] {
+        let hasProtein = protein > proteinThreshold
+        let hasFat = fat >= 5
+
+        return [
+            V2BGCheckpoint(hoursAfterMeal: 1, bgValue: nil, isClean: true, curvePhase: .carb),
+            V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
+            V2BGCheckpoint(hoursAfterMeal: 3, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein ? .protein : .carb),
+            V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein && hasFat ? .overlap :
+                                       hasProtein ? .protein :
+                                       hasFat ? .fat : .carb),
+            // (#11) 5h checkpoint captures protein peak (4-5h)
+            V2BGCheckpoint(hoursAfterMeal: 5, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein ? .protein : hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true,
+                           curvePhase: hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true,
+                           curvePhase: hasFat ? .fat : .skip),
+        ]
     }
 }
 
@@ -88,6 +152,7 @@ struct V2PersonalCurveParameters: Codable {
     var proteinPlateau: Double?     // base: 40g, learned
     var proteinFactor: Double?      // base: 0.35, learned
     var fatTotalCoeff: Double?      // base: 0.69, learned
+    var fiberCoefficient: Double?   // base: 0.30 min/g, user-adjustable
 
     // Garmin sensitivity rule weights (nil = use defaults)
     var sleepWeight: Double?
@@ -105,6 +170,7 @@ struct V2PersonalCurveParameters: Codable {
     var effectiveProteinPlateau: Double { proteinPlateau ?? 40 }
     var effectiveProteinFactor: Double { proteinFactor ?? 0.35 }
     var effectiveFatTotalCoeff: Double { fatTotalCoeff ?? 0.69 }
+    var effectiveFiberCoefficient: Double { fiberCoefficient ?? 0.30 }
 }
 
 // MARK: - Outcome Learning Store
@@ -175,6 +241,57 @@ final class V2OutcomeLearningStore {
         }
     }
 
+    // MARK: - Confounding Meal Detection (#4)
+
+    /// Detect confounding meals: if another meal was recorded within the 8h window
+    /// of a given outcome, mark individual checkpoints as dirty where the overlap occurs.
+    func detectConfoundingMeals() {
+        var outcomes = loadAll()
+        guard outcomes.count > 1 else { return }
+
+        var anyUpdated = false
+
+        for i in 0 ..< outcomes.count {
+            let mealTime = outcomes[i].date
+            let windowEnd = mealTime.addingTimeInterval(8 * 3600)
+
+            // Find any overlapping meals
+            let overlappingMeals = outcomes.filter { other in
+                other.id != outcomes[i].id &&
+                    other.date > mealTime &&
+                    other.date < windowEnd
+            }
+
+            if overlappingMeals.isEmpty {
+                if outcomes[i].hasConfoundingMeal {
+                    outcomes[i].hasConfoundingMeal = false
+                    anyUpdated = true
+                }
+                continue
+            }
+
+            // Per-checkpoint clean/dirty marking based on whether a confounding meal's
+            // absorption window overlaps that specific checkpoint time
+            outcomes[i].hasConfoundingMeal = true
+            for j in 0 ..< outcomes[i].checkpoints.count {
+                let cpTime = mealTime.addingTimeInterval(
+                    TimeInterval(outcomes[i].checkpoints[j].hoursAfterMeal * 3600)
+                )
+                // A checkpoint is dirty if any confounding meal started before the checkpoint time
+                // (its absorption is active at that point)
+                let isDirty = overlappingMeals.contains { $0.date < cpTime }
+                if isDirty {
+                    outcomes[i].checkpoints[j].isClean = false
+                    anyUpdated = true
+                }
+            }
+        }
+
+        if anyUpdated {
+            persistOutcomes(outcomes)
+        }
+    }
+
     // MARK: - Outcome Backfill
 
     /// Backfill BG outcomes for pending V2 meal outcomes.
@@ -207,6 +324,9 @@ final class V2OutcomeLearningStore {
         if anyUpdated {
             persistOutcomes(outcomes)
         }
+
+        // (#4) After backfilling BG data, detect confounding meals and mark dirty checkpoints
+        detectConfoundingMeals()
     }
 
     private func fetchClosestGlucose(
@@ -318,6 +438,10 @@ final class V2OutcomeLearningStore {
                     proteinWeight += recencyWeight * 0.3
                     fatAdjustment += error * 0.025 * recencyWeight * 0.3
                     fatWeight += recencyWeight * 0.3
+
+                case .skip:
+                    // (#3) This checkpoint is not relevant for this meal's macros — skip
+                    break
                 }
             }
         }
@@ -332,7 +456,7 @@ final class V2OutcomeLearningStore {
         if proteinWeight > 0 {
             let avgAdj = proteinAdjustment / proteinWeight
             let current = params.effectiveProteinFactor
-            params.proteinFactor = max(0.10, min(0.60, current + avgAdj))
+            params.proteinFactor = max(0.10, min(0.80, current + avgAdj)) // (#10) match slider range
         }
 
         if fatWeight > 0 {
@@ -348,6 +472,7 @@ final class V2OutcomeLearningStore {
     // MARK: - Create Outcome from Meal
 
     /// Create a V2 outcome record from a meal absorption result and context.
+    /// Uses dynamic phase attribution (#3) based on actual macros instead of hardcoded phases.
     static func createOutcome(
         from result: MacroAbsorptionResult,
         garminSnapshot: GarminContextSnapshot?,
@@ -355,15 +480,25 @@ final class V2OutcomeLearningStore {
         carbRatio: Double,
         isf: Double,
         smbMultiplier: Double,
-        mealModeActive: Bool
+        mealModeActive: Bool,
+        proteinThreshold: Double = 15
     ) -> V2MealOutcome {
-        V2MealOutcome(
+        // (#3) Dynamic phase attribution based on actual meal composition
+        let checkpoints = V2BGCheckpoint.computePhases(
+            carbs: result.originalCarbs,
+            fat: result.originalFat,
+            protein: result.originalProtein,
+            proteinThreshold: proteinThreshold
+        )
+
+        return V2MealOutcome(
             id: UUID(),
             date: Date(),
             mealID: result.mealID,
             carbs: result.originalCarbs,
             fat: result.originalFat,
             protein: result.originalProtein,
+            fiber: result.originalFiber,
             tauCarb: result.tauCarb,
             proteinFactor: result.proteinFactor,
             fatTotalEquiv: result.fatTotalEquiv,
@@ -378,14 +513,7 @@ final class V2OutcomeLearningStore {
             mealSMBMultiplier: smbMultiplier,
             mealModeWasActive: mealModeActive,
             adaptiveAdjustments: [],
-            checkpoints: [
-                V2BGCheckpoint(hoursAfterMeal: 1, bgValue: nil, isClean: true, curvePhase: .carb),
-                V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
-                V2BGCheckpoint(hoursAfterMeal: 3, bgValue: nil, isClean: true, curvePhase: .protein),
-                V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true, curvePhase: .overlap),
-                V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true, curvePhase: .fat),
-                V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true, curvePhase: .fat),
-            ],
+            checkpoints: checkpoints,
             hasConfoundingMeal: false
         )
     }
@@ -405,6 +533,182 @@ final class V2OutcomeLearningStore {
             currentParameters: params
         )
     }
+
+    // MARK: - Comprehensive Data Export
+
+    /// Build a full data export for every recorded meal: pre-meal BG trace,
+    /// all V2 engine inputs, all curve parameters, Garmin context with contribution
+    /// breakdown, user settings, scheduled dosing entries, and BG outcomes.
+    func buildComprehensiveExport(context: NSManagedObjectContext) async -> V2ComprehensiveExport {
+        let outcomes = loadAll()
+        let params = loadParameters()
+
+        // Snapshot current user settings at export time
+        let storage = BaseFileStorage()
+        let trioSettings = storage.retrieve(OpenAPS.Trio.settings, as: TrioSettings.self)
+            ?? TrioSettings()
+        let preferences = storage.retrieve(OpenAPS.Settings.preferences, as: Preferences.self)
+            ?? Preferences()
+
+        let settingsSnapshot = V2UserSettingsSnapshot(
+            // V2 engine settings
+            useV2MacroAbsorption: trioSettings.useV2MacroAbsorption,
+            insulinType: trioSettings.insulinType,
+            v2SafeWindowMinutesOverride: trioSettings.v2SafeWindowMinutes,
+            mealModeSMBMultiplier: Double(truncating: trioSettings.mealModeSMBMultiplier as NSDecimalNumber),
+            mealModeBGFloor: Double(truncating: trioSettings.mealModeBGFloor as NSDecimalNumber),
+            garminEnabled: trioSettings.garminEnabled,
+            v2OutcomeLearningEnabled: trioSettings.v2OutcomeLearningEnabled,
+            claudeRecalibrationEnabled: trioSettings.claudeRecalibrationEnabled,
+            // OpenAPS/oref settings that affect dosing
+            maxIOB: Double(truncating: preferences.maxIOB as NSDecimalNumber),
+            maxSMBBasalMinutes: Double(truncating: preferences.maxSMBBasalMinutes as NSDecimalNumber),
+            maxUAMSMBBasalMinutes: Double(truncating: preferences.maxUAMSMBBasalMinutes as NSDecimalNumber),
+            smbDeliveryRatio: Double(truncating: preferences.smbDeliveryRatio as NSDecimalNumber),
+            smbInterval: Double(truncating: preferences.smbInterval as NSDecimalNumber),
+            insulinCurve: preferences.curve.rawValue,
+            insulinPeakTime: Double(truncating: preferences.insulinPeakTime as NSDecimalNumber),
+            useCustomPeakTime: preferences.useCustomPeakTime,
+            maxCOB: Double(truncating: preferences.maxCOB as NSDecimalNumber),
+            enableSMBAlways: preferences.enableSMBAlways,
+            enableSMBWithCOB: preferences.enableSMBWithCOB,
+            enableSMBAfterCarbs: preferences.enableSMBAfterCarbs,
+            enableUAM: preferences.enableUAM,
+            autosensMax: Double(truncating: preferences.autosensMax as NSDecimalNumber),
+            autosensMin: Double(truncating: preferences.autosensMin as NSDecimalNumber)
+        )
+
+        var mealExports: [V2MealExportRecord] = []
+
+        for outcome in outcomes {
+            // Fetch 2h pre-meal BG trace (every 5 min reading)
+            let preMealStart = outcome.date.addingTimeInterval(-2 * 3600)
+            let preMealBG = await fetchGlucoseTrace(
+                from: preMealStart,
+                to: outcome.date,
+                context: context
+            )
+
+            // Fetch post-meal BG trace through end of absorption window (8h)
+            let postMealEnd = outcome.date.addingTimeInterval(8 * 3600)
+            let postMealBG = await fetchGlucoseTrace(
+                from: outcome.date,
+                to: min(postMealEnd, Date()),
+                context: context
+            )
+
+            // Fetch all scheduled V2 dosing entries for this meal (past + future)
+            let scheduled = await fetchScheduledEntries(
+                mealID: outcome.mealID,
+                context: context
+            )
+
+            // Re-derive Garmin sensitivity contributions from stored snapshot
+            let garminResult = GarminSensitivityModel.computeDemandFactor(from: outcome.garminSnapshot)
+            let garminContributions = garminResult.contributions.map {
+                V2GarminContribution(
+                    metric: $0.metric,
+                    value: $0.value,
+                    impact: $0.impact,
+                    description: $0.description
+                )
+            }
+
+            // Compute dosing summary from stored outcome fields
+            let upfrontCarbs = outcome.carbs * outcome.upfrontPercent * outcome.insulinDemandFactor
+            let proteinEquiv = outcome.protein * outcome.proteinFactor
+            let futureEntrySum = scheduled.reduce(0.0) { $0 + $1.carbEquivalent }
+            let totalEffectiveCarbs = upfrontCarbs + futureEntrySum
+
+            let dosingSummary = V2DosingSummary(
+                upfrontCarbsForBolus: upfrontCarbs,
+                upfrontInsulin: outcome.carbRatioAtMeal > 0
+                    ? upfrontCarbs / outcome.carbRatioAtMeal : 0,
+                proteinGlucoEquivalent: proteinEquiv,
+                fatCarbEquivalent: outcome.fatTotalEquiv,
+                totalEffectiveCarbs: totalEffectiveCarbs,
+                totalScheduledEntries: scheduled.count,
+                pendingEntries: scheduled.filter { !$0.isAbsorbed }.count,
+                absorbedEntries: scheduled.filter { $0.isAbsorbed }.count
+            )
+
+            let record = V2MealExportRecord(
+                outcome: outcome,
+                preMealBGTrace: preMealBG,
+                postMealBGTrace: postMealBG,
+                scheduledEntries: scheduled,
+                garminContributions: garminContributions,
+                dosingSummary: dosingSummary
+            )
+            mealExports.append(record)
+        }
+
+        return V2ComprehensiveExport(
+            exportDate: Date(),
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            totalMeals: outcomes.count,
+            currentParameters: params,
+            userSettings: settingsSnapshot,
+            meals: mealExports
+        )
+    }
+
+    /// Fetch all glucose readings in a time range as lightweight structs.
+    private func fetchGlucoseTrace(
+        from start: Date,
+        to end: Date,
+        context: NSManagedObjectContext
+    ) async -> [V2BGReading] {
+        await context.perform {
+            let request = GlucoseStored.fetchRequest()
+            request.predicate = NSPredicate(
+                format: "date >= %@ AND date <= %@",
+                start as NSDate,
+                end as NSDate
+            )
+            request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+
+            guard let results = try? context.fetch(request) else { return [] }
+
+            return results.compactMap { entry in
+                guard let date = entry.date else { return nil }
+                return V2BGReading(
+                    date: date,
+                    glucose: Int(entry.glucose),
+                    direction: entry.direction
+                )
+            }
+        }
+    }
+
+    /// Fetch all scheduled carb entries (V2 split-dosing + fat/protein entries) for a meal.
+    /// Returns both past (absorbed) and future (pending) entries sorted by date.
+    private func fetchScheduledEntries(
+        mealID: String,
+        context: NSManagedObjectContext
+    ) async -> [V2ScheduledEntry] {
+        await context.perform {
+            guard let uuid = UUID(uuidString: mealID) else { return [] }
+
+            let request: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
+            request.predicate = NSPredicate(format: "fpuID == %@", uuid as CVarArg)
+            request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+
+            guard let results = try? context.fetch(request) else { return [] }
+            let now = Date()
+
+            return results.compactMap { entry in
+                guard let date = entry.date else { return nil }
+                return V2ScheduledEntry(
+                    date: date,
+                    carbEquivalent: entry.carbs,
+                    entryType: entry.note ?? "unknown",
+                    isAbsorbed: date <= now,
+                    isFPU: entry.isFPU
+                )
+            }
+        }
+    }
 }
 
 // MARK: - Export Format
@@ -415,4 +719,106 @@ struct V2RecalibrationExport: Codable {
     let periodDays: Int
     let outcomes: [V2MealOutcome]
     let currentParameters: V2PersonalCurveParameters
+}
+
+// MARK: - Comprehensive Export Types
+
+/// A single BG reading for export.
+struct V2BGReading: Codable {
+    let date: Date
+    let glucose: Int        // mg/dL
+    let direction: String?  // CGM trend arrow (e.g. "Flat", "FortyFiveUp")
+}
+
+/// A single scheduled carb entry from the V2 dosing engine.
+/// These are the actual entries written to Core Data that oref sees.
+struct V2ScheduledEntry: Codable {
+    let date: Date              // when this entry is scheduled to be "absorbed"
+    let carbEquivalent: Double  // grams of carb-equivalent (may be from protein/fat curve)
+    let entryType: String       // "carb", "protein-gluco", "fat-resistance", or "unknown"
+    let isAbsorbed: Bool        // true if date is in the past (already consumed by oref)
+    let isFPU: Bool             // true for V2 curve entries (protein/fat/split-carb)
+}
+
+/// Garmin sensitivity contribution — one metric's effect on insulin demand.
+struct V2GarminContribution: Codable {
+    let metric: String          // e.g. "Sleep Score", "Body Battery", "Stress"
+    let value: String           // e.g. "42/100", "< 15"
+    let impact: Double          // e.g. -0.22 (negative = more resistant)
+    let description: String     // e.g. "Terrible sleep: 22% more resistant"
+}
+
+/// Computed dosing summary — what the V2 engine actually decided for this meal.
+struct V2DosingSummary: Codable {
+    let upfrontCarbsForBolus: Double    // carbs * upfrontPercent * demandFactor
+    let upfrontInsulin: Double          // upfrontCarbs / carbRatio (units)
+    let proteinGlucoEquivalent: Double  // protein * proteinFactor (grams carb-equiv)
+    let fatCarbEquivalent: Double       // from nonlinear ramp (grams carb-equiv)
+    let totalEffectiveCarbs: Double     // upfront + all scheduled entries
+    let totalScheduledEntries: Int      // count of entries in Core Data
+    let pendingEntries: Int             // entries still in the future
+    let absorbedEntries: Int            // entries already past
+}
+
+/// User settings snapshot at export time — all settings that affect V2 dosing.
+struct V2UserSettingsSnapshot: Codable {
+    // V2 engine settings
+    let useV2MacroAbsorption: Bool
+    let insulinType: String             // "rapidActing" or "ultraRapid"
+    let v2SafeWindowMinutesOverride: Int?
+    let mealModeSMBMultiplier: Double
+    let mealModeBGFloor: Double
+    let garminEnabled: Bool
+    let v2OutcomeLearningEnabled: Bool
+    let claudeRecalibrationEnabled: Bool
+
+    // OpenAPS/oref settings that affect insulin delivery
+    let maxIOB: Double
+    let maxSMBBasalMinutes: Double
+    let maxUAMSMBBasalMinutes: Double
+    let smbDeliveryRatio: Double
+    let smbInterval: Double             // minutes between SMBs
+    let insulinCurve: String            // "rapidActing", "ultraRapid", "bilinear"
+    let insulinPeakTime: Double         // minutes
+    let useCustomPeakTime: Bool
+    let maxCOB: Double
+    let enableSMBAlways: Bool
+    let enableSMBWithCOB: Bool
+    let enableSMBAfterCarbs: Bool
+    let enableUAM: Bool
+    let autosensMax: Double
+    let autosensMin: Double
+}
+
+/// Complete export record for one meal — everything the system knew and did.
+struct V2MealExportRecord: Codable {
+    // The full outcome record (macros, params, Garmin snapshot, checkpoints, adjustments)
+    let outcome: V2MealOutcome
+
+    // 2h pre-meal BG trace — every CGM reading from meal-2h to meal time
+    let preMealBGTrace: [V2BGReading]
+
+    // Post-meal BG trace — every CGM reading from meal time through 8h (or now)
+    let postMealBGTrace: [V2BGReading]
+
+    // All scheduled dosing entries for this meal — past (absorbed) and future (pending).
+    // Shows exactly what the V2 engine wrote to Core Data for oref to process.
+    let scheduledEntries: [V2ScheduledEntry]
+
+    // Garmin sensitivity breakdown — which metrics affected the demand factor and by how much.
+    // Re-derived from the stored GarminContextSnapshot at export time.
+    let garminContributions: [V2GarminContribution]
+
+    // Computed dosing summary — what the engine decided (upfront insulin, effective carbs, etc.)
+    let dosingSummary: V2DosingSummary
+}
+
+/// Top-level comprehensive export — the whole system picture.
+struct V2ComprehensiveExport: Codable {
+    let exportDate: Date
+    let appVersion: String
+    let totalMeals: Int
+    let currentParameters: V2PersonalCurveParameters
+    let userSettings: V2UserSettingsSnapshot
+    let meals: [V2MealExportRecord]
 }

@@ -8,6 +8,7 @@ struct CarbsEntry: JSON, Equatable, Hashable, Identifiable {
     let carbs: Decimal
     let fat: Decimal?
     let protein: Decimal?
+    var fiber: Decimal? = nil
     let note: String?
     let enteredBy: String?
     let isFPU: Bool?
@@ -33,6 +34,7 @@ extension CarbsEntry {
         case carbs
         case fat
         case protein
+        case fiber
         case note = "notes"
         case enteredBy
         case isFPU

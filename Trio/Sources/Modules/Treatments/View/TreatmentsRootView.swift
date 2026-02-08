@@ -611,8 +611,8 @@ extension Treatments {
                         v2SafeWindowMinutes: state.v2SafeWindowMinutes,
                         v2DemandFactor: state.v2DemandFactor,
                         v2CarbRatio: state.carbRatio > 0 ? Double(truncating: state.carbRatio as NSDecimalNumber) : nil,
-                        onApply: { carbs, fat, protein in
-                            state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein)
+                        onApply: { carbs, fat, protein, fiber in
+                            state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein, fiber: fiber)
                             handleDebouncedInput()
                         },
                         onAdjustFactor: { newFactor in

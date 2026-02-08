@@ -21,7 +21,8 @@ struct MacroAbsorptionResult {
     let originalCarbs: Double           // grams eaten
     let originalFat: Double             // grams eaten
     let originalProtein: Double         // grams eaten
-    let tauCarb: Double                 // fat-modified time constant (minutes)
+    let originalFiber: Double           // grams eaten (#15)
+    let tauCarb: Double                 // fat-and-fiber-modified time constant (minutes)
     let proteinFactor: Double           // 0-0.35, from smooth ramp
     let fatTotalEquiv: Double           // total fat carb-equivalent (grams)
     let safeWindowMinutes: Int          // window used for split
@@ -67,6 +68,7 @@ struct MacroAbsorptionEngine {
     ///   - carbs: Total carbohydrate grams from the meal
     ///   - fat: Total fat grams from the meal
     ///   - protein: Total protein grams from the meal
+    ///   - fiber: Total dietary fiber grams from the meal (#15)
     ///   - mealTime: When the meal was detected/eaten
     ///   - insulinDemandFactor: From Garmin model. 1.0 = normal, 1.25 = 25% more insulin needed
     ///   - upfrontPercent: User override for upfront %. nil = use curve-calculated default
@@ -77,6 +79,7 @@ struct MacroAbsorptionEngine {
         carbs: Double,
         fat: Double,
         protein: Double,
+        fiber: Double = 0,
         mealTime: Date,
         insulinDemandFactor: Double = 1.0,
         upfrontPercent: Double? = nil,
@@ -93,7 +96,7 @@ struct MacroAbsorptionEngine {
         let safeWindowMinutes = safeWindowOverride ?? insulinType.defaultSafeWindowMinutes
 
         // --- Curve 1: Carbohydrate absorption (gamma-shaped) ---
-        let tauCarb = carbTau(baseTau: params.effectiveCarbTau, fatGrams: fat)
+        let tauCarb = carbTau(baseTau: params.effectiveCarbTau, fatGrams: fat, fiberGrams: fiber, fiberCoefficient: params.effectiveFiberCoefficient)
         let curveSuggestedPercent = gammaCDFValue(tau: tauCarb, atMinutes: Double(safeWindowMinutes))
         let effectivePercent = upfrontPercent ?? curveSuggestedPercent
 
@@ -142,10 +145,16 @@ struct MacroAbsorptionEngine {
 
         // --- Curve 3: Fat insulin resistance (normalized gaussian) ---
         // Below 5g fat, effect is negligible — skip entirely.
-        // Uses personal fat coefficient. individualAdjustmentFactor is NOT applied here.
+        // (#6) Uses nonlinear saturating ramp instead of linear coefficient.
+        // At moderate fat levels, tau modification already handles timing shift;
+        // Curve 3 entries only add substantial demand at high fat levels where
+        // insulin resistance becomes the primary concern (Bell 2020).
         let fatTotalEquiv: Double
         if fat >= 5 {
-            fatTotalEquiv = fat * params.effectiveFatTotalCoeff
+            fatTotalEquiv = fatCarbEquivalent(
+                fatGrams: fat,
+                maxCoeff: params.effectiveFatTotalCoeff
+            )
             if fatTotalEquiv > 0.5 {
                 let fatEntries = generateNormalizedFatResistanceEntries(
                     totalEquiv: fatTotalEquiv,
@@ -195,6 +204,7 @@ struct MacroAbsorptionEngine {
             originalCarbs: carbs,
             originalFat: fat,
             originalProtein: protein,
+            originalFiber: fiber,
             tauCarb: tauCarb,
             proteinFactor: proteinFactor,
             fatTotalEquiv: fatTotalEquiv,
@@ -202,13 +212,46 @@ struct MacroAbsorptionEngine {
         )
     }
 
+    // MARK: - Nonlinear Fat Coefficient (#6)
+
+    /// Nonlinear fat carb-equivalent calculation using a saturating ramp.
+    /// At moderate fat levels (< threshold), the effect is minimal because the tau
+    /// modification already handles timing shift. At high fat levels (> plateau),
+    /// the full coefficient applies for insulin resistance demand.
+    ///
+    /// Based on Bell (2020): fat dose-response is nonlinear — 20g fat needs +6%,
+    /// 40g needs +6%, but 60g needs +21%. A single linear coefficient overcharges
+    /// moderate-fat meals.
+    static func fatCarbEquivalent(
+        fatGrams: Double,
+        maxCoeff: Double = 0.69,
+        threshold: Double = 10,
+        plateau: Double = 50
+    ) -> Double {
+        guard fatGrams >= 5 else { return 0 }
+        if fatGrams <= threshold { return fatGrams * 0.05 } // minimal effect — tau handles timing
+        if fatGrams >= plateau { return fatGrams * maxCoeff }
+        let rampFraction = (fatGrams - threshold) / (plateau - threshold)
+        let effectiveCoeff = 0.05 + rampFraction * (maxCoeff - 0.05)
+        return fatGrams * effectiveCoeff
+    }
+
     // MARK: - Curve 1: Gamma(2, tau) for Carbohydrates
 
-    /// Fat-modified time constant for the carb absorption gamma curve.
+    /// Fat- and fiber-modified time constant for the carb absorption gamma curve.
     /// More fat = slower gastric emptying = larger tau = later peak.
-    static func carbTau(baseTau: Double, fatGrams: Double) -> Double {
-        let fatSlowingCoefficient = 0.8 // minutes per gram of fat
-        return baseTau + (fatGrams * fatSlowingCoefficient)
+    /// (#15) Fiber independently slows gastric emptying and glucose absorption
+    /// (Torsdottir 1991, Jenkins 1978). The 0.3 min/g coefficient is conservative;
+    /// fiber's effect is real but smaller than fat's. The 5g threshold avoids
+    /// adjusting for trace amounts.
+    static func carbTau(baseTau: Double, fatGrams: Double, fiberGrams: Double = 0, fiberCoefficient: Double = 0.3) -> Double {
+        let fatSlowingCoefficient = 0.8   // minutes per gram of fat
+        let fiberThreshold = 5.0          // below this, fiber effect is negligible
+
+        let fatDelay = fatGrams * fatSlowingCoefficient
+        let fiberDelay = max(0, fiberGrams - fiberThreshold) * fiberCoefficient
+
+        return baseTau + fatDelay + fiberDelay
     }
 
     /// Gamma(2, tau) CDF: fraction of carbs absorbed by time t.

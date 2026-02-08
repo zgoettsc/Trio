@@ -87,12 +87,14 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
         async let carbSamples = fetchSamples(type: .dietaryCarbohydrates, from: startDate, to: endDate)
         async let fatSamples = fetchSamples(type: .dietaryFatTotal, from: startDate, to: endDate)
         async let proteinSamples = fetchSamples(type: .dietaryProtein, from: startDate, to: endDate)
+        async let fiberSamples = fetchSamples(type: .dietaryFiber, from: startDate, to: endDate)
 
         let carbs = try await carbSamples
         let fats = try await fatSamples
         let proteins = try await proteinSamples
+        let fibers = try await fiberSamples
 
-        debug(.service, "Nutrition fetch: \(carbs.count) carb samples, \(fats.count) fat samples, \(proteins.count) protein samples")
+        debug(.service, "Nutrition fetch: \(carbs.count) carb, \(fats.count) fat, \(proteins.count) protein, \(fibers.count) fiber samples")
         for sample in carbs.prefix(3) {
             debug(
                 .service,
@@ -101,7 +103,7 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
         }
 
         // Merge samples by timestamp and source into unified nutrition entries
-        return mergeNutritionSamples(carbs: carbs, fats: fats, proteins: proteins)
+        return mergeNutritionSamples(carbs: carbs, fats: fats, proteins: proteins, fibers: fibers)
     }
 
     // MARK: - Fetch Meals
@@ -190,16 +192,18 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
             let totalCarbs = entries.reduce(0) { $0 + $1.carbs }
             let totalFat = entries.reduce(0) { $0 + $1.fat }
             let totalProtein = entries.reduce(0) { $0 + $1.protein }
+            let totalFiber = entries.reduce(0) { $0 + $1.fiber }
 
             debug(
                 .service,
-                "Crono button: HealthKit current totals C=\(Int(totalCarbs))g F=\(Int(totalFat))g P=\(Int(totalProtein))g"
+                "Crono button: HealthKit current totals C=\(Int(totalCarbs))g F=\(Int(totalFat))g P=\(Int(totalProtein))g Fb=\(Int(totalFiber))g"
             )
 
             return snapshotStore.recordAndComputeLatestMeal(
                 currentCarbs: totalCarbs,
                 currentFat: totalFat,
-                currentProtein: totalProtein
+                currentProtein: totalProtein,
+                currentFiber: totalFiber
             )
         } catch {
             debug(.service, "Crono button: Failed to query HealthKit: \(error.localizedDescription)")
@@ -217,18 +221,20 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
             let totalCarbs = entries.reduce(0) { $0 + $1.carbs }
             let totalFat = entries.reduce(0) { $0 + $1.fat }
             let totalProtein = entries.reduce(0) { $0 + $1.protein }
+            let totalFiber = entries.reduce(0) { $0 + $1.fiber }
 
             let snapshot = NutritionSnapshot(
                 cumulativeCarbs: totalCarbs,
                 cumulativeFat: totalFat,
                 cumulativeProtein: totalProtein,
+                cumulativeFiber: totalFiber,
                 forDate: today
             )
             snapshotStore.saveSnapshot(snapshot)
 
             debug(
                 .service,
-                "Nutrition snapshot recorded: C=\(Int(totalCarbs))g F=\(Int(totalFat))g P=\(Int(totalProtein))g"
+                "Nutrition snapshot recorded: C=\(Int(totalCarbs))g F=\(Int(totalFat))g P=\(Int(totalProtein))g Fb=\(Int(totalFiber))g"
             )
         } catch {
             debug(.service, "Failed to record nutrition snapshot: \(error.localizedDescription)")
@@ -287,7 +293,8 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
     private func mergeNutritionSamples(
         carbs: [HKQuantitySample],
         fats: [HKQuantitySample],
-        proteins: [HKQuantitySample]
+        proteins: [HKQuantitySample],
+        fibers: [HKQuantitySample]
     ) -> [HealthNutritionEntry] {
         // Build a dictionary keyed by (rounded timestamp, source) for merging
         struct SampleKey: Hashable {
@@ -295,7 +302,7 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
             let source: String
         }
 
-        var merged: [SampleKey: (carbs: Double, fat: Double, protein: Double, date: Date, source: String)] = [:]
+        var merged: [SampleKey: (carbs: Double, fat: Double, protein: Double, fiber: Double, date: Date, source: String)] = [:]
 
         func key(for sample: HKQuantitySample) -> SampleKey {
             let ts = Int(sample.startDate.timeIntervalSinceReferenceDate / 2) * 2
@@ -304,27 +311,34 @@ final class BaseNutritionHealthService: NutritionHealthService, Injectable {
 
         for sample in carbs {
             let k = key(for: sample)
-            var entry = merged[k] ?? (carbs: 0, fat: 0, protein: 0, date: sample.startDate, source: sample.sourceRevision.source.name)
+            var entry = merged[k] ?? (carbs: 0, fat: 0, protein: 0, fiber: 0, date: sample.startDate, source: sample.sourceRevision.source.name)
             entry.carbs += sample.quantity.doubleValue(for: .gram())
             merged[k] = entry
         }
 
         for sample in fats {
             let k = key(for: sample)
-            var entry = merged[k] ?? (carbs: 0, fat: 0, protein: 0, date: sample.startDate, source: sample.sourceRevision.source.name)
+            var entry = merged[k] ?? (carbs: 0, fat: 0, protein: 0, fiber: 0, date: sample.startDate, source: sample.sourceRevision.source.name)
             entry.fat += sample.quantity.doubleValue(for: .gram())
             merged[k] = entry
         }
 
         for sample in proteins {
             let k = key(for: sample)
-            var entry = merged[k] ?? (carbs: 0, fat: 0, protein: 0, date: sample.startDate, source: sample.sourceRevision.source.name)
+            var entry = merged[k] ?? (carbs: 0, fat: 0, protein: 0, fiber: 0, date: sample.startDate, source: sample.sourceRevision.source.name)
             entry.protein += sample.quantity.doubleValue(for: .gram())
             merged[k] = entry
         }
 
+        for sample in fibers {
+            let k = key(for: sample)
+            var entry = merged[k] ?? (carbs: 0, fat: 0, protein: 0, fiber: 0, date: sample.startDate, source: sample.sourceRevision.source.name)
+            entry.fiber += sample.quantity.doubleValue(for: .gram())
+            merged[k] = entry
+        }
+
         return merged.values
-            .map { HealthNutritionEntry(date: $0.date, carbs: $0.carbs, fat: $0.fat, protein: $0.protein, source: $0.source) }
+            .map { HealthNutritionEntry(date: $0.date, carbs: $0.carbs, fat: $0.fat, protein: $0.protein, fiber: $0.fiber, source: $0.source) }
             .sorted { $0.date < $1.date }
     }
 
