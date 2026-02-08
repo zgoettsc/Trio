@@ -435,17 +435,45 @@ final class OpenAPS {
             var effectiveSMBMinutes = activeOverrides.first?.smbMinutes?.decimalValue ?? maxSMBBasalMinutes
             var effectiveUAMMinutes = activeOverrides.first?.uamMinutes?.decimalValue ?? maxUAMBasalMinutes
 
-            // V2 Meal-Mode SMB Enhancement: temporarily increase maxSMB during active meal absorption
+            // V2 Meal-Mode SMB Enhancement: temporarily increase maxSMB during active meal absorption.
+            // All 4 safety gates must pass independently each cycle:
+            //   Gate 1: Active V2 meal entries exist in the future
+            //   Gate 2: Current BG > configurable floor (default 90 mg/dL)
+            //   Gate 3: BG trend is flat or rising (not dropping)
+            //   Gate 4: CGM data is fresh (< 10 min old)
             let trioSettings = self.storage.retrieve(OpenAPS.Trio.settings, as: TrioSettings.self) ?? TrioSettings()
-            if trioSettings.useV2MacroAbsorption {
-                let hasFutureFPU = self.hasActiveFPUEntries()
-                if hasFutureFPU {
-                    let latestBG = glucose.first
-                    let bgFloor = Double(truncating: trioSettings.mealModeBGFloor as NSDecimalNumber)
-                    let multiplier = Double(truncating: trioSettings.mealModeSMBMultiplier as NSDecimalNumber)
+            if trioSettings.useV2MacroAbsorption, self.hasActiveV2MealEntries() {
+                let bgFloor = Double(truncating: trioSettings.mealModeBGFloor as NSDecimalNumber)
+                let multiplier = Double(truncating: trioSettings.mealModeSMBMultiplier as NSDecimalNumber)
 
-                    // Check meal-mode safety gates inline (simplified — full gate check in MacroAdaptiveService)
-                    if let latestBGValue = latestBG, Double(latestBGValue.glucose) > bgFloor {
+                if let latestBG = glucose.first,
+                   let cgmDate = latestBG.date,
+                   // Gate 2: BG above floor
+                   Double(latestBG.glucose) > bgFloor,
+                   // Gate 4: CGM freshness (< 10 minutes old)
+                   Date().timeIntervalSince(cgmDate) < 600
+                {
+                    // Gate 3: BG trend is flat or rising (not dropping fast)
+                    let trendOK: Bool = {
+                        // Use CGM direction arrow if available
+                        if let direction = latestBG.directionEnum {
+                            switch direction {
+                            case .doubleDown, .singleDown, .fortyFiveDown:
+                                return false // BG dropping, don't enhance
+                            default:
+                                return true // flat, rising, or slightly falling
+                            }
+                        }
+                        // Fallback: compare two most recent readings
+                        if glucose.count >= 2 {
+                            let delta = Int(latestBG.glucose) - Int(glucose[1].glucose)
+                            return delta >= -5 // allow up to 5 mg/dL drop per 5 min
+                        }
+                        return true // insufficient data, assume OK
+                    }()
+
+                    if trendOK {
+                        // All 4 gates passed — enhance SMB delivery for both remaining carbs and fat/protein
                         effectiveSMBMinutes = Decimal(Double(truncating: effectiveSMBMinutes as NSDecimalNumber) * multiplier)
                         effectiveUAMMinutes = Decimal(Double(truncating: effectiveUAMMinutes as NSDecimalNumber) * multiplier)
                     }
@@ -482,9 +510,11 @@ final class OpenAPS {
         }
     }
 
-    /// V2: Check if any FPU entries exist in the future (for meal-mode gate).
+    /// V2: Check if any future V2 meal entries exist (carb-absorption, protein-gluconeogenesis,
+    /// or fat-resistance entries). All three types are tagged isFPU=true and have future dates.
+    /// This covers BOTH remaining carbs from split dosing AND fat/protein delayed entries.
     /// Called from within context.perform so must be synchronous.
-    private func hasActiveFPUEntries() -> Bool {
+    private func hasActiveV2MealEntries() -> Bool {
         let fetchRequest: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
         fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
             NSPredicate(format: "isFPU == YES"),

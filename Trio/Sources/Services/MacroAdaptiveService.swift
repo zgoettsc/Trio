@@ -170,12 +170,117 @@ final class MacroAdaptiveService {
         guard bg >= Self.lowBGGuard else { return mealMode } // don't increase entries when low
         guard bg <= Self.highBGGuard else { return mealMode } // don't chase extreme highs
 
-        // For now, we skip the predicted BG computation (requires curve state tracking).
-        // The BG-adaptive adjustments will be wired up once the full loop integration
-        // is connected and we have access to the curve state per meal.
-        // The meal-mode SMB enhancement is the primary Phase B deliverable.
+        // BG-Adaptive Real-Time Correction
+        //
+        // For each active meal, estimate the predicted BG impact from its curve entries
+        // and compare with actual BG. If reality diverges, scale remaining entries.
+        //
+        // Predicted BG impact = sum of carb entries already absorbed * (1/CR) * ISF
+        //   (how much BG should have risen from absorbed carbs minus IOB action)
+        // Actual BG delta = currentBG - BG at meal start (or baseline)
+        // Error = actual delta - predicted delta
+        //   Positive error: BG higher than expected → scale UP remaining entries
+        //   Negative error: BG lower than expected → scale DOWN remaining entries
+
+        for mealID in activeMealIDs {
+            // Compute absorbed carbs: sum of past entries for this meal
+            let absorbedAndRemaining = await fetchAbsorbedAndRemainingCarbs(
+                mealID: mealID,
+                context: context
+            )
+
+            let absorbedCarbs = absorbedAndRemaining.absorbed
+            let remainingCarbs = absorbedAndRemaining.remaining
+
+            // Skip if no entries have been absorbed yet
+            guard absorbedCarbs > 0, remainingCarbs > 0 else { continue }
+
+            // Predicted BG impact: absorbed carbs → insulin needed → BG effect
+            // Each absorbed gram of carb-equivalent should raise BG by ISF/CR mg/dL
+            // IOB is working to bring it down. So predicted BG = baseline + (absorbed/CR)*ISF - IOB*ISF
+            let predictedBGImpact = (absorbedCarbs / cr) * isf - currentIOB * isf
+
+            // We don't know the pre-meal baseline BG, but we can use the trend:
+            // If actual BG is higher than predicted, the model is under-estimating the meal impact.
+            // The key signal: is BG rising faster/higher than the curve predicted?
+            //
+            // Simplified approach: use the BG error relative to predicted impact.
+            // error = (actual trend * minutes_since_first_entry / 5) vs predictedBGImpact
+            let trendBasedActual = trend * (absorbedAndRemaining.minutesSinceFirst / 5.0)
+            let error = trendBasedActual - predictedBGImpact
+
+            // Only adjust if error exceeds threshold
+            guard abs(error) > Self.errorThreshold else { continue }
+
+            // Compute scaling factor: 1.0 + (error / scalingConstant)
+            let rawScaling = 1.0 + (error / Self.scalingConstant)
+
+            // Blend: apply 50% of trend correction immediately (prevents overreaction)
+            let blendedScaling = 1.0 + (rawScaling - 1.0) * 0.5
+
+            // Scale future entries
+            await scaleFutureEntries(
+                mealID: mealID,
+                scalingFactor: blendedScaling,
+                context: context
+            )
+
+            // Record adjustment for audit trail
+            let adjustment = AdaptiveAdjustment(
+                timestamp: Date(),
+                actualBG: bg,
+                predictedBG: bg - error,
+                error: error,
+                trendError: trend - (predictedBGImpact * 5.0 / max(1, absorbedAndRemaining.minutesSinceFirst)),
+                scalingFactor: blendedScaling,
+                cumulativeScaling: cumulativeScaling[mealID] ?? 1.0,
+                mealID: mealID
+            )
+            adjustmentHistory.append(adjustment)
+        }
 
         return mealMode
+    }
+
+    // MARK: - Entry Analysis
+
+    /// Fetch absorbed (past) and remaining (future) carbs for a meal.
+    private func fetchAbsorbedAndRemainingCarbs(
+        mealID: String,
+        context: NSManagedObjectContext
+    ) async -> (absorbed: Double, remaining: Double, minutesSinceFirst: Double) {
+        await context.perform {
+            let fetchRequest: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
+            fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                NSPredicate(format: "fpuID == %@", UUID(uuidString: mealID)! as CVarArg),
+                NSPredicate(format: "isFPU == YES")
+            ])
+            fetchRequest.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+
+            do {
+                let entries = try context.fetch(fetchRequest)
+                let now = Date()
+                var absorbed = 0.0
+                var remaining = 0.0
+                var earliestDate: Date?
+
+                for entry in entries {
+                    guard let entryDate = entry.date else { continue }
+                    if earliestDate == nil { earliestDate = entryDate }
+
+                    if entryDate <= now {
+                        absorbed += entry.carbs
+                    } else {
+                        remaining += entry.carbs
+                    }
+                }
+
+                let minutesSinceFirst = earliestDate.map { now.timeIntervalSince($0) / 60.0 } ?? 0
+                return (absorbed, remaining, minutesSinceFirst)
+            } catch {
+                return (0, 0, 0)
+            }
+        }
     }
 
     /// Scale future entries for a given mealID by the adjustment factor.

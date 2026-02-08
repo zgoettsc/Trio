@@ -603,6 +603,14 @@ extension Treatments {
                         minutesSinceMeal: state.cronometerMealMinutesAgo,
                         decayAdjustedCarbs: state.cronometerDecayAdjustedCarbs,
                         isFactorLocked: state.cronometerFactorLocked,
+                        v2UpfrontCarbs: state.v2UpfrontCarbs,
+                        v2UpfrontPercent: state.v2UpfrontPercent,
+                        v2CurveSuggestedPercent: state.v2CurveSuggestedPercent,
+                        v2TauCarb: state.v2TauCarb,
+                        v2FatTotalEquiv: state.v2FatTotalEquiv,
+                        v2SafeWindowMinutes: state.v2SafeWindowMinutes,
+                        v2DemandFactor: state.v2DemandFactor,
+                        v2CarbRatio: state.carbRatio > 0 ? Double(truncating: state.carbRatio as NSDecimalNumber) : nil,
                         onApply: { carbs, fat, protein in
                             state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein)
                             handleDebouncedInput()
@@ -612,6 +620,9 @@ extension Treatments {
                         },
                         onToggleFactorLock: {
                             state.toggleCronometerFactorLock()
+                        },
+                        onAdjustV2Upfront: { newPercent in
+                            state.adjustV2UpfrontPercent(newPercent)
                         },
                         onDismiss: {
                             state.showCronometerSheet = false

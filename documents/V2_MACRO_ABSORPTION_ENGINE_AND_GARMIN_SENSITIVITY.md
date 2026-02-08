@@ -2,7 +2,7 @@
 
 **Version:** 2.6
 **Date:** February 8, 2026
-**Status:** Integration complete — V2 components wired into Crono flow, settings UI, outcome analysis, macro on-board display with decay chart
+**Status:** Integration complete — V2 components wired into Crono flow, settings UI, outcome analysis, macro on-board display with decay chart. v2.6 update: Split dosing slider wired into CronometerMealRecommendationView, all 4 meal-mode SMB safety gates implemented in OpenAPS.swift, BG-adaptive real-time correction implemented in MacroAdaptiveService.
 **Prerequisite:** V1 Cronometer Integration (Phases 1-5b, implemented)
 
 ---
@@ -1945,43 +1945,36 @@ The recommendation banner clearly states: **"Carbs logged automatically. Do NOT 
 
 ### 8.6 User Controls: Upfront Bolus Slider
 
-The "Adjust" action on the recommendation banner opens a slider interface:
+**Status:** IMPLEMENTED (v2.6) — Slider wired inline into `CronometerMealRecommendationView`.
 
-```
-+----------------------------------------------+
-|  Adjust Bolus Split                           |
-|                                               |
-|  Upfront bolus: [====|=========] 28%          |
-|                                               |
-|  Curve-suggested: 28% (18g)                   |
-|  Current setting: 28% (18g)                   |
-|  Remaining via SMBs: 47g                      |
-|                                               |
-|  Meal SMB Multiplier: [====|====] 2.0x        |
-|                                               |
-|  [Apply]  [Reset to Curve Default]            |
-+----------------------------------------------+
-```
+The V2 split dosing section appears in the Cronometer recommendation sheet when V2 is enabled. It shows:
+
+1. **Fat delay explanation:** When fat > 5g, displays the fat-modified tau and explains slowed absorption
+2. **Gamma curve reference:** Shows what % the curve calculated and the safe window duration
+3. **Upfront % slider:** 0-100% with a white reference mark at the curve-suggested value
+4. **Real-time preview:** Shows upfront grams, upfront units (at current CR), and remaining grams via SMBs
+5. **High-fat warning:** When slider > 1.5x curve suggestion with >5g fat, red warning about hypoglycemia risk
+
+**Implementation flow:**
+- User adjusts slider → `onAdjustV2Upfront` callback → `TreatmentsStateModel.adjustV2UpfrontPercent()`
+- Recalculates `v2UpfrontCarbs` and `cronometerFPUCarbEquivalents` in real-time
+- When user taps "Apply":
+  - `applyCronometerRecommendation()` sets `self.carbs = v2UpfrontCarbs` (upfront portion only)
+  - Threads full carbs via `carbsStorage.v2FullCarbsForEngine` and override via `carbsStorage.v2UpfrontPercentOverride`
+  - Bolus calculator recommends insulin for upfront carbs only
+  - `saveCarbEquivalents()` receives full carbs for engine → generates correct remaining curve entries
+  - No carb double-counting: original entry has upfront carbs, future entries have remaining carbs
+
+**Two slider locations:**
+- **CronometerMealRecommendationView** (WIRED): Inline V2 section shown when V2 is enabled
+- **BolusAdjustSliderView** (standalone): Built for the MealDetectedBanner "Adjust" flow — available but not yet wired to a banner presenter
 
 The slider ranges from 0% to 100%:
 - **0%:** No upfront bolus, everything via SMBs (maximum caution)
 - **Curve-suggested %:** The gamma curve's calculated safe amount (default)
 - **100%:** Full bolus upfront (like the current system, for low-fat meals the user trusts)
 
-**High-fat upfront warning:** When the user slides more than 50% above the curve-suggested percentage for a meal with >15g fat, a soft warning is shown:
-
-```
-"Curve suggests 28% for this meal (28g fat).
- 100% upfront may cause a low as fat delays carb absorption.
- [Keep 100%]  [Use Suggested 28%]"
-```
-
-The user can still override — this is informed consent, not a hard block. For meals with <=15g fat, no warning is shown since the absorption delay is minimal.
-
-The meal SMB multiplier slider ranges from 1.0x to 3.0x:
-- **1.0x:** Normal SMB behavior (no enhancement)
-- **2.0x:** Default, doubles maxSMB during meal absorption
-- **3.0x:** Maximum aggressiveness for large meals
+The meal SMB multiplier (configurable in V2 Settings, 1.0x-3.0x) controls how aggressively the loop delivers the remaining carbs + fat/protein via SMBs.
 
 ---
 
@@ -2073,23 +2066,42 @@ This rich context enables the ML model (Phase G) and Claude recalibration.
 
 **Goal:** Compare predicted vs actual BG and adjust future entries every loop cycle. Enable meal-mode SMB enhancement.
 
+**Status:** IMPLEMENTED (v2.6)
+
 **New files:**
 - `Trio/Sources/Services/MacroAdaptiveService.swift` — runs BEFORE oref each loop cycle
-- `Trio/Sources/Models/MealModeState.swift` — meal-mode SMB evaluation with safety gates
 
 **Modified files:**
-- `Trio/Sources/APS/OpenAPS/OpenAPS.swift` — hook adaptive service BEFORE oref in loop cycle
-- `Trio/Sources/APS/Storage/CarbsStorage.swift` — method to update future entries by mealID
+- `Trio/Sources/APS/OpenAPS/OpenAPS.swift` — meal-mode SMB enhancement with all 4 safety gates inline
+- `Trio/Sources/APS/Storage/CarbsStorage.swift` — V2 upfront override threading via `v2FullCarbsForEngine` and `v2UpfrontPercentOverride`
 
-**Steps:**
-1. Implement `MacroAdaptiveService` with predicted BG computation
-2. Hook into the loop cycle **BEFORE oref runs** (not after)
-3. Implement entry scaling logic with safety constraints (+/-50% per cycle, +/-100% cumulative)
-4. Implement `MealModeState` evaluation with all safety gates
-5. Pass `effectiveMaxSMB` to oref profile before each cycle
-6. Store prediction history for outcome learning
-7. Add dampening to prevent oscillation (minimum 15-min between adjustments)
-8. Add unit tests for safety gate logic
+**What was implemented:**
+
+1. **Meal-mode SMB enhancement** in `OpenAPS.swift:prepareTrioCustomOrefVariables()`:
+   - Gate 1: `hasActiveV2MealEntries()` — checks for any future isFPU entries (covers remaining carbs, protein, AND fat entries)
+   - Gate 2: Current BG > configurable floor (default 90 mg/dL)
+   - Gate 3: BG trend flat or rising — uses CGM direction arrow (`directionEnum`), with fallback to comparing latest 2 readings (allows up to 5 mg/dL drop per 5 min)
+   - Gate 4: CGM freshness — reading must be < 10 minutes old
+   - When all 4 gates pass, both `smbMinutes` and `uamMinutes` are multiplied by `mealSMBMultiplier` (default 2.0x)
+   - Covers BOTH remaining carbs from split dosing AND fat/protein delayed entries
+
+2. **BG-adaptive real-time correction** in `MacroAdaptiveService.runAdaptiveCycle()`:
+   - For each active meal, fetches absorbed (past) and remaining (future) carb entries
+   - Estimates predicted BG impact: `(absorbedCarbs / CR) * ISF - IOB * ISF`
+   - Compares with actual BG trend to compute error
+   - Applies blended scaling (50% of trend correction) to prevent overreaction
+   - Calls `scaleFutureEntries()` which enforces all safety guardrails:
+     - Max single-cycle: +/-50%
+     - Max cumulative: 0x-2x of original
+     - 15-minute damping between adjustments
+     - Low BG guard (< 80 mg/dL: don't increase)
+     - High BG guard (> 300 mg/dL: cap at original)
+   - Records adjustment history for audit trail
+
+3. **Split dosing upfront override** wired through `CarbsStorage`:
+   - `v2FullCarbsForEngine: Double?` — set before `storeCarbs()`, passes full meal carbs to engine even when entry contains only upfront carbs
+   - `v2UpfrontPercentOverride: Double?` — passes user's slider choice to the engine
+   - Both cleared after single use (per-storeCarbs-call semantics)
 
 ---
 
@@ -2729,20 +2741,31 @@ V2 builds on V1's infrastructure — it does NOT replace it. The V1 components r
 
 The V1 document (`CRONOMETER_INTEGRATION_AND_AUTO_DOSING_VISION.md`) remains the reference for Phases 1-5b. This V2 document covers the next generation.
 
-### V2 Integration Summary (v2.5)
+### V2 Integration Summary (v2.6)
 
 All V2 components are now wired together through the existing Crono dosing flow:
 
 | Component | Integration Point | Status |
 |-----------|------------------|--------|
-| MacroAbsorptionEngine | CarbsStorage.processFPU() + TreatmentsStateModel.calculateCronometerRecommendation() | **Wired** |
+| MacroAbsorptionEngine | CarbsStorage.saveCarbEquivalents() + TreatmentsStateModel.calculateCronometerRecommendation() | **Wired** |
 | GarminSensitivityModel | CarbsStorage (entry generation) + TreatmentsStateModel (Crono preview) | **Wired** |
 | GarminFirestoreService | Fetched before both CarbsStorage and Crono recommendation | **Wired** |
 | V2OutcomeLearningStore | TreatmentsStateModel.applyCronometerRecommendation() records V2MealOutcome | **Wired** |
 | V2MacroDosingSettingsView | Settings → Algorithm → V2 Macro Dosing | **Wired** |
 | V2OutcomeAnalysisView | Settings → Algorithm → V2 Macro Dosing → Analysis | **Wired** |
-| MacroAdaptiveService | Loop cycle (BEFORE oref) | Coded, not yet wired |
+| Split Dosing Slider | CronometerMealRecommendationView (inline V2 section) | **Wired (v2.6)** |
+| Meal-Mode SMB Enhancement | OpenAPS.swift:prepareTrioCustomOrefVariables() — all 4 safety gates | **Wired (v2.6)** |
+| BG-Adaptive Correction | MacroAdaptiveService.runAdaptiveCycle() — predicted vs actual BG | **Implemented (v2.6)** |
+| CarbsStorage V2 Override | v2FullCarbsForEngine + v2UpfrontPercentOverride threading | **Wired (v2.6)** |
 | MacrosOnBoardTracker | HK observer → banner display | Coded, not yet wired |
 | SensitivityRecalibrationService | Weekly Claude analysis | Coded, not yet wired |
 | MacroOnBoardCalculator | HomeRootView (COB display) + TreatmentsRootView (decay chart) | **Wired** |
 | MacroDecayChartView | TreatmentsRootView, after ForecastChart | **Wired** |
+
+#### v2.6 Changes (February 2026)
+
+1. **Split dosing slider wired into UI:** The `CronometerMealRecommendationView` now includes an inline V2 section with the upfront % slider when V2 is enabled. The slider shows the gamma curve's suggested percentage as a reference mark, real-time preview of upfront grams/units vs remaining-via-SMBs, and a high-fat warning when exceeding 1.5x the curve suggestion. The `applyCronometerRecommendation()` method now sets `self.carbs = v2UpfrontCarbs` for V2 (not full carbs), preventing carb double-counting.
+
+2. **All 4 meal-mode SMB safety gates implemented:** The inline check in `OpenAPS.swift` now evaluates all 4 gates: (1) active V2 entries, (2) BG above floor, (3) BG trend flat/rising via `directionEnum` with 2-reading fallback, (4) CGM freshness < 10 min. Previously only gates 1 and 2 were checked. The method was renamed from `hasActiveFPUEntries()` to `hasActiveV2MealEntries()` to clarify that it covers ALL V2 entry types (remaining carbs, protein-gluconeogenesis, fat-resistance), not just fat/protein units.
+
+3. **BG-adaptive real-time correction implemented:** The `MacroAdaptiveService.runAdaptiveCycle()` method now computes predicted BG impact from absorbed curve entries, compares with actual CGM trend, and scales remaining future entries when error exceeds 15 mg/dL threshold. Uses 50% blended correction to prevent overreaction. All safety guardrails enforced: +/-50% per cycle, 0-2x cumulative, 15-min damping, BG floor/ceiling guards.

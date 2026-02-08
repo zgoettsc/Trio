@@ -10,6 +10,17 @@ protocol CarbsObserver {
 
 protocol CarbsStorage {
     var updatePublisher: AnyPublisher<Void, Never> { get }
+
+    /// V2: When set before calling storeCarbs, saveCarbEquivalents uses this value
+    /// as the engine's carb input instead of the entry's carbs. This allows the entry
+    /// to contain only upfront carbs (for bolus calculation) while the engine receives
+    /// full meal carbs (for correct curve generation). Cleared after use.
+    var v2FullCarbsForEngine: Double? { get set }
+
+    /// V2: When set before calling storeCarbs, the upfront percent override from the
+    /// user's slider adjustment is passed to the absorption engine. nil = use curve default.
+    var v2UpfrontPercentOverride: Double? { get set }
+
     func storeCarbs(_ carbs: [CarbsEntry], areFetchedFromRemote: Bool) async throws
     func deleteCarbsEntryStored(_ treatmentObjectID: NSManagedObjectID) async
     func syncDate() -> Date
@@ -32,6 +43,10 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
     var updatePublisher: AnyPublisher<Void, Never> {
         updateSubject.eraseToAnyPublisher()
     }
+
+    // V2 split dosing: full meal carbs for engine (set before storeCarbs, cleared after)
+    var v2FullCarbsForEngine: Double?
+    var v2UpfrontPercentOverride: Double?
 
     private let context: NSManagedObjectContext
 
@@ -212,11 +227,18 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
 
             // V2 three-curve engine path
             if trioSettings.useV2MacroAbsorption {
-                let carbsValue = Double(truncating: lastEntry.carbs as NSDecimalNumber)
+                // Use full meal carbs from V2 override if available (entry may contain
+                // only upfront carbs for correct bolus calculation — engine needs full carbs).
+                let carbsValue = v2FullCarbsForEngine ?? Double(truncating: lastEntry.carbs as NSDecimalNumber)
                 let fatValue = Double(truncating: fat as NSDecimalNumber)
                 let proteinValue = Double(truncating: protein as NSDecimalNumber)
                 let adjustmentFactor = Double(truncating: trioSettings.individualAdjustmentFactor as NSDecimalNumber)
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+
+                // Clear V2 overrides after reading (single-use per storeCarbs call)
+                let upfrontOverride = v2UpfrontPercentOverride
+                v2FullCarbsForEngine = nil
+                v2UpfrontPercentOverride = nil
 
                 // Fetch Garmin sensitivity factor if enabled
                 var demandFactor = 1.0
@@ -234,7 +256,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     protein: proteinValue,
                     mealTime: lastEntry.actualDate ?? lastEntry.createdAt,
                     insulinDemandFactor: demandFactor,
-                    upfrontPercent: nil, // Use curve-calculated default
+                    upfrontPercent: upfrontOverride,
                     insulinType: insulinType,
                     individualAdjustmentFactor: adjustmentFactor,
                     safeWindowOverride: trioSettings.v2SafeWindowMinutes
