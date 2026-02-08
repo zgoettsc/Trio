@@ -389,6 +389,66 @@ var outcomes = try JSONDecoder().decode([V2MealOutcome].self, from: data)
 
 ---
 
+### 15. Add Fiber Modifier to Carb Absorption Tau
+
+**File:** `Trio/Sources/Models/MacroAbsorptionEngine.swift`, line 209–212
+
+**Current code:**
+```swift
+static func carbTau(baseTau: Double, fatGrams: Double) -> Double {
+    let fatSlowingCoefficient = 0.8 // minutes per gram of fat
+    return baseTau + (fatGrams * fatSlowingCoefficient)
+}
+```
+
+**Problem:** The carb absorption time constant τ is modified by fat (which slows gastric emptying) but not by dietary fiber. High-fiber meals independently slow gastric emptying and glucose absorption through multiple mechanisms:
+
+- Soluble fiber forms a viscous gel in the stomach and small intestine, physically slowing carb access to the intestinal wall
+- Fiber delays gastric emptying independent of fat content (Torsdottir et al., 1991; Jenkins et al., 1978)
+- High-fiber meals produce lower and later glycemic peaks even with identical carb content
+
+A 60g carb lentil bowl with 15g fiber and 3g fat currently gets essentially the same τ as 60g of white rice with 3g fat — the model treats them identically despite dramatically different absorption profiles. The lentils would peak later and lower, but the system would still deliver the same upfront bolus percentage.
+
+**Data source:** Fiber is already available in Apple Health as part of the nutritional data from Cronometer. It can be extracted from meal snapshots using the same `HKQuantityType(.dietaryFiber)` query used for carbs, fat, and protein — no new data pipeline needed.
+
+**Change:** Add a fiber slowing coefficient to `carbTau`:
+
+```swift
+static func carbTau(baseTau: Double, fatGrams: Double, fiberGrams: Double = 0) -> Double {
+    let fatSlowingCoefficient = 0.8   // minutes per gram of fat
+    let fiberSlowingCoefficient = 0.3 // minutes per gram of fiber above threshold
+    let fiberThreshold = 5.0          // below this, fiber effect is negligible
+
+    let fatDelay = fatGrams * fatSlowingCoefficient
+    let fiberDelay = max(0, fiberGrams - fiberThreshold) * fiberSlowingCoefficient
+
+    return baseTau + fatDelay + fiberDelay
+}
+```
+
+The 0.3 min/g coefficient is conservative — fiber's effect on gastric emptying is real but smaller than fat's. The 5g threshold avoids adjusting for trace amounts. Example impacts:
+
+| Meal | Fat | Fiber | τ_base | τ_effective | Current τ (no fiber) |
+|------|-----|-------|--------|-------------|---------------------|
+| White rice | 3g | 1g | 35 | 37.4 min | 37.4 min (same) |
+| Lentil bowl | 3g | 15g | 35 | 40.4 min | 37.4 min |
+| Bean burrito | 18g | 12g | 35 | 51.5 min | 49.4 min |
+| High-fiber cereal | 2g | 28g | 35 | 43.5 min | 36.6 min |
+
+The high-fiber cereal case is the most impactful: without fiber adjustment, it gets nearly the same τ as juice. With fiber, τ increases by 7 minutes, reducing the upfront bolus and extending SMB delivery — matching the slower absorption profile.
+
+**Downstream changes needed:**
+- `MacroAbsorptionEngine.generateEntries()`: pass fiber into `carbTau()`
+- `MacroAbsorptionResult`: add `originalFiber: Double` field
+- Cronometer meal snapshot extraction: add `HKQuantityType(.dietaryFiber)` query
+- `V2MealOutcome`: add `fiber: Double` field for outcome tracking
+- `V2MacroDosingSettingsView`: show fiber's effect in the example calculation
+- `V2DosingStrategy.md`: document fiber modifier in Section 4
+
+**Why:** Fiber is a well-established independent modifier of carb absorption rate. The data is already available from Cronometer via Apple Health. The implementation cost is minimal — one additional term in an existing function — and it closes the most obvious gap in the carb absorption model. A high-fiber, low-fat meal is currently the scenario where the model is most wrong.
+
+---
+
 ## Items NOT Changed (Confirmed Correct)
 
 The following were reviewed and found to be correctly implemented:
