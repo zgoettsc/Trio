@@ -590,9 +590,9 @@ oref's default SMB limits (typically 30 minutes of basal rate) are designed for 
 
 When V2 meal entries are active, the system can multiply the maximum SMB size by a configurable factor (default 2.0x, range 1.0–3.0x). This increases `maxSMBBasalMinutes` and `maxUAMSMBBasalMinutes` so oref can deliver larger boluses to match the curve-predicted need.
 
-### The Four Safety Gates
+### The Five Safety Gates
 
-Enhancement is NOT always-on. Four independent safety gates must ALL pass on every oref cycle. If **any single gate** fails, the multiplier reverts to 1.0x instantly:
+Enhancement is NOT always-on. Five independent safety gates must ALL pass on every oref cycle. If **any single gate** fails, the multiplier reverts to 1.0x instantly:
 
 **Gate 1: Active Meal Entries**
 Future V2 entries (carb-absorption, protein-gluconeogenesis, or fat-resistance) must exist in Core Data with dates in the future. Once all entries have been consumed, enhancement stops.
@@ -600,14 +600,24 @@ Future V2 entries (carb-absorption, protein-gluconeogenesis, or fat-resistance) 
 **Gate 2: BG Above Floor**
 Current BG must be above the configurable floor (default 90 mg/dL, range 70–130). If BG drops below the floor, enhancement stops immediately — no need to deliver more insulin when already heading low.
 
-**Gate 3: BG Trend Flat or Rising**
+**Gate 3: BG Trend Flat or Rising (with Hysteresis)**
 The CGM trend must not be falling rapidly. Specifically:
 - If a CGM direction arrow is available: `doubleDown`, `singleDown`, and `fortyFiveDown` fail the gate
-- Fallback: the delta between the two most recent readings must be ≥ −5 mg/dL per 5 minutes
-This prevents enhancement during active drops — if BG is already falling, the existing insulin is working.
+- Fallback: the delta between the two most recent readings must be ≥ −3.0 mg/dL per 5 minutes
+- **Hysteresis:** Once the gate fails (trend < −3.0), it requires the trend to recover to ≥ 0.0 mg/dL per 5 minutes before re-enabling. This prevents rapid toggling caused by CGM noise near the threshold.
+
+This prevents enhancement during active drops — if BG is already falling, the existing insulin is working. The −3.0 threshold allows normal post-meal dips (typically −1 to −2 mg/dL/5min) while catching real drops. The hysteresis ensures that once the gate trips, the system waits for a clear recovery before resuming enhanced delivery.
 
 **Gate 4: CGM Freshness**
 The most recent CGM reading must be less than 10 minutes old. Stale data (sensor warmup, compression gap) should not trigger enhanced delivery.
+
+**Gate 5: IOB vs Remaining Absorption**
+Current IOB must not exceed 120% of the remaining insulin need. Specifically:
+```
+remainingInsulinNeed = remainingCarbsForActiveMeals / carbRatio
+if currentIOB > remainingInsulinNeed × 1.2: gate fails
+```
+This prevents insulin stacking — if the IOB already covers the remaining predicted absorption plus a 20% buffer, there's no need to deliver enhanced SMBs.
 
 ### Implementation
 
@@ -634,13 +644,15 @@ The adaptive service runs before each oref cycle (approximately every 5 minutes)
 
 1. **Calculate predicted BG impact** from the meal:
    ```
-   predictedImpact = (absorbedCarbs / carbRatio) × ISF - IOB × ISF
+   predictedImpact = (absorbedCarbs / carbRatio) × ISF - mealIOB × ISF
    ```
+   Uses meal-attributed IOB (insulin specifically recorded for this meal via `recordMealInsulin`) rather than total system IOB, preventing correction boluses from confounding the prediction.
 
-2. **Calculate actual BG trend** from CGM data:
+2. **Calculate actual BG change** from meal start:
    ```
-   actualTrend = cgmDelta × (minutesSinceFirstReading / 5)
+   actualBGDelta = currentBG - bgAtMealStart
    ```
+   Uses the BG at meal start (stored in `V2MealOutcome.bgAtMeal`) rather than extrapolating the current CGM trend, which is more accurate for meals that spiked early and then flattened.
 
 3. **Compute error:**
    ```
@@ -682,7 +694,7 @@ When a user applies a Cronometer recommendation with V2 enabled, a `V2MealOutcom
 - The curve parameters used (tauCarb, proteinFactor, fatTotalEquiv)
 - The dosing context (upfrontPercent, insulinDemandFactor, carbRatioAtMeal, isfAtMeal)
 - The Garmin context snapshot
-- Six empty BG checkpoints at 1h, 2h, 3h, 4h, 6h, and 8h
+- Seven empty BG checkpoints at 1h, 2h, 3h, 4h, 5h, 6h, and 8h (phases dynamically assigned based on meal macros)
 
 ### BG Checkpoint Backfill
 
@@ -701,10 +713,13 @@ Each checkpoint is tagged with the dominant absorption curve at that time:
 |------------|-------|---------------|
 | 1h | carb | Carbohydrate absorption (gamma peak region) |
 | 2h | carb | Carbohydrate absorption (tail region) |
-| 3h | protein | Protein gluconeogenesis (sigmoid onset) |
-| 4h | overlap | Multiple curves active |
-| 6h | fat | Fat insulin resistance (Gaussian peak) |
-| 8h | fat | Fat insulin resistance (Gaussian tail) |
+| 3h | protein/carb | Protein gluconeogenesis onset (if protein > threshold, else carb) |
+| 4h | overlap/protein/fat/carb | Dynamic: overlap if both protein+fat, else dominant macro |
+| 5h | protein/fat/skip | Protein peak (4-5h), or fat if no protein, or skip if neither |
+| 6h | fat/skip | Fat insulin resistance peak (if fat ≥ 5g, else skip) |
+| 8h | fat/skip | Fat insulin resistance tail (if fat ≥ 5g, else skip) |
+
+Phase attribution is **dynamic** based on actual meal composition (#3). Low-protein meals skip protein checkpoints; low-fat meals skip fat checkpoints. The `.skip` phase excludes the checkpoint from parameter learning, preventing attribution errors for curves that weren't active.
 
 ### Rule-Based Parameter Recalibration
 
@@ -743,23 +758,102 @@ if 70 ≤ BG ≤ 180: error = 0                (in range, skip)
 | Parameter | Minimum | Maximum |
 |-----------|---------|---------|
 | carbTau | 20 min | 60 min |
-| proteinFactor | 0.10 | 0.60 |
+| proteinFactor | 0.10 | 0.80 |
 | fatTotalCoeff | 0.30 | 1.20 |
 
 ### Claude AI Recalibration
 
-When enabled, the `SensitivityRecalibrationService` exports the last 7 days of outcomes (with full Garmin context) to the Claude API. Claude analyzes patterns that the rule-based system cannot detect:
+When enabled, the `SensitivityRecalibrationService` exports the last 7 days of outcomes (with full Garmin context) to the Claude API for pattern analysis. This runs weekly or on manual trigger (Settings → V2 Macro Dosing → AI Insights).
 
+#### What Claude Analyzes
+
+Claude receives a structured data prompt containing:
+- Current model parameters (carbTau, proteinFactor, fatCoefficient, fiberCoefficient, protein threshold/plateau)
+- Each meal outcome: macros (carbs, fat, protein, fiber), curve parameters used, BG checkpoints with phase attribution, adaptive adjustments applied, Garmin context snapshot, dosing context (CR, ISF, demand factor)
+- Confounding meal flags and per-checkpoint clean/dirty status
+
+Claude identifies patterns the rule-based system cannot detect:
 - Time-of-day insulin sensitivity patterns
 - Day-of-week patterns (weekend meals differ from weekday)
 - Correlations between specific Garmin metrics and BG outcomes
 - Systematic drift in a single parameter
+- Interactions between multiple parameters (e.g., high-fat + low-sleep)
 
-Claude returns structured JSON recommendations with confidence levels. Only medium/high confidence recommendations are applied, with the same parameter clamping limits.
+#### Prompt Structure
+
+The system prompt defines Claude's role as a diabetes insulin sensitivity calibration expert and describes the three-curve model, the fiber modifier, and the Garmin sensitivity model with all rule weights. The data prompt includes current parameters and every meal outcome from the analysis period with full context.
+
+#### Expected JSON Response Schema
+
+```json
+{
+  "curve_parameter_updates": {
+    "carb_tau": { "current": 35, "recommended": 33, "rationale": "...", "confidence": "high" },
+    "protein_factor": { "current": 0.35, "recommended": 0.38, "rationale": "...", "confidence": "medium" },
+    "fat_coefficient": null,
+    "protein_threshold": null,
+    "protein_plateau": null,
+    "fiber_coefficient": null
+  },
+  "sensitivity_weight_updates": {
+    "sleep_weight": null,
+    "body_battery_weight": null,
+    "stress_weight": { "current": 0.08, "recommended": 0.12, "rationale": "...", "confidence": "medium" },
+    "resting_hr_weight": null,
+    "hrv_weight": null,
+    "activity_yesterday_weight": null,
+    "activity_today_weight": null
+  },
+  "patterns": [
+    { "pattern_type": "time_of_day", "description": "...", "frequency": "...", "impact": "...", "confidence": "high" }
+  ],
+  "explanation": "Natural language summary of findings and recommendations",
+  "confidence": "medium",
+  "meals_analyzed": 14
+}
+```
+
+#### Validation Pipeline
+
+1. **JSON extraction:** Parse the response, extracting JSON from within any surrounding text
+2. **Schema validation:** Verify all required fields exist and have correct types
+3. **Per-parameter change limit:** Reject any single parameter change > 30% from current value (prevents hallucinated recommendations from causing harm)
+4. **Confidence filter:** Only apply updates with medium or high confidence (configurable minimum)
+5. **Range clamping:** Every recommended value is clamped to the same limits as the settings UI:
+
+| Parameter | Minimum | Maximum |
+|-----------|---------|---------|
+| carbTau | 20 min | 60 min |
+| proteinFactor | 0.10 | 0.80 |
+| fatTotalCoeff | 0.30 | 1.20 |
+| fiberCoefficient | 0.00 | 1.00 |
+| proteinThreshold | 10g | 25g |
+| proteinPlateau | 30g | 60g |
+| Garmin weights | per-metric min | per-metric max |
+
+#### User Confirmation Flow
+
+Recommendations are presented in the AI Insights view for user review before applying:
+1. Each recommended change shows: current value → recommended value, rationale, confidence level
+2. Detected patterns are listed with descriptions, frequency, and impact
+3. The user must explicitly tap "Apply Recommendations" to save changes
+4. No parameters are modified without user confirmation
+
+#### Error Handling
+
+- **Malformed JSON:** Falls back to response text as explanation, no parameters applied
+- **API failure / network error:** Returns nil, logged for debugging
+- **Rate limiting:** Service respects weekly cadence; manual triggers have no limit
+- **Parameters outside ranges:** Clamped silently to valid range after 30% change validation
+- **Low confidence:** All parameters at "low" confidence are skipped by default
+
+### Outcome Storage
+
+Meal outcomes are stored in Core Data (`V2MealOutcomeStored` entity) with queryable attributes for date, mealID, macros, and curve parameters. Nested data (BG checkpoints, adaptive adjustments, Garmin context snapshot) is stored as JSON-encoded binary attributes, balancing query performance with schema simplicity. A one-time migration moves existing outcomes from UserDefaults to Core Data on first access after the update.
 
 ### Data Retention
 
-Outcomes older than 90 days are pruned automatically. Recency weighting further reduces influence of old data. This allows the system to adapt to seasonal changes, medication changes, and lifestyle shifts.
+Outcomes older than 90 days are excluded automatically via date predicates. Recency weighting further reduces influence of old data. This allows the system to adapt to seasonal changes, medication changes, and lifestyle shifts.
 
 ---
 

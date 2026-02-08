@@ -35,6 +35,7 @@ struct RecalibrationResult: Codable {
         let fatCoefficient: ParameterUpdate?
         let proteinThreshold: ParameterUpdate?
         let proteinPlateau: ParameterUpdate?
+        let fiberCoefficient: ParameterUpdate?
     }
 
     struct SensitivityWeightUpdates: Codable {
@@ -79,6 +80,7 @@ final class SensitivityRecalibrationService {
     1. Carb curve: Gamma(2, tau) — tau is the time constant in minutes (default 35, higher = slower absorption)
     2. Protein curve: Delayed sigmoid — proteinFactor (0-0.35) controls gluconeogenesis magnitude, with threshold (15g) and plateau (40g)
     3. Fat curve: Normalized Gaussian — fatCoefficient (default 0.69) is total carb-equivalent per gram of fat
+    4. Fiber modifier: Delays carb tau — fiberCoefficient (0.0-1.0, default 0.30) is additional minutes of tau per gram of fiber above a 5g threshold
 
     The system also uses a Garmin-based sensitivity model with rule weights:
     - Sleep quality/duration → insulin resistance
@@ -108,7 +110,8 @@ final class SensitivityRecalibrationService {
         "protein_factor": {...} | null,
         "fat_coefficient": {...} | null,
         "protein_threshold": {...} | null,
-        "protein_plateau": {...} | null
+        "protein_plateau": {...} | null,
+        "fiber_coefficient": {...} | null
       },
       "sensitivity_weight_updates": {
         "sleep_weight": {...} | null,
@@ -171,7 +174,8 @@ final class SensitivityRecalibrationService {
         prompt += "- Protein factor: \(export.currentParameters.effectiveProteinFactor)\n"
         prompt += "- Protein threshold: \(export.currentParameters.effectiveProteinThreshold)g\n"
         prompt += "- Protein plateau: \(export.currentParameters.effectiveProteinPlateau)g\n"
-        prompt += "- Fat coefficient: \(export.currentParameters.effectiveFatTotalCoeff)\n\n"
+        prompt += "- Fat coefficient: \(export.currentParameters.effectiveFatTotalCoeff)\n"
+        prompt += "- Fiber coefficient: \(export.currentParameters.effectiveFiberCoefficient) min/g\n\n"
 
         // Meal outcomes
         prompt += "MEAL OUTCOMES:\n"
@@ -180,7 +184,7 @@ final class SensitivityRecalibrationService {
 
         for (i, outcome) in export.outcomes.enumerated() {
             prompt += "\n--- Meal \(i + 1): \(dateFormatter.string(from: outcome.date)) ---\n"
-            prompt += "Macros: \(Int(outcome.carbs))g carbs, \(Int(outcome.fat))g fat, \(Int(outcome.protein))g protein\n"
+            prompt += "Macros: \(Int(outcome.carbs))g carbs, \(Int(outcome.fat))g fat, \(Int(outcome.protein))g protein, \(Int(outcome.fiber))g fiber\n"
             prompt += "Params: tau=\(String(format: "%.0f", outcome.tauCarb)), "
             prompt += "protFactor=\(String(format: "%.2f", outcome.proteinFactor)), "
             prompt += "fatEquiv=\(String(format: "%.1f", outcome.fatTotalEquiv))g\n"
@@ -290,7 +294,8 @@ final class SensitivityRecalibrationService {
             proteinFactor: parseParameterUpdate(dict["protein_factor"]),
             fatCoefficient: parseParameterUpdate(dict["fat_coefficient"]),
             proteinThreshold: parseParameterUpdate(dict["protein_threshold"]),
-            proteinPlateau: parseParameterUpdate(dict["protein_plateau"])
+            proteinPlateau: parseParameterUpdate(dict["protein_plateau"]),
+            fiberCoefficient: parseParameterUpdate(dict["fiber_coefficient"])
         )
     }
 
@@ -336,50 +341,67 @@ final class SensitivityRecalibrationService {
 
     // MARK: - Apply Results
 
+    /// Validate that a parameter update doesn't change too aggressively in one cycle.
+    /// Rejects changes greater than 30% from current value.
+    func validateUpdate(_ update: RecalibrationResult.ParameterUpdate?, maxChangePercent: Double = 30.0) -> RecalibrationResult.ParameterUpdate? {
+        guard let update = update else { return nil }
+        guard update.currentValue != 0 else { return update } // Can't compute % change from 0
+        let changePercent = abs(update.recommendedValue - update.currentValue) / abs(update.currentValue) * 100
+        if changePercent > maxChangePercent {
+            debugPrint("SensitivityRecalibration: Rejected \(update.rationale) — \(String(format: "%.0f", changePercent))% change exceeds \(String(format: "%.0f", maxChangePercent))% limit")
+            return nil
+        }
+        return update
+    }
+
     /// Apply recalibration results to personal parameters.
     /// Only applies updates with medium or high confidence.
+    /// Rejects single-parameter changes greater than 30% as a safety guardrail.
     func applyResults(_ result: RecalibrationResult, minimumConfidence: RecalibrationResult.ConfidenceLevel = .medium) {
         var params = outcomeStore.loadParameters()
         let minLevel = confidenceLevel(minimumConfidence)
 
         if let curveUpdates = result.curveParameterUpdates {
-            if let update = curveUpdates.carbTau, confidenceLevel(update.confidence) >= minLevel {
+            if let update = validateUpdate(curveUpdates.carbTau), confidenceLevel(update.confidence) >= minLevel {
                 params.carbTau = clamp(update.recommendedValue, min: 20, max: 60)
             }
-            if let update = curveUpdates.proteinFactor, confidenceLevel(update.confidence) >= minLevel {
-                params.proteinFactor = clamp(update.recommendedValue, min: 0.10, max: 0.60)
+            if let update = validateUpdate(curveUpdates.proteinFactor), confidenceLevel(update.confidence) >= minLevel {
+                params.proteinFactor = clamp(update.recommendedValue, min: 0.10, max: 0.80)
             }
-            if let update = curveUpdates.fatCoefficient, confidenceLevel(update.confidence) >= minLevel {
+            if let update = validateUpdate(curveUpdates.fatCoefficient), confidenceLevel(update.confidence) >= minLevel {
                 params.fatTotalCoeff = clamp(update.recommendedValue, min: 0.30, max: 1.20)
             }
-            if let update = curveUpdates.proteinThreshold, confidenceLevel(update.confidence) >= minLevel {
+            if let update = validateUpdate(curveUpdates.proteinThreshold), confidenceLevel(update.confidence) >= minLevel {
                 params.proteinThreshold = clamp(update.recommendedValue, min: 10, max: 25)
             }
-            if let update = curveUpdates.proteinPlateau, confidenceLevel(update.confidence) >= minLevel {
+            if let update = validateUpdate(curveUpdates.proteinPlateau), confidenceLevel(update.confidence) >= minLevel {
                 params.proteinPlateau = clamp(update.recommendedValue, min: 30, max: 60)
+            }
+            if let update = validateUpdate(curveUpdates.fiberCoefficient), confidenceLevel(update.confidence) >= minLevel {
+                params.fiberCoefficient = clamp(update.recommendedValue, min: 0.0, max: 1.0)
             }
         }
 
         if let sensitivityUpdates = result.sensitivityWeightUpdates {
-            if let u = sensitivityUpdates.sleepWeight, confidenceLevel(u.confidence) >= minLevel {
+            if let u = validateUpdate(sensitivityUpdates.sleepWeight), confidenceLevel(u.confidence) >= minLevel {
                 params.sleepWeight = clamp(u.recommendedValue, min: 0.05, max: 0.40)
             }
-            if let u = sensitivityUpdates.bodyBatteryWeight, confidenceLevel(u.confidence) >= minLevel {
+            if let u = validateUpdate(sensitivityUpdates.bodyBatteryWeight), confidenceLevel(u.confidence) >= minLevel {
                 params.bodyBatteryWeight = clamp(u.recommendedValue, min: 0.05, max: 0.30)
             }
-            if let u = sensitivityUpdates.stressWeight, confidenceLevel(u.confidence) >= minLevel {
+            if let u = validateUpdate(sensitivityUpdates.stressWeight), confidenceLevel(u.confidence) >= minLevel {
                 params.stressWeight = clamp(u.recommendedValue, min: 0.02, max: 0.15)
             }
-            if let u = sensitivityUpdates.restingHRWeight, confidenceLevel(u.confidence) >= minLevel {
+            if let u = validateUpdate(sensitivityUpdates.restingHRWeight), confidenceLevel(u.confidence) >= minLevel {
                 params.restingHRWeight = clamp(u.recommendedValue, min: 0.03, max: 0.20)
             }
-            if let u = sensitivityUpdates.hrvWeight, confidenceLevel(u.confidence) >= minLevel {
+            if let u = validateUpdate(sensitivityUpdates.hrvWeight), confidenceLevel(u.confidence) >= minLevel {
                 params.hrvWeight = clamp(u.recommendedValue, min: 0.02, max: 0.15)
             }
-            if let u = sensitivityUpdates.activityYesterdayWeight, confidenceLevel(u.confidence) >= minLevel {
+            if let u = validateUpdate(sensitivityUpdates.activityYesterdayWeight), confidenceLevel(u.confidence) >= minLevel {
                 params.activityYesterdayWeight = clamp(u.recommendedValue, min: 0.03, max: 0.25)
             }
-            if let u = sensitivityUpdates.activityTodayWeight, confidenceLevel(u.confidence) >= minLevel {
+            if let u = validateUpdate(sensitivityUpdates.activityTodayWeight), confidenceLevel(u.confidence) >= minLevel {
                 params.activityTodayWeight = clamp(u.recommendedValue, min: 0.02, max: 0.15)
             }
         }
