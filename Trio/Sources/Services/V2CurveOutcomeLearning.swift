@@ -23,6 +23,7 @@ struct V2MealOutcome: Codable, Identifiable {
     let carbs: Double
     let fat: Double
     let protein: Double
+    let fiber: Double  // (#15) dietary fiber for outcome tracking
 
     // V2 curve parameters used
     let tauCarb: Double
@@ -76,6 +77,37 @@ struct V2BGCheckpoint: Codable {
         case protein    // 2-5h: protein gluconeogenesis onset
         case fat        // 4-9h: fat insulin resistance
         case overlap    // multiple curves active
+        case skip       // checkpoint not relevant for this meal's macros
+    }
+
+    /// Compute phase attribution dynamically based on actual meal macros (#3).
+    /// Prevents attributing errors to curves that weren't active for this meal.
+    static func computePhases(
+        carbs: Double,
+        fat: Double,
+        protein: Double,
+        proteinThreshold: Double
+    ) -> [V2BGCheckpoint] {
+        let hasProtein = protein > proteinThreshold
+        let hasFat = fat >= 5
+
+        return [
+            V2BGCheckpoint(hoursAfterMeal: 1, bgValue: nil, isClean: true, curvePhase: .carb),
+            V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
+            V2BGCheckpoint(hoursAfterMeal: 3, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein ? .protein : .carb),
+            V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein && hasFat ? .overlap :
+                                       hasProtein ? .protein :
+                                       hasFat ? .fat : .carb),
+            // (#11) 5h checkpoint captures protein peak (4-5h)
+            V2BGCheckpoint(hoursAfterMeal: 5, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein ? .protein : hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true,
+                           curvePhase: hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true,
+                           curvePhase: hasFat ? .fat : .skip),
+        ]
     }
 }
 
@@ -175,6 +207,57 @@ final class V2OutcomeLearningStore {
         }
     }
 
+    // MARK: - Confounding Meal Detection (#4)
+
+    /// Detect confounding meals: if another meal was recorded within the 8h window
+    /// of a given outcome, mark individual checkpoints as dirty where the overlap occurs.
+    func detectConfoundingMeals() {
+        var outcomes = loadAll()
+        guard outcomes.count > 1 else { return }
+
+        var anyUpdated = false
+
+        for i in 0 ..< outcomes.count {
+            let mealTime = outcomes[i].date
+            let windowEnd = mealTime.addingTimeInterval(8 * 3600)
+
+            // Find any overlapping meals
+            let overlappingMeals = outcomes.filter { other in
+                other.id != outcomes[i].id &&
+                    other.date > mealTime &&
+                    other.date < windowEnd
+            }
+
+            if overlappingMeals.isEmpty {
+                if outcomes[i].hasConfoundingMeal {
+                    outcomes[i].hasConfoundingMeal = false
+                    anyUpdated = true
+                }
+                continue
+            }
+
+            // Per-checkpoint clean/dirty marking based on whether a confounding meal's
+            // absorption window overlaps that specific checkpoint time
+            outcomes[i].hasConfoundingMeal = true
+            for j in 0 ..< outcomes[i].checkpoints.count {
+                let cpTime = mealTime.addingTimeInterval(
+                    TimeInterval(outcomes[i].checkpoints[j].hoursAfterMeal * 3600)
+                )
+                // A checkpoint is dirty if any confounding meal started before the checkpoint time
+                // (its absorption is active at that point)
+                let isDirty = overlappingMeals.contains { $0.date < cpTime }
+                if isDirty {
+                    outcomes[i].checkpoints[j].isClean = false
+                    anyUpdated = true
+                }
+            }
+        }
+
+        if anyUpdated {
+            persistOutcomes(outcomes)
+        }
+    }
+
     // MARK: - Outcome Backfill
 
     /// Backfill BG outcomes for pending V2 meal outcomes.
@@ -207,6 +290,9 @@ final class V2OutcomeLearningStore {
         if anyUpdated {
             persistOutcomes(outcomes)
         }
+
+        // (#4) After backfilling BG data, detect confounding meals and mark dirty checkpoints
+        detectConfoundingMeals()
     }
 
     private func fetchClosestGlucose(
@@ -318,6 +404,10 @@ final class V2OutcomeLearningStore {
                     proteinWeight += recencyWeight * 0.3
                     fatAdjustment += error * 0.025 * recencyWeight * 0.3
                     fatWeight += recencyWeight * 0.3
+
+                case .skip:
+                    // (#3) This checkpoint is not relevant for this meal's macros — skip
+                    break
                 }
             }
         }
@@ -332,7 +422,7 @@ final class V2OutcomeLearningStore {
         if proteinWeight > 0 {
             let avgAdj = proteinAdjustment / proteinWeight
             let current = params.effectiveProteinFactor
-            params.proteinFactor = max(0.10, min(0.60, current + avgAdj))
+            params.proteinFactor = max(0.10, min(0.80, current + avgAdj)) // (#10) match slider range
         }
 
         if fatWeight > 0 {
@@ -348,6 +438,7 @@ final class V2OutcomeLearningStore {
     // MARK: - Create Outcome from Meal
 
     /// Create a V2 outcome record from a meal absorption result and context.
+    /// Uses dynamic phase attribution (#3) based on actual macros instead of hardcoded phases.
     static func createOutcome(
         from result: MacroAbsorptionResult,
         garminSnapshot: GarminContextSnapshot?,
@@ -355,15 +446,25 @@ final class V2OutcomeLearningStore {
         carbRatio: Double,
         isf: Double,
         smbMultiplier: Double,
-        mealModeActive: Bool
+        mealModeActive: Bool,
+        proteinThreshold: Double = 15
     ) -> V2MealOutcome {
-        V2MealOutcome(
+        // (#3) Dynamic phase attribution based on actual meal composition
+        let checkpoints = V2BGCheckpoint.computePhases(
+            carbs: result.originalCarbs,
+            fat: result.originalFat,
+            protein: result.originalProtein,
+            proteinThreshold: proteinThreshold
+        )
+
+        return V2MealOutcome(
             id: UUID(),
             date: Date(),
             mealID: result.mealID,
             carbs: result.originalCarbs,
             fat: result.originalFat,
             protein: result.originalProtein,
+            fiber: result.originalFiber,
             tauCarb: result.tauCarb,
             proteinFactor: result.proteinFactor,
             fatTotalEquiv: result.fatTotalEquiv,
@@ -378,14 +479,7 @@ final class V2OutcomeLearningStore {
             mealSMBMultiplier: smbMultiplier,
             mealModeWasActive: mealModeActive,
             adaptiveAdjustments: [],
-            checkpoints: [
-                V2BGCheckpoint(hoursAfterMeal: 1, bgValue: nil, isClean: true, curvePhase: .carb),
-                V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
-                V2BGCheckpoint(hoursAfterMeal: 3, bgValue: nil, isClean: true, curvePhase: .protein),
-                V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true, curvePhase: .overlap),
-                V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true, curvePhase: .fat),
-                V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true, curvePhase: .fat),
-            ],
+            checkpoints: checkpoints,
             hasConfoundingMeal: false
         )
     }

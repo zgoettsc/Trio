@@ -206,7 +206,7 @@ struct V2MacroDosingSettingsView: BaseView {
                         maxFactor: proteinFactor
                     )
                     let exProteinEquiv = 35 * exProteinFactor
-                    let exFatEquiv = 28 * fatCoefficient
+                    let exFatEquiv = MacroAbsorptionEngine.fatCarbEquivalent(fatGrams: 28, maxCoeff: fatCoefficient)
                     let exTau = MacroAbsorptionEngine.carbTau(baseTau: carbTau, fatGrams: 28)
 
                     HStack {

@@ -10,6 +10,12 @@ import Foundation
 //   1.25 = 25% more insulin needed (bad sleep, high stress)
 //   0.83 = 17% less insulin needed (good recovery, active yesterday)
 
+// NOTE: Impact weights below are initial heuristics, not regression-derived (#8).
+// They are directionally grounded in literature (Spiegel 1999, Donga 2010, etc.)
+// but the specific magnitudes and their additive stacking are estimated, not
+// calibrated against BG outcome data. The outcome learning system is intended
+// to validate and adjust these over time. Users should monitor the demand
+// factor's effect on their outcomes and adjust or disable if results are poor.
 struct GarminSensitivityModel {
 
     /// Result of the sensitivity calculation, with breakdown for UI display.

@@ -203,6 +203,16 @@ Fat slows gastric emptying by signaling the pyloric sphincter to reduce emptying
 
 Where 0.8 minutes per gram of fat is derived from gastric emptying studies (Gentilcore et al., 2006; Horowitz et al., 1993).
 
+> **Note:** The 0.8 min/g coefficient is derived from liquid fat load studies (olive oil infused into the duodenum). Solid food with fat may exhibit different gastric emptying rates due to mechanical breakdown. This coefficient serves as a starting point; the outcome learning system adjusts effective τ from real meal data.
+
+**Fiber Modification of τ:** Dietary fiber independently slows gastric emptying and glucose absorption (Torsdottir et al., 1991; Jenkins et al., 1978). The V2 engine adds a fiber delay term:
+
+```
+τ_effective = τ_base + (fat_grams × 0.8) + max(0, fiber_grams − 5) × 0.3
+```
+
+The 0.3 min/g coefficient is conservative — fiber's effect is real but smaller than fat's. The 5g threshold avoids adjusting for trace amounts. Fiber data is sourced from Apple Health via Cronometer.
+
 **Example — τ values for different meals:**
 
 | Meal | Fat | τ_base | τ_effective | Peak Absorption | 95% Duration |
@@ -439,7 +449,9 @@ The V2 system integrates with Garmin wearable devices via Firebase/Firestore. A 
 
 ### The Demand Factor Model
 
-The `GarminSensitivityModel` converts the snapshot into a single **insulin demand factor** using additive rule-based scoring:
+The `GarminSensitivityModel` converts the snapshot into a single **insulin demand factor** using additive rule-based scoring.
+
+> **Epistemic Note:** The impact weights below are starting heuristics based on directional findings from the literature (e.g., Spiegel 1999, Donga 2010 for sleep; general exercise physiology for activity). The specific magnitudes are estimated, not calibrated against BG outcome data, and their additive stacking to a potential 1.67x demand factor is unvalidated. The outcome learning system is intended to validate and adjust these over time. Users should monitor the demand factor's effect on their outcomes and adjust or disable if results are poor.
 
 ```
 sensitivityFactor = 1.0   (start at baseline)
