@@ -25,72 +25,53 @@ struct MacroDecayChartView: View {
                 Chart {
                     ForEach(decayPoints) { point in
                         // Fat (bottom layer — longest duration)
-                        if breakdown.fatOnBoard > 0 {
-                            AreaMark(
-                                x: .value("Time", point.date),
-                                y: .value("Fat", point.fat)
-                            )
-                            .foregroundStyle(
-                                .linearGradient(
-                                    colors: [.orange.opacity(0.4), .orange.opacity(0.1)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                        AreaMark(
+                            x: .value("Time", point.date),
+                            y: .value("Fat", point.fat)
+                        )
+                        .foregroundStyle(by: .value("Macro", "Fat"))
 
-                            LineMark(
-                                x: .value("Time", point.date),
-                                y: .value("Fat", point.fat)
-                            )
-                            .foregroundStyle(.orange)
-                            .lineStyle(StrokeStyle(lineWidth: 1.5))
-                        }
+                        LineMark(
+                            x: .value("Time", point.date),
+                            y: .value("FatLine", point.fat)
+                        )
+                        .foregroundStyle(.orange)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
 
                         // Protein (middle layer)
-                        if breakdown.proteinOnBoard > 0 {
-                            AreaMark(
-                                x: .value("Time", point.date),
-                                y: .value("Protein", point.protein)
-                            )
-                            .foregroundStyle(
-                                .linearGradient(
-                                    colors: [.purple.opacity(0.4), .purple.opacity(0.1)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                        AreaMark(
+                            x: .value("Time", point.date),
+                            y: .value("Protein", point.protein)
+                        )
+                        .foregroundStyle(by: .value("Macro", "Protein"))
 
-                            LineMark(
-                                x: .value("Time", point.date),
-                                y: .value("Protein", point.protein)
-                            )
-                            .foregroundStyle(.purple)
-                            .lineStyle(StrokeStyle(lineWidth: 1.5))
-                        }
+                        LineMark(
+                            x: .value("Time", point.date),
+                            y: .value("ProteinLine", point.protein)
+                        )
+                        .foregroundStyle(.purple)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
 
                         // Carbs (top layer — fastest decay)
-                        if breakdown.carbsOnBoard > 0 {
-                            AreaMark(
-                                x: .value("Time", point.date),
-                                y: .value("Carbs", point.carbs)
-                            )
-                            .foregroundStyle(
-                                .linearGradient(
-                                    colors: [Color.loopYellow.opacity(0.4), Color.loopYellow.opacity(0.1)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                        AreaMark(
+                            x: .value("Time", point.date),
+                            y: .value("Carbs", point.carbs)
+                        )
+                        .foregroundStyle(by: .value("Macro", "Carbs"))
 
-                            LineMark(
-                                x: .value("Time", point.date),
-                                y: .value("Carbs", point.carbs)
-                            )
-                            .foregroundStyle(.loopYellow)
-                            .lineStyle(StrokeStyle(lineWidth: 1.5))
-                        }
+                        LineMark(
+                            x: .value("Time", point.date),
+                            y: .value("CarbsLine", point.carbs)
+                        )
+                        .foregroundStyle(Color.loopYellow)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
                     }
                 }
+                .chartForegroundStyleScale([
+                    "Carbs": Color.loopYellow.opacity(0.3),
+                    "Protein": Color.purple.opacity(0.3),
+                    "Fat": Color.orange.opacity(0.3),
+                ])
                 .chartXAxis {
                     AxisMarks(values: .stride(by: .hour)) { value in
                         AxisGridLine()
@@ -108,6 +89,7 @@ struct MacroDecayChartView: View {
                         }
                     }
                 }
+                .chartLegend(.hidden)
                 .frame(height: 120)
 
                 // Legend
