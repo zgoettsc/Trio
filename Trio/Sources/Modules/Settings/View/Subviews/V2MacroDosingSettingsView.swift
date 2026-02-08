@@ -10,6 +10,16 @@ struct V2MacroDosingSettingsView: BaseView {
     @Environment(\.colorScheme) var colorScheme
     @Environment(AppState.self) var appState
 
+    // Curve parameter state — loaded from V2OutcomeLearningStore on appear
+    @State private var fatCoefficient: Double = 0.69
+    @State private var proteinFactor: Double = 0.35
+    @State private var proteinThreshold: Double = 15
+    @State private var proteinPlateau: Double = 40
+    @State private var carbTau: Double = 35
+
+    // Track whether parameters have been customized (vs. defaults)
+    @State private var paramsLoaded = false
+
     var body: some View {
         Form {
             // MARK: - Engine Toggle
@@ -89,6 +99,148 @@ struct V2MacroDosingSettingsView: BaseView {
                 }
                 .listRowBackground(Color.chart)
 
+                // MARK: - Curve Parameters (Interactive Sliders)
+                Section(header: Text("Fat Absorption")) {
+                    HStack {
+                        Text("Fat Coefficient")
+                        Spacer()
+                        Text(String(format: "%.2f g-equiv/g", fatCoefficient))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $fatCoefficient, in: 0.30 ... 2.00, step: 0.01)
+                        .onChange(of: fatCoefficient) { _, newValue in
+                            saveCurveParameter { $0.fatTotalCoeff = newValue }
+                        }
+
+                    Text("How much extra insulin fat requires. Higher values increase delayed insulin for fatty meals. Based on Wolpert 2013 (default 0.69).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.chart)
+
+                Section(header: Text("Protein Absorption")) {
+                    HStack {
+                        Text("Protein Factor")
+                        Spacer()
+                        Text(String(format: "%.2f", proteinFactor))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $proteinFactor, in: 0.10 ... 0.80, step: 0.01)
+                        .onChange(of: proteinFactor) { _, newValue in
+                            saveCurveParameter { $0.proteinFactor = newValue }
+                        }
+
+                    Text("Peak fraction of protein converted to glucose via gluconeogenesis. Research range: 0.20-0.60 for most people.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Text("Protein Threshold")
+                        Spacer()
+                        Text(String(format: "%.0fg", proteinThreshold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $proteinThreshold, in: 5 ... 30, step: 1)
+                        .onChange(of: proteinThreshold) { _, newValue in
+                            saveCurveParameter { $0.proteinThreshold = newValue }
+                        }
+
+                    Text("Minimum protein grams before gluconeogenesis kicks in. Below this, protein has no BG effect.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Text("Protein Plateau")
+                        Spacer()
+                        Text(String(format: "%.0fg", proteinPlateau))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $proteinPlateau, in: 20 ... 80, step: 1)
+                        .onChange(of: proteinPlateau) { _, newValue in
+                            saveCurveParameter { $0.proteinPlateau = newValue }
+                        }
+
+                    Text("Protein grams at which conversion plateaus at max factor. Above this, more protein doesn't increase the conversion rate.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.chart)
+
+                Section(header: Text("Carb Absorption")) {
+                    HStack {
+                        Text("Base Carb Tau")
+                        Spacer()
+                        Text(String(format: "%.0f min", carbTau))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $carbTau, in: 20 ... 60, step: 1)
+                        .onChange(of: carbTau) { _, newValue in
+                            saveCurveParameter { $0.carbTau = newValue }
+                        }
+
+                    Text("Base time constant for carb absorption. Higher = slower absorption. Fat adds 0.8 min per gram on top of this.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.chart)
+
+                // MARK: - Example Calculation
+                Section(header: Text("Example: 65g Carbs, 28g Fat, 35g Protein")) {
+                    let exProteinFactor = MacroAbsorptionEngine.proteinGlucoFactor(
+                        proteinGrams: 35,
+                        threshold: proteinThreshold,
+                        plateau: proteinPlateau,
+                        maxFactor: proteinFactor
+                    )
+                    let exProteinEquiv = 35 * exProteinFactor
+                    let exFatEquiv = 28 * fatCoefficient
+                    let exTau = MacroAbsorptionEngine.carbTau(baseTau: carbTau, fatGrams: 28)
+
+                    HStack {
+                        Text("Protein glucose-equiv")
+                        Spacer()
+                        Text(String(format: "%.1fg (%.0f%% of 35g)", exProteinEquiv, exProteinFactor * 100))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Fat carb-equiv")
+                        Spacer()
+                        Text(String(format: "%.1fg", exFatEquiv))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Total delayed impact")
+                        Spacer()
+                        Text(String(format: "%.1fg over 8h", exProteinEquiv + exFatEquiv))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Fat-modified tau")
+                        Spacer()
+                        Text(String(format: "%.0f min", exTau))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("This shows how your current settings would calculate a meal with 65g carbs, 28g fat, and 35g protein.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.chart)
+
+                // MARK: - Reset
+                Section {
+                    Button("Reset Curve Parameters to Defaults") {
+                        let defaults = V2PersonalCurveParameters()
+                        V2OutcomeLearningStore.shared.saveParameters(defaults)
+                        loadCurveParameters()
+                    }
+                    .foregroundStyle(.red)
+                }
+                .listRowBackground(Color.chart)
+
                 // MARK: - Garmin Sensitivity
                 Section(header: Text("Garmin Sensitivity")) {
                     Toggle("Enable Garmin Adjustment", isOn: $state.garminEnabled)
@@ -147,29 +299,16 @@ struct V2MacroDosingSettingsView: BaseView {
                     Text("Meal Outcome Accuracy").navigationLink(to: .v2OutcomeAnalysis, from: self)
                 }
                 .listRowBackground(Color.chart)
-
-                // MARK: - Learned Parameters
-                Section(header: Text("Learned Parameters")) {
-                    let params = V2OutcomeLearningStore.shared.loadParameters()
-                    paramRow("Carb Tau", value: params.carbTau, defaultVal: 35, unit: "min")
-                    paramRow("Protein Factor", value: params.proteinFactor, defaultVal: 0.35, unit: "")
-                    paramRow("Fat Coefficient", value: params.fatTotalCoeff, defaultVal: 0.69, unit: "")
-                    paramRow("Protein Threshold", value: params.proteinThreshold, defaultVal: 15, unit: "g")
-                    paramRow("Protein Plateau", value: params.proteinPlateau, defaultVal: 40, unit: "g")
-
-                    Button("Reset to Defaults") {
-                        V2OutcomeLearningStore.shared.saveParameters(V2PersonalCurveParameters())
-                    }
-                    .foregroundStyle(.red)
-                }
-                .listRowBackground(Color.chart)
             }
         }
         .scrollContentBackground(.hidden)
         .background(appState.trioBackgroundColor(for: colorScheme))
         .navigationTitle("V2 Macro Dosing")
         .navigationBarTitleDisplayMode(.automatic)
-        .onAppear(perform: configureView)
+        .onAppear {
+            configureView()
+            loadCurveParameters()
+        }
     }
 
     // MARK: - Helpers
@@ -181,23 +320,20 @@ struct V2MacroDosingSettingsView: BaseView {
         return state.insulinType == "ultraRapid" ? "30 min (ultra rapid)" : "45 min (rapid acting)"
     }
 
-    private func paramRow(_ label: String, value: Double?, defaultVal: Double, unit: String) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            if let v = value {
-                Text(String(format: "%.2f%@", v, unit.isEmpty ? "" : " \(unit)"))
-                    .foregroundStyle(.primary)
-                Text("(learned)")
-                    .font(.caption2)
-                    .foregroundStyle(.green)
-            } else {
-                Text(String(format: "%.2f%@", defaultVal, unit.isEmpty ? "" : " \(unit)"))
-                    .foregroundStyle(.secondary)
-                Text("(default)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
+    private func loadCurveParameters() {
+        let params = V2OutcomeLearningStore.shared.loadParameters()
+        fatCoefficient = params.effectiveFatTotalCoeff
+        proteinFactor = params.effectiveProteinFactor
+        proteinThreshold = params.effectiveProteinThreshold
+        proteinPlateau = params.effectiveProteinPlateau
+        carbTau = params.effectiveCarbTau
+        paramsLoaded = true
+    }
+
+    private func saveCurveParameter(_ update: (inout V2PersonalCurveParameters) -> Void) {
+        guard paramsLoaded else { return }
+        var params = V2OutcomeLearningStore.shared.loadParameters()
+        update(&params)
+        V2OutcomeLearningStore.shared.saveParameters(params)
     }
 }

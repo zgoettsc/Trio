@@ -481,8 +481,8 @@ extension Treatments {
 
             // V2 three-curve engine: compute upfront/future split and Garmin demand factor
             if trioSettings.useV2MacroAbsorption {
-                let adjustment = NSDecimalNumber(decimal: trioSettings.individualAdjustmentFactor).doubleValue
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+                let curveParams = V2OutcomeLearningStore.shared.loadParameters()
 
                 let result = MacroAbsorptionEngine.generateEntries(
                     carbs: cronometerRecommendedCarbs,
@@ -492,7 +492,7 @@ extension Treatments {
                     insulinDemandFactor: v2DemandFactor,
                     upfrontPercent: nil,
                     insulinType: insulinType,
-                    individualAdjustmentFactor: adjustment,
+                    curveParameters: curveParams,
                     safeWindowOverride: trioSettings.v2SafeWindowMinutes
                 )
 
@@ -695,11 +695,16 @@ extension Treatments {
             v2UpfrontCarbs = fullCarbs * newPercent * v2DemandFactor
 
             // Recalculate FPU display total (remaining carbs + protein + fat entries)
+            let curveParams = V2OutcomeLearningStore.shared.loadParameters()
             let remainingCarbs = fullCarbs * (1.0 - newPercent) * v2DemandFactor
-            let proteinEquiv = cronometerRecommendedProtein * MacroAbsorptionEngine.proteinGlucoFactor(proteinGrams: cronometerRecommendedProtein)
-                * NSDecimalNumber(decimal: settingsManager.settings.individualAdjustmentFactor).doubleValue * v2DemandFactor
+            let proteinEquiv = cronometerRecommendedProtein * MacroAbsorptionEngine.proteinGlucoFactor(
+                proteinGrams: cronometerRecommendedProtein,
+                threshold: curveParams.effectiveProteinThreshold,
+                plateau: curveParams.effectiveProteinPlateau,
+                maxFactor: curveParams.effectiveProteinFactor
+            ) * v2DemandFactor
             let fatEquiv = cronometerRecommendedFat >= 5
-                ? cronometerRecommendedFat * 0.69 * NSDecimalNumber(decimal: settingsManager.settings.individualAdjustmentFactor).doubleValue * v2DemandFactor
+                ? cronometerRecommendedFat * curveParams.effectiveFatTotalCoeff * v2DemandFactor
                 : 0
             cronometerFPUCarbEquivalents = remainingCarbs + proteinEquiv + fatEquiv
         }
@@ -771,6 +776,7 @@ extension Treatments {
                         garminSnapshot = await service.fetchContext() // uses cache
                     }
 
+                    let outcomeParams = V2OutcomeLearningStore.shared.loadParameters()
                     let outcome = V2MealOutcome(
                         id: UUID(),
                         date: Date(),
@@ -778,9 +784,9 @@ extension Treatments {
                         carbs: appliedCarbs,
                         fat: appliedFat,
                         protein: appliedProtein,
-                        tauCarb: 35, // base, will be personalized
-                        proteinFactor: 0.35,
-                        fatTotalEquiv: appliedFat * 0.69,
+                        tauCarb: outcomeParams.effectiveCarbTau,
+                        proteinFactor: outcomeParams.effectiveProteinFactor,
+                        fatTotalEquiv: appliedFat * outcomeParams.effectiveFatTotalCoeff,
                         upfrontPercent: upfrontPct ?? 0.65,
                         curveSuggestedPercent: upfrontPct ?? 0.65,
                         insulinDemandFactor: demandFactor,

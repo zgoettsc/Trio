@@ -71,7 +71,7 @@ struct MacroAbsorptionEngine {
     ///   - insulinDemandFactor: From Garmin model. 1.0 = normal, 1.25 = 25% more insulin needed
     ///   - upfrontPercent: User override for upfront %. nil = use curve-calculated default
     ///   - insulinType: User's insulin type (affects safe window default)
-    ///   - individualAdjustmentFactor: User's personal adjustment (default 0.5 from settings)
+    ///   - curveParameters: Personal curve parameters (learned or manually tuned). nil = use defaults
     ///   - safeWindowOverride: User override for safe window minutes. nil = use insulin type default
     static func generateEntries(
         carbs: Double,
@@ -81,9 +81,11 @@ struct MacroAbsorptionEngine {
         insulinDemandFactor: Double = 1.0,
         upfrontPercent: Double? = nil,
         insulinType: V2InsulinType = .rapidActing,
-        individualAdjustmentFactor: Double = 0.5,
+        curveParameters: V2PersonalCurveParameters? = nil,
         safeWindowOverride: Int? = nil
     ) -> MacroAbsorptionResult {
+
+        let params = curveParameters ?? V2PersonalCurveParameters()
 
         let mealID = UUID().uuidString
 
@@ -91,7 +93,7 @@ struct MacroAbsorptionEngine {
         let safeWindowMinutes = safeWindowOverride ?? insulinType.defaultSafeWindowMinutes
 
         // --- Curve 1: Carbohydrate absorption (gamma-shaped) ---
-        let tauCarb = carbTau(baseTau: 35, fatGrams: fat)
+        let tauCarb = carbTau(baseTau: params.effectiveCarbTau, fatGrams: fat)
         let curveSuggestedPercent = gammaCDFValue(tau: tauCarb, atMinutes: Double(safeWindowMinutes))
         let effectivePercent = upfrontPercent ?? curveSuggestedPercent
 
@@ -117,9 +119,16 @@ struct MacroAbsorptionEngine {
         }
 
         // --- Curve 2: Protein gluconeogenesis (delayed sigmoid, smooth ramp) ---
-        let proteinFactor = proteinGlucoFactor(proteinGrams: protein)
+        // Uses personal curve parameters for threshold, plateau, and max factor.
+        // individualAdjustmentFactor is NOT applied here — V2 has its own tunable coefficients.
+        let proteinFactor = proteinGlucoFactor(
+            proteinGrams: protein,
+            threshold: params.effectiveProteinThreshold,
+            plateau: params.effectiveProteinPlateau,
+            maxFactor: params.effectiveProteinFactor
+        )
         if proteinFactor > 0 {
-            let glucoseEquiv = protein * proteinFactor * individualAdjustmentFactor
+            let glucoseEquiv = protein * proteinFactor
             if glucoseEquiv > 0.5 {
                 let proteinEntries = generateProteinCurveEntries(
                     totalGlucose: glucoseEquiv,
@@ -133,9 +142,10 @@ struct MacroAbsorptionEngine {
 
         // --- Curve 3: Fat insulin resistance (normalized gaussian) ---
         // Below 5g fat, effect is negligible — skip entirely.
+        // Uses personal fat coefficient. individualAdjustmentFactor is NOT applied here.
         let fatTotalEquiv: Double
         if fat >= 5 {
-            fatTotalEquiv = fat * 0.69 * individualAdjustmentFactor
+            fatTotalEquiv = fat * params.effectiveFatTotalCoeff
             if fatTotalEquiv > 0.5 {
                 let fatEntries = generateNormalizedFatResistanceEntries(
                     totalEquiv: fatTotalEquiv,
@@ -273,12 +283,18 @@ struct MacroAbsorptionEngine {
 
     // MARK: - Curve 2: Protein Gluconeogenesis (Delayed Sigmoid)
 
-    /// Smooth protein ramp factor: 0 at <=15g, linear to 0.35 at 40g, plateau above.
+    /// Smooth protein ramp factor: 0 at <=threshold, linear to maxFactor at plateau, plateau above.
     /// Replaces the hard 28g cutoff — no physiological cliff at any threshold.
-    static func proteinGlucoFactor(proteinGrams: Double) -> Double {
-        if proteinGrams <= 15 { return 0.0 }
-        if proteinGrams >= 40 { return 0.35 }
-        return (proteinGrams - 15.0) / (40.0 - 15.0) * 0.35
+    /// Parameters are tunable via V2 settings sliders or outcome learning.
+    static func proteinGlucoFactor(
+        proteinGrams: Double,
+        threshold: Double = 15,
+        plateau: Double = 40,
+        maxFactor: Double = 0.35
+    ) -> Double {
+        if proteinGrams <= threshold { return 0.0 }
+        if proteinGrams >= plateau { return maxFactor }
+        return (proteinGrams - threshold) / (plateau - threshold) * maxFactor
     }
 
     /// Protein sigmoid value at time t.
@@ -352,7 +368,7 @@ struct MacroAbsorptionEngine {
 
     /// Generate fat resistance entries using a normalized Gaussian.
     /// The entries always sum to exactly `totalEquiv` regardless of spacing.
-    /// Uses total coefficient of 0.69 g-carb-equiv per g-fat (from Wolpert).
+    /// Coefficient is parameterized via V2PersonalCurveParameters (default 0.69 from Wolpert).
     static func generateNormalizedFatResistanceEntries(
         totalEquiv: Double,
         mealTime: Date,
