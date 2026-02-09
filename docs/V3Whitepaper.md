@@ -1408,9 +1408,181 @@ The following items have been identified through external review and are acknowl
 
 ### Planned Improvements
 
-**Garmin demand factor feedback loop.** The Garmin sensitivity weights (§8) are heuristics with no automatic correction mechanism. If a weight is miscalibrated (e.g., the sleep impact of −0.22 systematically causes lows after bad sleep), the only feedback path is the weekly Claude AI recalibration, which requires user opt-in. **Planned fix:** Track outcome accuracy for demand-factor-adjusted meals separately. If adjusted meals systematically overshoot compared to non-adjusted meals, automatically dampen the demand factor toward 1.0. This provides a simple, always-on correction without requiring the full Claude pipeline.
+#### #5 — Pre-Meal BG Slope Correction
 
-**Pre-meal BG slope correction.** The adaptive service (§10) uses cumulative BG delta (`currentBG - bgAtMealStart`) without accounting for pre-existing BG trends. If BG was already rising before the meal (dawn phenomenon, prior snack absorption), the meal is blamed for a rise it didn't cause. This systematically biases the carb curve at breakfast. **Planned fix:** Compute a bounded pre-meal trend from the 15–30 minutes before the meal and subtract its estimated contribution from the actual delta for the first 1–2 hours only, avoiding the noise amplification of long-horizon trend extrapolation.
+**The Problem**
+
+The BG-adaptive service calculates error as `actualBGDelta - predictedImpact`, where `actualBGDelta = currentBG - bgAtMealStart`. This attributes the entire BG change since meal start to the meal. But BG was already moving before you ate.
+
+The most common case is dawn phenomenon — hepatic glucose dump in the early morning that raises BG at +1 to +3 mg/dL per 5 minutes. If your BG was rising at +2 mg/dL/5min before breakfast and continues that trajectory for the first hour, that's +24 mg/dL of rise that has nothing to do with the meal. The adaptive service sees it as "BG rising more than predicted → under-dosed" and scales up remaining entries. The learning system sees the 1h and 2h checkpoints running high and nudges carbTau down (faster absorption → more upfront insulin next time).
+
+Both responses are wrong. You're not under-dosed — you have a pre-existing rise the meal didn't cause. Over weeks of breakfasts, carbTau drifts lower for no physiological reason. The system is learning from contaminated signal.
+
+This also happens with:
+
+- **Active correction boluses** — BG is dropping pre-meal, which then gets attributed as "meal caused a drop" at the 1h checkpoint
+- **Exercise-induced sensitivity changes** — BG falling from a recent workout
+- **Rebound from a treated low** — BG rising from glucose tabs taken 30 minutes before the meal
+
+**What Needs to Change**
+
+Measure the BG slope in the 15 minutes before meal start. Subtract a bounded version of that slope from the first 1-2 hours of post-meal BG delta, linearly ramping the correction to zero by 2h. This removes the pre-existing trend from both the adaptive service's real-time error calculation and the learning system's checkpoint evaluation.
+
+**How**
+
+**Step 1: Capture pre-meal slope at meal recording time**
+
+When the outcome is created, query the two CGM readings closest to (mealTime - 5min) and (mealTime - 15min). Compute the slope in mg/dL per 5 minutes. Store it as `preMealSlope` on the `V2MealOutcome`.
+
+If fewer than 2 readings exist in that window, or if the readings are more than 10 minutes apart, set `preMealSlope = 0` (no correction — better to skip than use bad data).
+
+**Step 2: Apply stability check**
+
+Only apply the correction if the slope is stable — meaning the two 5-minute deltas in the 15-minute window don't diverge wildly. If one segment shows +3 and another shows -1, the trend isn't consistent and shouldn't be extrapolated. A simple check: if the variance between segments exceeds a threshold (say, the segments differ by more than 2 mg/dL/5min), discard and set slope to 0.
+
+**Step 3: Cap the slope**
+
+Clamp the stored slope to ±2 mg/dL per 5 minutes. This prevents an anomalous pre-meal reading (compression low, calibration jump) from generating a huge correction. A ±2 cap means the maximum correction at 1h is ±24 mg/dL, which is already generous — most dawn phenomenon is +1 to +1.5 mg/dL/5min.
+
+Also cap the total cumulative correction to ±20 mg/dL. This is a second safety bound that catches edge cases where a moderate slope applied over many checkpoints accumulates too much.
+
+**Step 4: Apply to adaptive service**
+
+In `runAdaptiveCycle()`, when computing `actualBGDelta`:
+
+```swift
+let minutesSinceMeal = Date().timeIntervalSince(mealStart) / 60
+let rampFactor: Double
+if minutesSinceMeal <= 60 {
+    rampFactor = 1.0  // full correction in first hour
+} else if minutesSinceMeal <= 120 {
+    rampFactor = 1.0 - (minutesSinceMeal - 60) / 60  // linear ramp to 0
+} else {
+    rampFactor = 0.0  // no correction after 2h
+}
+
+let slopeCorrection = preMealSlope * (minutesSinceMeal / 5.0) * rampFactor
+let correctedDelta = actualBGDelta - clamp(slopeCorrection, -20, 20)
+```
+
+Use `correctedDelta` instead of `actualBGDelta` in the error calculation.
+
+**Step 5: Apply to learning checkpoints**
+
+The same correction applies to the 1h and 2h checkpoint evaluation in `recalculateCurveParameters()`. The 1h checkpoint gets the full slope subtracted (ramp = 1.0). The 2h checkpoint gets half (ramp = 0.5 at 120min... actually ramp hits 0 at 120min, so 2h gets zero correction — which is intentional because by 2h the meal's own absorption signal dominates).
+
+Actually, rethinking: the ramp goes 1.0 at ≤60min, linear to 0.0 at 120min. So at exactly 120min (the 2h checkpoint), the correction is 0. The 1h checkpoint gets full correction. The 3h+ checkpoints get nothing. That's the right behavior — pre-meal trend only contaminates the early window.
+
+**What This Doesn't Fix**
+
+This doesn't help if the pre-meal trend *changes* at meal time — for example, if you were flat before eating but dawn phenomenon kicks in right as you eat. That's indistinguishable from meal absorption. But that's also a much rarer scenario than the common case of an established trend that continues through the meal's early absorption window.
+
+**Core Data Impact**
+
+One new optional Double attribute on `V2MealOutcomeStored` — `preMealSlope`. Lightweight migration, default nil, old meals get no correction (which is the safe default).
+
+---
+
+#### #2 — Garmin Demand Factor Feedback Loop
+
+**The Problem**
+
+The Garmin sensitivity model applies up to ±40% adjustment to insulin delivery based on sleep, stress, activity, and cardiovascular metrics. But there's no mechanism to evaluate whether those adjustments are actually helping. The weights are heuristics — educated guesses based on directional findings from the literature (Spiegel, Donga, Borghouts). The epistemic note in the whitepaper explicitly calls this out.
+
+Right now, the only feedback path is Claude AI recalibration, which can suggest weight changes but runs weekly, requires manual approval, and analyzes aggregate patterns rather than directly measuring metric effectiveness. The rule-based learning system adjusts curve parameters (carbTau, proteinFactor, fatTotalCoeff) but never touches Garmin weights. This means curve parameters are absorbing Garmin model errors — if the sleep weight is too aggressive, carbTau drifts to compensate, which then causes errors on well-slept days.
+
+**The Core Insight**
+
+You can't compare "adjusted meals" to "unadjusted meals" directly because Garmin adjustments correlate with physiological state. People who get bad sleep actually *are* more insulin resistant — comparing their meals to well-rested meals confounds the Garmin adjustment with the real physiological effect. You'd be measuring biology, not model accuracy.
+
+What you *can* measure is **within-group variance**: among meals where Garmin applied a meaningful adjustment (say, demand factor > 1.15 or < 0.88), is the magnitude of the adjustment correlated with checkpoint error? If the sleep weight is perfectly calibrated, meals with demand factor 1.3 and meals with demand factor 1.5 should have similar checkpoint errors (both compensated correctly). If the sleep weight is too low, the 1.5x meals should still run high (under-compensated), showing a positive correlation between demand factor and BG error.
+
+**What Needs to Change**
+
+Add a periodic analysis (weekly, run before rule-based learning) that computes the Pearson correlation between `insulinDemandFactor` and average checkpoint BG error across Garmin-adjusted meals. If the correlation is significantly positive (under-compensating) or negative (over-compensating), nudge the dominant Garmin weights in the appropriate direction.
+
+**How**
+
+**Step 1: Filter to Garmin-adjusted meals**
+
+From the outcome store, pull all clean (non-confounded) meals from the analysis window where `insulinDemandFactor` deviates from 1.0 by more than a threshold — say, `|demandFactor - 1.0| > 0.12`. This gives you meals where Garmin was actively adjusting. Exclude meals with demand factor near 1.0 because they're in the model's "no adjustment" zone and add noise.
+
+**Step 2: Compute per-meal average BG error**
+
+For each meal, average the checkpoint errors using the same formula as the learning system (BG > 180: positive error, BG < 70: negative error, in-range: 0). Use only clean checkpoints. This gives you one error number per meal.
+
+**Step 3: Compute Pearson correlation**
+
+Correlate `demandFactor` with `averageCheckpointError` across the filtered meals. You need the stored Garmin contributions from #10 to break this down by metric later, but the first-order signal is the aggregate correlation.
+
+**Step 4: Interpret and act**
+
+| Correlation | Meaning | Action |
+|-------------|---------|--------|
+| r > +0.3 (significant positive) | Higher demand factor → higher BG error. Model under-compensating. | Garmin weights too conservative — needs larger adjustments |
+| r < -0.3 (significant negative) | Higher demand factor → lower BG error. Model over-compensating. | Garmin weights too aggressive — needs smaller adjustments |
+| -0.3 < r < +0.3 | No significant correlation | Model is calibrated reasonably well, or insufficient data |
+
+Significance threshold: require at least 10 adjusted meals in the window before acting. Below that, the correlation is too noisy to be meaningful.
+
+**Step 5: Nudge weights**
+
+If the correlation is significant, apply a small uniform scaling to all negative-impact weights (sleep, stress, body battery, RHR, HRV) — the weights that push demand up:
+
+```swift
+let nudgeFactor = 1.0 + (correlation * 0.1)  // e.g., r=0.4 → scale weights by 1.04
+for weight in negativeImpactWeights {
+    weight *= nudgeFactor
+}
+```
+
+The 0.1 multiplier keeps nudges small — even a strong correlation (r=0.5) only adjusts weights by 5%. Clamp all weights to their existing min/max ranges.
+
+**Step 6: Per-metric breakdown (uses #10)**
+
+Once aggregate correlation is working, break it down using the stored Garmin contributions. For each metric, compute the correlation between that metric's contribution and the checkpoint error. This tells you *which specific metric* is miscalibrated:
+
+```
+sleep_score_contribution vs error: r = +0.35 → sleep weight too conservative
+body_battery_contribution vs error: r = -0.05 → well calibrated
+stress_contribution vs error: r = +0.22 → mildly too conservative
+```
+
+This enables per-metric weight adjustment instead of uniform scaling. But the uniform scaling is a fine v1 — per-metric comes later.
+
+**When It Runs**
+
+Weekly, before rule-based learning runs. Order matters: fix Garmin weights first so curve parameters don't absorb Garmin errors. The sequence is:
+
+1. Garmin feedback loop analyzes and adjusts weights
+2. Rule-based learning runs with corrected demand factors
+3. Claude AI recalibration (if triggered) sees both updated weights and curve parameters
+
+**Safety Bounds**
+
+- Maximum weight change per cycle: ±10% (the `× 0.1` multiplier handles this)
+- Minimum sample size: 10 adjusted meals (below this, skip)
+- Weight clamping: same ranges as Claude AI validation pipeline
+- Persist adjustments to the same Garmin weights store Claude uses
+- Log the correlation coefficient, sample size, and any weight changes for post-hoc analysis
+
+**What This Doesn't Fix**
+
+Per-metric correlation requires sufficient data per metric. If a user always sleeps badly AND is always stressed, those two metrics co-vary and you can't disentangle them with correlation alone. You'd need multivariate regression, which needs even more data. The uniform scaling approach sidesteps this — it doesn't try to identify which metric is wrong, just whether the aggregate adjustment magnitude is right.
+
+The per-metric breakdown (#10 contributions) helps when metrics are somewhat independent — a user who has variable sleep but consistent stress gives you data to isolate the sleep weight. But fully entangled metrics remain a limitation until you have enough meals (50+) for multivariate analysis, which is likely a Claude AI task rather than an on-device computation.
+
+**Core Data Impact**
+
+No new entities or attributes needed. The analysis reads existing `V2MealOutcomeStored` records (demand factor, checkpoints, Garmin contributions from #10). Weight adjustments write to the existing Garmin weights store.
+
+---
+
+#### Implementation Order
+
+**#5 first.** It's 2-3 hours, self-contained, and immediately improves data quality for both the adaptive service and the learning system. Every breakfast meal gets cleaner signal starting immediately.
+
+**#2 second.** It depends on #10 (done) for per-metric breakdown, benefits from #5 (cleaner checkpoint data), and is the last piece before the learning system is architecturally complete. The v1 (aggregate correlation with uniform scaling) is ~3 hours. Per-metric breakdown is an additional 1-2 hours on top.
 
 **~~Confounding meal detection scaling by macro load.~~** Implemented — small snacks (< 15g carbs AND < 5g fat) are now excluded from confounding detection. See §12 Confounding Meal Detection.
 
