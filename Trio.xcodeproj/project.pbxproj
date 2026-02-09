@@ -562,6 +562,16 @@
 		V2B00E00000000000000000E /* V2OutcomeAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00E00000000000000000E /* V2OutcomeAnalysisView.swift */; };
 		V2B00F00000000000000000F /* MacroOnBoardCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F00F00000000000000000F /* MacroOnBoardCalculator.swift */; };
 		V2B01000000000000000010 /* MacroDecayChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V2F01000000000000000010 /* MacroDecayChartView.swift */; };
+		V3B01100000000000000011 /* V2DetectedMeal.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01100000000000000011 /* V2DetectedMeal.swift */; };
+		V3B01200000000000000012 /* V2TreatmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01200000000000000012 /* V2TreatmentView.swift */; };
+		V3B01300000000000000013 /* V2MealCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01300000000000000013 /* V2MealCardView.swift */; };
+		V3B01400000000000000014 /* V2DosePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01400000000000000014 /* V2DosePreviewView.swift */; };
+		V3B01500000000000000015 /* V2ForecastChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01500000000000000015 /* V2ForecastChart.swift */; };
+		V3B01600000000000000016 /* V2ManualMealEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01600000000000000016 /* V2ManualMealEntryView.swift */; };
+		V3B01700000000000000017 /* V2MacroHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01700000000000000017 /* V2MacroHubView.swift */; };
+		V3B01800000000000000018 /* V2NutritionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01800000000000000018 /* V2NutritionSettingsView.swift */; };
+		V3B01900000000000000019 /* V2GarminSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01900000000000000019 /* V2GarminSettingsView.swift */; };
+		V3B01A0000000000000001A /* V2AnalysisHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = V3F01A0000000000000001A /* V2AnalysisHubView.swift */; };
 		DD1745202C55523E00211FAC /* SMBSettingsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD17451F2C55523E00211FAC /* SMBSettingsDataFlow.swift */; };
 		DD1745222C55524800211FAC /* SMBSettingsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1745212C55524800211FAC /* SMBSettingsProvider.swift */; };
 		DD1745242C55526000211FAC /* SMBSettingsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1745232C55526000211FAC /* SMBSettingsStateModel.swift */; };
@@ -1449,6 +1459,16 @@
 		V2F00E00000000000000000E /* V2OutcomeAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2OutcomeAnalysisView.swift; sourceTree = "<group>"; };
 		V2F00F00000000000000000F /* MacroOnBoardCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroOnBoardCalculator.swift; sourceTree = "<group>"; };
 		V2F01000000000000000010 /* MacroDecayChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroDecayChartView.swift; sourceTree = "<group>"; };
+		V3F01100000000000000011 /* V2DetectedMeal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2DetectedMeal.swift; sourceTree = "<group>"; };
+		V3F01200000000000000012 /* V2TreatmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2TreatmentView.swift; sourceTree = "<group>"; };
+		V3F01300000000000000013 /* V2MealCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2MealCardView.swift; sourceTree = "<group>"; };
+		V3F01400000000000000014 /* V2DosePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2DosePreviewView.swift; sourceTree = "<group>"; };
+		V3F01500000000000000015 /* V2ForecastChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2ForecastChart.swift; sourceTree = "<group>"; };
+		V3F01600000000000000016 /* V2ManualMealEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2ManualMealEntryView.swift; sourceTree = "<group>"; };
+		V3F01700000000000000017 /* V2MacroHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2MacroHubView.swift; sourceTree = "<group>"; };
+		V3F01800000000000000018 /* V2NutritionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2NutritionSettingsView.swift; sourceTree = "<group>"; };
+		V3F01900000000000000019 /* V2GarminSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2GarminSettingsView.swift; sourceTree = "<group>"; };
+		V3F01A0000000000000001A /* V2AnalysisHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2AnalysisHubView.swift; sourceTree = "<group>"; };
 		DD17451F2C55523E00211FAC /* SMBSettingsDataFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsDataFlow.swift; sourceTree = "<group>"; };
 		DD1745212C55524800211FAC /* SMBSettingsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsProvider.swift; sourceTree = "<group>"; };
 		DD1745232C55526000211FAC /* SMBSettingsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSettingsStateModel.swift; sourceTree = "<group>"; };
@@ -2586,6 +2606,7 @@
 				V2F00200000000000000002 /* GarminContextSnapshot.swift */,
 				V2F00300000000000000003 /* GarminSensitivityModel.swift */,
 				V2F00400000000000000004 /* MacrosOnBoardTracker.swift */,
+				V3F01100000000000000011 /* V2DetectedMeal.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -3086,6 +3107,11 @@
 				58237D9D2BCF0A6B00A47A79 /* PopupView.swift */,
 				BDB899872C564509006F3298 /* ForecastChart.swift */,
 				V2F01000000000000000010 /* MacroDecayChartView.swift */,
+				V3F01200000000000000012 /* V2TreatmentView.swift */,
+				V3F01300000000000000013 /* V2MealCardView.swift */,
+				V3F01400000000000000014 /* V2DosePreviewView.swift */,
+				V3F01500000000000000015 /* V2ForecastChart.swift */,
+				V3F01600000000000000016 /* V2ManualMealEntryView.swift */,
 				CR0N0V13W000000001 /* CronometerMealRecommendationView.swift */,
 				CR0N0P1CK000000001 /* CronometerMealPickerView.swift */,
 				DD07CA5A2CE950B9002D45A9 /* MealPreset */,
@@ -3509,6 +3535,10 @@
 				V2F00C0000000000000000C /* GarminFirestoreStatusView.swift */,
 				V2F00D00000000000000000D /* V2MacroDosingSettingsView.swift */,
 				V2F00E00000000000000000E /* V2OutcomeAnalysisView.swift */,
+				V3F01700000000000000017 /* V2MacroHubView.swift */,
+				V3F01800000000000000018 /* V2NutritionSettingsView.swift */,
+				V3F01900000000000000019 /* V2GarminSettingsView.swift */,
+				V3F01A0000000000000001A /* V2AnalysisHubView.swift */,
 				DD1745362C55B74200211FAC /* AlgorithmSettings.swift */,
 			);
 			path = Subviews;
@@ -4669,6 +4699,16 @@
 				V2B00E00000000000000000E /* V2OutcomeAnalysisView.swift in Sources */,
 				V2B00F00000000000000000F /* MacroOnBoardCalculator.swift in Sources */,
 				V2B01000000000000000010 /* MacroDecayChartView.swift in Sources */,
+				V3B01100000000000000011 /* V2DetectedMeal.swift in Sources */,
+				V3B01200000000000000012 /* V2TreatmentView.swift in Sources */,
+				V3B01300000000000000013 /* V2MealCardView.swift in Sources */,
+				V3B01400000000000000014 /* V2DosePreviewView.swift in Sources */,
+				V3B01500000000000000015 /* V2ForecastChart.swift in Sources */,
+				V3B01600000000000000016 /* V2ManualMealEntryView.swift in Sources */,
+				V3B01700000000000000017 /* V2MacroHubView.swift in Sources */,
+				V3B01800000000000000018 /* V2NutritionSettingsView.swift in Sources */,
+				V3B01900000000000000019 /* V2GarminSettingsView.swift in Sources */,
+				V3B01A0000000000000001A /* V2AnalysisHubView.swift in Sources */,
 				38BF021B25E7D06400579895 /* PumpSettingsView.swift in Sources */,
 				3811DEEA25CA063400A708ED /* SyncAccess.swift in Sources */,
 				190EBCC829FF13AA00BA767D /* UserInterfaceSettingsStateModel.swift in Sources */,

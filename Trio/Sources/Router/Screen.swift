@@ -180,7 +180,7 @@ extension Screen {
         case .garminFirestoreStatus:
             GarminFirestoreStatusView()
         case .v2MacroDosingSettings:
-            V2MacroDosingSettingsView(resolver: resolver, state: Settings.StateModel())
+            V2MacroHubView(resolver: resolver, state: Settings.StateModel())
         case .v2OutcomeAnalysis:
             V2OutcomeAnalysisView()
         }
