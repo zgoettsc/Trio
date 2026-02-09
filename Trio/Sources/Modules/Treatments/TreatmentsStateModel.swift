@@ -964,6 +964,21 @@ extension Treatments {
                 let isFatPresent = fat > 0
                 let isProteinPresent = protein > 0
 
+                // V2 per-meal independent processing: thread selected meals to CarbsStorage
+                // so each meal gets its own engine call with its own timestamp and mealID.
+                let trioSettings = await MainActor.run { settingsManager.settings }
+                if trioSettings.useV2MacroAbsorption {
+                    let selectedMeals = await MainActor.run { v2SelectedMealsForChart }
+                    if let meals = selectedMeals, !meals.isEmpty {
+                        carbsStorage.v2SelectedMealsForDelivery = meals
+                        // Thread full carbs and upfront override
+                        let fullCarbs = await MainActor.run { v2OriginalFullCarbs }
+                        let upfrontOverride = await MainActor.run { v2UpfrontPercentOverride }
+                        carbsStorage.v2FullCarbsForEngine = fullCarbs
+                        carbsStorage.v2UpfrontPercentOverride = upfrontOverride
+                    }
+                }
+
                 if isCarbsPresent || isFatPresent || isProteinPresent {
                     await saveMeal()
                 }

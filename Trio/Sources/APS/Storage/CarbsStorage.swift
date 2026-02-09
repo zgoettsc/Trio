@@ -25,6 +25,11 @@ protocol CarbsStorage {
     /// to the future entries in Core Data. Used by outcome tracking to link meals to entries.
     var v2LastEngineMealID: String? { get }
 
+    /// V2: When set before calling storeCarbs, the engine processes each meal independently
+    /// with its own timestamp and mealID per the V3 whitepaper §13 per-meal independent processing.
+    /// When nil, falls back to combined-macro single-call behavior.
+    var v2SelectedMealsForDelivery: [V2DetectedMeal]? { get set }
+
     func storeCarbs(_ carbs: [CarbsEntry], areFetchedFromRemote: Bool) async throws
     func deleteCarbsEntryStored(_ treatmentObjectID: NSManagedObjectID) async
     func syncDate() -> Date
@@ -52,6 +57,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
     var v2FullCarbsForEngine: Double?
     var v2UpfrontPercentOverride: Double?
     private(set) var v2LastEngineMealID: String?
+    var v2SelectedMealsForDelivery: [V2DetectedMeal]?
 
     private let context: NSManagedObjectContext
 
@@ -232,19 +238,15 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
 
             // V2 three-curve engine path
             if trioSettings.useV2MacroAbsorption {
-                // Use full meal carbs from V2 override if available (entry may contain
-                // only upfront carbs for correct bolus calculation — engine needs full carbs).
-                let carbsValue = v2FullCarbsForEngine ?? Double(truncating: lastEntry.carbs as NSDecimalNumber)
-                let fatValue = Double(truncating: fat as NSDecimalNumber)
-                let proteinValue = Double(truncating: protein as NSDecimalNumber)
-                let fiberValue = Double(truncating: NSDecimalNumber(decimal: lastEntry.fiber ?? 0))
                 let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
                 let curveParams = V2OutcomeLearningStore.shared.loadParameters()
 
                 // Clear V2 overrides after reading (single-use per storeCarbs call)
                 let upfrontOverride = v2UpfrontPercentOverride
+                let selectedMeals = v2SelectedMealsForDelivery
                 v2FullCarbsForEngine = nil
                 v2UpfrontPercentOverride = nil
+                v2SelectedMealsForDelivery = nil
 
                 // Fetch Garmin sensitivity factor if enabled
                 var demandFactor = 1.0
@@ -256,28 +258,70 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     debug(.service, "Garmin demand factor: \(demandFactor) (\(sensitivityResult.contributions.count) contributions)")
                 }
 
-                let result = MacroAbsorptionEngine.generateEntries(
-                    carbs: carbsValue,
-                    fat: fatValue,
-                    protein: proteinValue,
-                    fiber: fiberValue,
-                    mealTime: lastEntry.actualDate ?? lastEntry.createdAt,
-                    insulinDemandFactor: demandFactor,
-                    upfrontPercent: upfrontOverride,
-                    insulinType: insulinType,
-                    curveParameters: curveParams,
-                    safeWindowOverride: trioSettings.v2SafeWindowMinutes,
-                    minUpfrontFloor: NSDecimalNumber(decimal: trioSettings.v2MinUpfrontFloor).doubleValue
-                )
+                // Per-meal independent processing (V3 Whitepaper §13):
+                // Each meal runs through generateEntries() with its own timestamp and gets
+                // its own mealID. This ensures a granola bar from 20 min ago doesn't generate
+                // entries for already-absorbed carbs, and each meal is tracked independently
+                // by the adaptive service and outcome learning.
+                if let meals = selectedMeals, meals.count > 0 {
+                    var lastMealID: String?
+                    for meal in meals {
+                        let result = MacroAbsorptionEngine.generateEntries(
+                            carbs: meal.carbs,
+                            fat: meal.fat,
+                            protein: meal.protein,
+                            fiber: meal.fiber,
+                            mealTime: meal.date, // Each meal's OWN timestamp
+                            insulinDemandFactor: demandFactor,
+                            upfrontPercent: upfrontOverride,
+                            insulinType: insulinType,
+                            curveParameters: curveParams,
+                            safeWindowOverride: trioSettings.v2SafeWindowMinutes,
+                            minUpfrontFloor: NSDecimalNumber(decimal: trioSettings.v2MinUpfrontFloor).doubleValue
+                        )
+                        lastMealID = result.mealID
 
-                // Expose the engine's mealID so outcome tracking can link to these entries
-                v2LastEngineMealID = result.mealID
+                        if !result.futureEntries.isEmpty {
+                            await saveFPUToCoreDataAsBatchInsert(
+                                entries: result.futureEntries,
+                                areFetchedFromRemote: areFetchedFromRemote
+                            )
+                        }
+                        debug(
+                            .service,
+                            "V2 per-meal entry: \(meal.label) (\(String(format: "%.0f", meal.carbs))c/\(String(format: "%.0f", meal.fat))f/\(String(format: "%.0f", meal.protein))p) at \(meal.date) → \(result.futureEntries.count) entries, mealID=\(result.mealID)"
+                        )
+                    }
+                    v2LastEngineMealID = lastMealID
+                } else {
+                    // Fallback: single-call combined path (manual entry, Cronometer button flow)
+                    let carbsValue = v2FullCarbsForEngine ?? Double(truncating: lastEntry.carbs as NSDecimalNumber)
+                    let fatValue = Double(truncating: fat as NSDecimalNumber)
+                    let proteinValue = Double(truncating: protein as NSDecimalNumber)
+                    let fiberValue = Double(truncating: NSDecimalNumber(decimal: lastEntry.fiber ?? 0))
 
-                if !result.futureEntries.isEmpty {
-                    await saveFPUToCoreDataAsBatchInsert(
-                        entries: result.futureEntries,
-                        areFetchedFromRemote: areFetchedFromRemote
+                    let result = MacroAbsorptionEngine.generateEntries(
+                        carbs: carbsValue,
+                        fat: fatValue,
+                        protein: proteinValue,
+                        fiber: fiberValue,
+                        mealTime: lastEntry.actualDate ?? lastEntry.createdAt,
+                        insulinDemandFactor: demandFactor,
+                        upfrontPercent: upfrontOverride,
+                        insulinType: insulinType,
+                        curveParameters: curveParams,
+                        safeWindowOverride: trioSettings.v2SafeWindowMinutes,
+                        minUpfrontFloor: NSDecimalNumber(decimal: trioSettings.v2MinUpfrontFloor).doubleValue
                     )
+
+                    v2LastEngineMealID = result.mealID
+
+                    if !result.futureEntries.isEmpty {
+                        await saveFPUToCoreDataAsBatchInsert(
+                            entries: result.futureEntries,
+                            areFetchedFromRemote: areFetchedFromRemote
+                        )
+                    }
                 }
                 return
             }
