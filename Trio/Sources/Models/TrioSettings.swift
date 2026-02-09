@@ -87,6 +87,9 @@ struct TrioSettings: JSON, Equatable {
     var mealModeSMBMultiplier: Decimal = 2.0
     /// BG floor for meal-mode SMB activation (mg/dL).
     var mealModeBGFloor: Decimal = 90
+    /// Minimum upfront bolus floor for high-fat meals (0-1). Default 0.25 (25%).
+    /// Low-fat meals get up to 80% upfront via fat-scaled lerp; this is the absolute floor for ≥50g fat.
+    var v2MinUpfrontFloor: Decimal = 0.25
     /// Enable Garmin sensitivity integration.
     var garminEnabled: Bool = false
     /// Firebase project ID for Garmin Firestore.
@@ -356,6 +359,9 @@ extension TrioSettings: Decodable {
         }
         if let mealModeBGFloor = try? container.decode(Decimal.self, forKey: .mealModeBGFloor) {
             settings.mealModeBGFloor = mealModeBGFloor
+        }
+        if let v2MinUpfrontFloor = try? container.decode(Decimal.self, forKey: .v2MinUpfrontFloor) {
+            settings.v2MinUpfrontFloor = v2MinUpfrontFloor
         }
         if let garminEnabled = try? container.decode(Bool.self, forKey: .garminEnabled) {
             settings.garminEnabled = garminEnabled

@@ -510,7 +510,8 @@ extension Treatments {
                     upfrontPercent: nil,
                     insulinType: insulinType,
                     curveParameters: curveParams,
-                    safeWindowOverride: trioSettings.v2SafeWindowMinutes
+                    safeWindowOverride: trioSettings.v2SafeWindowMinutes,
+                    minUpfrontFloor: NSDecimalNumber(decimal: trioSettings.v2MinUpfrontFloor).doubleValue
                 )
 
                 v2UpfrontCarbs = result.upfrontCarbs
@@ -1633,7 +1634,8 @@ extension Treatments.StateModel {
                 upfrontPercent: upfrontPercent,
                 insulinType: insulinType,
                 curveParameters: curveParams,
-                safeWindowOverride: trioSettings.v2SafeWindowMinutes
+                safeWindowOverride: trioSettings.v2SafeWindowMinutes,
+                minUpfrontFloor: NSDecimalNumber(decimal: trioSettings.v2MinUpfrontFloor).doubleValue
             )
 
             totalUpfrontCarbs += result.upfrontCarbs

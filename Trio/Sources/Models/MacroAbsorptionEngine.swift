@@ -71,10 +71,13 @@ struct MacroAbsorptionEngine {
     ///   - fiber: Total dietary fiber grams from the meal (#15)
     ///   - mealTime: When the meal was detected/eaten
     ///   - insulinDemandFactor: From Garmin model. 1.0 = normal, 1.25 = 25% more insulin needed
-    ///   - upfrontPercent: User override for upfront %. nil = use curve-calculated default
+    ///   - upfrontPercent: User override for upfront %. nil = use curve-calculated default with fat-scaled floor
     ///   - insulinType: User's insulin type (affects safe window default)
     ///   - curveParameters: Personal curve parameters (learned or manually tuned). nil = use defaults
     ///   - safeWindowOverride: User override for safe window minutes. nil = use insulin type default
+    ///   - minUpfrontFloor: Absolute minimum upfront % for the fattiest meals (0-1). nil = 0.25.
+    ///     Low-fat meals get up to 70% upfront; the floor sets the minimum for high-fat (≥50g) meals.
+    ///     Prevents simple carb meals from being under-bolused by the CDF calculation alone.
     static func generateEntries(
         carbs: Double,
         fat: Double,
@@ -85,7 +88,8 @@ struct MacroAbsorptionEngine {
         upfrontPercent: Double? = nil,
         insulinType: V2InsulinType = .rapidActing,
         curveParameters: V2PersonalCurveParameters? = nil,
-        safeWindowOverride: Int? = nil
+        safeWindowOverride: Int? = nil,
+        minUpfrontFloor: Double? = nil
     ) -> MacroAbsorptionResult {
 
         let params = curveParameters ?? V2PersonalCurveParameters()
@@ -98,7 +102,12 @@ struct MacroAbsorptionEngine {
         // --- Curve 1: Carbohydrate absorption (gamma-shaped) ---
         let tauCarb = carbTau(baseTau: params.effectiveCarbTau, fatGrams: fat, fiberGrams: fiber, fiberCoefficient: params.effectiveFiberCoefficient)
         let curveSuggestedPercent = gammaCDFValue(tau: tauCarb, atMinutes: Double(safeWindowMinutes))
-        let effectivePercent = upfrontPercent ?? curveSuggestedPercent
+
+        // Fat-scaled minimum upfront: prevents simple carb meals from being under-bolused.
+        // Low-fat meals get ~80% upfront (close to standard AID); high-fat meals get the floor.
+        // User override bypasses this — if someone explicitly sets upfront %, use it exactly.
+        let fatMinUpfront = fatScaledMinUpfront(fatGrams: fat, floor: minUpfrontFloor ?? 0.25)
+        let effectivePercent = upfrontPercent ?? max(curveSuggestedPercent, fatMinUpfront)
 
         // Only generate entries for carbs AFTER the safe window.
         // The upfront portion is covered by the bolus — no entries for it.
@@ -234,6 +243,29 @@ struct MacroAbsorptionEngine {
         let rampFraction = (fatGrams - threshold) / (plateau - threshold)
         let effectiveCoeff = 0.05 + rampFraction * (maxCoeff - 0.05)
         return fatGrams * effectiveCoeff
+    }
+
+    // MARK: - Fat-Scaled Minimum Upfront Percentage
+
+    /// Compute a fat-scaled minimum upfront bolus percentage.
+    ///
+    /// The Gamma CDF alone under-boluses simple carb meals (e.g., rice bowl gets only
+    /// 34% upfront). This function provides a floor that scales with fat content:
+    /// - 0g fat → 80% upfront (close to standard AID full-bolus behavior)
+    /// - 50g+ fat → `floor` (default 25%, aggressive splitting for HFHP meals)
+    ///
+    /// The formula is a linear interpolation: `lerp(0.80, floor, clamp(fatGrams/50, 0, 1))`
+    ///
+    /// The effective upfront percent is `max(CDF, fatScaledMinUpfront)`, so the CDF
+    /// still matters for very high-fat meals where it may exceed the floor.
+    static func fatScaledMinUpfront(
+        fatGrams: Double,
+        floor: Double = 0.25,
+        lowFatUpfront: Double = 0.80,
+        fatCap: Double = 50.0
+    ) -> Double {
+        let t = min(max(fatGrams / fatCap, 0), 1)
+        return lowFatUpfront + (floor - lowFatUpfront) * t
     }
 
     // MARK: - Curve 1: Gamma(2, tau) for Carbohydrates
