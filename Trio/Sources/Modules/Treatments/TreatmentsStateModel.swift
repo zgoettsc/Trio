@@ -1566,7 +1566,7 @@ extension Treatments.StateModel {
 
         // Get already-dosed meal dates from V2 outcome records
         let outcomes = V2OutcomeLearningStore.shared.loadAll()
-        let dosedDates = outcomes.map { $0.mealDate }
+        let dosedDates = outcomes.map { $0.date }
 
         // Flatten day-level data into individual entries for the meal feed
         var meals: [V2DetectedMeal] = []
