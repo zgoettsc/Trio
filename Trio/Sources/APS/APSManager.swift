@@ -489,11 +489,15 @@ final class BaseAPSManager: APSManager, Injectable {
             if trioSettings.useV2MacroAbsorption {
                 let activeMealIDs = await MacroAdaptiveService.activeMealIDs(context: privateContext)
                 if !activeMealIDs.isEmpty {
-                    // Build mealStartBGs map from V2 outcome records
+                    // Build per-meal context maps from V2 outcome records
                     let outcomes = V2OutcomeLearningStore.shared.loadAll()
                     var mealStartBGs: [String: Double] = [:]
+                    var mealFatGrams: [String: Double] = [:]
+                    var mealDates: [String: Date] = [:]
                     for outcome in outcomes where activeMealIDs.contains(outcome.mealID) {
                         mealStartBGs[outcome.mealID] = Double(outcome.bgAtMeal)
+                        mealFatGrams[outcome.mealID] = outcome.fat
+                        mealDates[outcome.mealID] = outcome.date
                     }
 
                     let latestBG = glucose.first.map { Double($0.glucose) }
@@ -530,6 +534,8 @@ final class BaseAPSManager: APSManager, Injectable {
                         cr: crValue,
                         activeMealIDs: activeMealIDs,
                         mealStartBGs: mealStartBGs,
+                        mealFatGrams: mealFatGrams,
+                        mealDates: mealDates,
                         context: privateContext,
                         userMaxSMBMinutes: settingsManager.preferences.maxSMBBasalMinutes,
                         mealSMBMultiplier: NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue,
