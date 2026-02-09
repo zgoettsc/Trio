@@ -105,10 +105,7 @@ struct V2DosePreviewView: View {
                             Text("Late meal: \(late.label)")
                                 .font(.subheadline.weight(.medium))
                             Text(
-                                String(
-                                    format: "%.0f min ago. The engine has adjusted the treatment plan for already-absorbed carbs.",
-                                    late.minutesAgo
-                                )
+                                "\(formatMinutesAgo(late.minutesAgo)). The engine has adjusted the treatment plan for already-absorbed carbs."
                             )
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -145,8 +142,13 @@ struct V2DosePreviewView: View {
                 HStack {
                     Text("Bolus now")
                     Spacer()
-                    Text(String(format: "%.1f U (%.0fg)", upfrontUnits, upfrontGrams))
-                        .foregroundStyle(.secondary)
+                    Text(String(
+                        format: "%.1fU for %.0fg (%.0f%% upfront)",
+                        upfrontUnits,
+                        upfrontGrams,
+                        upfrontPercent * 100
+                    ))
+                    .foregroundStyle(.secondary)
                 }
 
                 HStack {
@@ -287,6 +289,20 @@ struct V2DosePreviewView: View {
                     .buttonStyle(.bordered)
                 }
 
+                if abs(Double(truncating: state.insulinCalculated as NSDecimalNumber) - upfrontUnits) > 0.05 {
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        Text(String(
+                            format: "Rec. %.1fU includes BG correction + IOB",
+                            Double(truncating: state.insulinCalculated as NSDecimalNumber)
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
                 HStack {
                     Text("External Insulin")
                     Spacer()
@@ -397,6 +413,20 @@ struct V2DosePreviewView: View {
             demandOverride = state.v2DemandFactor
         }
         recalculate()
+    }
+
+    private func formatMinutesAgo(_ minutes: Double) -> String {
+        let mins = Int(minutes)
+        if mins < 60 {
+            return "\(mins) min ago"
+        } else {
+            let hours = mins / 60
+            let remaining = mins % 60
+            if remaining == 0 {
+                return "\(hours)h ago"
+            }
+            return "\(hours)h \(remaining)m ago"
+        }
     }
 
     private func macroBlock(_ label: String, value: Double, unit: String, color: Color) -> some View {

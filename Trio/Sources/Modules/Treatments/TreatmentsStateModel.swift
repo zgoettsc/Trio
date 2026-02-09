@@ -1555,55 +1555,63 @@ private extension Predictions {
 
 extension Treatments.StateModel {
     /// Load detected meals from HealthKit/Cronometer for the V2 meal feed.
-    /// Reads from the NutritionHealthService and maps to V2DetectedMeal.
+    ///
+    /// Uses the snapshot delta system to detect meals with correct timestamps.
+    /// Cronometer writes all Apple Health entries at midnight, so raw HealthKit queries
+    /// produce midnight timestamps. The snapshot system captures the ACTUAL time each
+    /// nutrition change was detected (when the observer fired), giving correct meal times.
+    ///
+    /// Falls back to a fresh HealthKit snapshot if no prior snapshots exist (bootstrap).
     @MainActor
     func loadV2DetectedMeals() async {
         useV2MacroAbsorption = settings.settings.useV2MacroAbsorption
 
-        // Fetch today's meals from the nutrition health service.
-        // Cronometer writes all Apple Health entries with midnight (00:00) timestamps,
-        // so we must query from start-of-day rather than a rolling hour window.
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? Date()
-        guard let recentDays = try? await nutritionHealthService.fetchMeals(from: startOfDay, to: endOfDay) else {
-            v2DetectedMeals = []
-            return
-        }
+        // First, trigger a fresh snapshot so we capture any changes since last observer fire.
+        // This ensures newly-logged Cronometer entries are detected even if the background
+        // observer was delayed.
+        _ = await nutritionHealthService.fetchLatestMealDelta()
+
+        // Use the snapshot delta system for the last 8 hours.
+        // This returns meals with CORRECT timestamps (when the change was detected),
+        // not Cronometer's midnight timestamps.
+        let inferredMeals = NutritionSnapshotStore.shared.inferredMealEvents(forLastHours: 8)
 
         // Get already-dosed meals from V2 outcome records for today.
-        // Cronometer entries have midnight timestamps, so we can't match on date.
-        // Instead, match on macro fingerprint: an outcome with the same carbs/fat/protein
-        // (within 1g tolerance) created today means this entry was already dosed.
+        let calendar = Calendar.current
         let outcomes = V2OutcomeLearningStore.shared.loadAll()
         let todayOutcomes = outcomes.filter { calendar.isDateInToday($0.date) }
 
-        // Flatten day-level data into individual entries for the meal feed
         var meals: [V2DetectedMeal] = []
-        for day in recentDays {
-            for entry in day.entries {
-                // Skip entries with no macros
-                guard entry.carbs > 0 || entry.fat > 0 || entry.protein > 0 else { continue }
+        for event in inferredMeals {
+            // Skip events with no meaningful macros
+            guard event.carbsDelta > 1 || event.fatDelta > 1 || event.proteinDelta > 1 else { continue }
 
-                let isDosed = todayOutcomes.contains(where: {
-                    abs($0.carbs - entry.carbs) < 1.0 &&
-                    abs($0.fat - entry.fat) < 1.0 &&
-                    abs($0.protein - entry.protein) < 1.0
-                })
-                meals.append(V2DetectedMeal(
-                    date: entry.date,
-                    label: inferMealLabel(for: entry.date),
-                    carbs: entry.carbs,
-                    fat: entry.fat,
-                    protein: entry.protein,
-                    fiber: entry.fiber,
-                    source: entry.source.isEmpty ? "Apple Health" : entry.source,
-                    isDosed: isDosed,
-                    healthKitID: entry.id.uuidString
-                ))
-            }
+            // Match against already-dosed outcomes by macro fingerprint
+            let isDosed = todayOutcomes.contains(where: {
+                abs($0.carbs - event.carbsDelta) < 2.0 &&
+                abs($0.fat - event.fatDelta) < 2.0 &&
+                abs($0.protein - event.proteinDelta) < 2.0
+            })
+
+            meals.append(V2DetectedMeal(
+                date: event.detectedAt,
+                label: inferMealLabel(for: event.detectedAt),
+                carbs: event.carbsDelta,
+                fat: event.fatDelta,
+                protein: event.proteinDelta,
+                fiber: event.fiberDelta,
+                source: "Cronometer",
+                isDosed: isDosed,
+                healthKitID: nil
+            ))
         }
+
         v2DetectedMeals = meals.sorted { $0.date > $1.date } // Most recent first
+
+        debug(
+            .service,
+            "V2 meal feed: \(v2DetectedMeals.count) meals detected from snapshot deltas (8h window)"
+        )
     }
 
     /// Add a manually entered meal to the V2 detected meals list.
@@ -1621,6 +1629,56 @@ extension Treatments.StateModel {
             healthKitID: nil
         )
         v2DetectedMeals.insert(meal, at: 0)
+    }
+
+    /// Compute V3 engine curve parameters for the selected meals.
+    /// Runs the engine to determine upfront percent, tau, and other curve parameters
+    /// that the dose preview page needs for correct display and bolus calculation.
+    @MainActor
+    func computeV2CurveParamsForSelectedMeals(_ meals: [V2DetectedMeal]) {
+        guard !meals.isEmpty else { return }
+
+        let trioSettings = settings.settings
+        let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+        let curveParams = V2OutcomeLearningStore.shared.loadParameters()
+
+        // Use the combined macros to compute representative curve parameters.
+        // For multi-meal selections, we use the combined totals because the dose preview
+        // shows a single set of curve params. Per-meal temporal independence is preserved
+        // in prepareV2IndependentMealEntries at delivery time.
+        let totalCarbs = meals.reduce(0.0) { $0 + $1.carbs }
+        let totalFat = meals.reduce(0.0) { $0 + $1.fat }
+        let totalProtein = meals.reduce(0.0) { $0 + $1.protein }
+        let totalFiber = meals.reduce(0.0) { $0 + $1.fiber }
+
+        let result = MacroAbsorptionEngine.generateEntries(
+            carbs: totalCarbs,
+            fat: totalFat,
+            protein: totalProtein,
+            fiber: totalFiber,
+            mealTime: meals.first?.date ?? Date(),
+            insulinDemandFactor: v2DemandFactor,
+            upfrontPercent: nil, // Let the engine calculate from CDF + fat-scaled floor
+            insulinType: insulinType,
+            curveParameters: curveParams,
+            safeWindowOverride: trioSettings.v2SafeWindowMinutes,
+            minUpfrontFloor: NSDecimalNumber(decimal: trioSettings.v2MinUpfrontFloor).doubleValue
+        )
+
+        // Set state for dose preview display
+        v2CurveSuggestedPercent = result.upfrontPercent
+        v2TauCarb = result.tauCarb
+        v2FatTotalEquiv = result.fatTotalEquiv
+        v2SafeWindowMinutes = result.safeWindowMinutes
+        v2OriginalFullCarbs = totalCarbs
+
+        // Set upfront carbs for the bolus calculator
+        carbs = Decimal(result.upfrontCarbs)
+
+        debug(
+            .service,
+            "V2 engine: tau=\(String(format: "%.1f", result.tauCarb)) upfront=\(String(format: "%.0f%%", result.upfrontPercent * 100)) (\(String(format: "%.1fg", result.upfrontCarbs))) for \(String(format: "%.0f", totalCarbs))c/\(String(format: "%.0f", totalFat))f/\(String(format: "%.0f", totalProtein))p/\(String(format: "%.0f", totalFiber))fb"
+        )
     }
 
     /// Prepare V2 treatment entries for multiple meals independently.

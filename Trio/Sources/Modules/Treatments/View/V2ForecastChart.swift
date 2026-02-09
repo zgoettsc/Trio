@@ -42,15 +42,20 @@ struct V2ForecastChart: View {
     /// Predict BG over 6 hours using a lightweight ISF/CR model.
     ///
     /// Both forecast lines call this with different parameters:
-    /// - "No treatment": bolusUnits=0, meals=[]
-    /// - "With treatment": bolusUnits=proposed, meals=selectedMeals
+    /// - "No treatment": bolusUnits=0, meals=[], smbCoverage=false
+    /// - "With treatment": bolusUnits=proposed, meals=selectedMeals, smbCoverage=true
     ///
-    /// Using the same model for both ensures the gap is purely treatment effect.
+    /// When smbCoverage is true, the model assumes SMBs will deliver insulin to cover
+    /// carbs beyond the upfront bolus portion, tracking the gamma CDF absorption curve.
+    /// This prevents the "with treatment" line from appearing unrealistically high.
+    ///
+    /// Using the same model for both ensures the gap is purely the treatment effect.
     private func predict(
         bolusUnits: Double,
         meals: [V2DetectedMeal],
         demandFactor: Double,
-        tau: Double
+        tau: Double,
+        smbCoverage: Bool = false
     ) -> [(date: Date, value: Double)] {
         let params = modelParams
         guard params.valid else { return [] }
@@ -59,25 +64,44 @@ struct V2ForecastChart: View {
         let steps = 73 // 6h * 12 steps/h + 1
         var forecast: [(date: Date, value: Double)] = []
 
+        // Compute total upfront fraction from state (what the bolus covers)
+        let upfrontPercent = state.v2CurveSuggestedPercent ?? 0.50
+
         for step in 0 ..< steps {
             let minutesAhead = Double(step * 5)
             let date = now.addingTimeInterval(minutesAhead * 60)
 
             // Carb impact: sum gamma CDF contributions from each meal at its own timestamp
             var carbBGDelta = 0.0
+            var smbInsulinDelta = 0.0
+
             for meal in meals {
                 let mealMinutesAgo = now.timeIntervalSince(meal.date) / 60.0
                 let totalMinutes = mealMinutesAgo + minutesAhead
                 let absorbed = MacroAbsorptionEngine.gammaCDFValue(tau: tau, atMinutes: totalMinutes)
                 let totalCarbs = meal.carbs * demandFactor
                 carbBGDelta += (totalCarbs * absorbed / params.cr) * params.isf
+
+                // Model SMB insulin delivery covering the non-upfront carbs.
+                // SMBs deliver insulin proportional to the carbs being absorbed beyond
+                // what the upfront bolus covers. We assume SMBs track the absorption curve
+                // with a ~30 minute lag (loop cycle delay + insulin onset).
+                if smbCoverage {
+                    let smbCarbs = meal.carbs * (1.0 - upfrontPercent) * demandFactor
+                    let smbLagMinutes = 30.0
+                    let laggedMinutes = max(0, totalMinutes - smbLagMinutes)
+                    let smbDelivered = MacroAbsorptionEngine.gammaCDFValue(tau: tau, atMinutes: laggedMinutes)
+                    let smbUnits = smbCarbs * smbDelivered / params.cr
+                    // SMB insulin absorption: linear over 4 hours from delivery time
+                    let smbAbsorbed = min(1.0, minutesAhead / (4.0 * 60.0))
+                    smbInsulinDelta += smbUnits * smbAbsorbed * params.isf
+                }
             }
 
-            // Insulin impact: new bolus absorption + existing IOB decay
-            // Both use the same simplified model so there's no systematic divergence
+            // Insulin impact: new bolus absorption + existing IOB decay + SMB delivery
             let bolusAbsorbed = min(1.0, minutesAhead / (4.0 * 60.0))
             let iobDecay = max(0, 1.0 - minutesAhead / (6.0 * 60.0))
-            let insulinBGDelta = (bolusUnits * bolusAbsorbed + params.iob * (1.0 - iobDecay)) * params.isf
+            let insulinBGDelta = (bolusUnits * bolusAbsorbed + params.iob * (1.0 - iobDecay)) * params.isf + smbInsulinDelta
 
             let predictedBG = max(40, params.currentBG + carbBGDelta - insulinBGDelta)
             forecast.append((date, predictedBG))
@@ -86,7 +110,7 @@ struct V2ForecastChart: View {
         return forecast
     }
 
-    /// "With treatment" forecast: carb absorption from selected meals + proposed bolus + existing IOB
+    /// "With treatment" forecast: carb absorption from selected meals + proposed bolus + SMB delivery + existing IOB
     private var withTreatmentForecast: [(date: Date, value: Double)] {
         let selectedMeals = state.v2SelectedMealsForChart ?? []
         let demandFactor = state.v2DemandFactor
@@ -97,7 +121,8 @@ struct V2ForecastChart: View {
             bolusUnits: bolusUnits,
             meals: selectedMeals,
             demandFactor: demandFactor,
-            tau: tau
+            tau: tau,
+            smbCoverage: true
         )
     }
 
