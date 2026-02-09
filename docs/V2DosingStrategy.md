@@ -365,7 +365,7 @@ Entries are generated every 15 minutes from 120 to 540 minutes (2–9 hours), no
 
 | Parameter | Default | Range | What It Controls |
 |-----------|---------|-------|-----------------|
-| fatTotalCoeff | 0.69 | 0.30–2.00 | g-carb-equivalent per g-fat |
+| fatTotalCoeff | 0.69 | 0.30–1.20 | g-carb-equivalent per g-fat (peak of nonlinear ramp) |
 
 ---
 
@@ -734,11 +734,17 @@ The `recalculateCurveParameters()` method processes all non-confounded outcomes:
 recencyWeight = max(0.1, 1.0 - (ageInDays / 90))
 ```
 
-**Step 3: Calculate per-checkpoint error**
+**Step 3: Calculate per-checkpoint error (target-based with dead zone)**
+
+Errors are computed relative to a target BG (default 110 mg/dL) with a ±30 dead zone (80–140), ensuring the system learns from users who consistently land near the upper boundary rather than treating 170 as "in range."
+
 ```
-if BG > 180:  error = +(BG - 180) / 100    (under-dosed)
-if BG < 70:   error = -(70 - BG) / 100     (over-dosed)
-if 70 ≤ BG ≤ 180: error = 0                (in range, skip)
+deadZoneLow  = targetBG - 30 = 80
+deadZoneHigh = targetBG + 30 = 140
+
+if BG > deadZoneHigh:  error = +(BG - targetBG) / 100    (under-dosed, relative to target)
+if BG < deadZoneLow:   error = -(targetBG - BG) / 100    (over-dosed, relative to target)
+if deadZoneLow ≤ BG ≤ deadZoneHigh: error = 0            (within dead zone, skip)
 ```
 
 **Step 4: Attribute to curve phase**
@@ -751,7 +757,7 @@ if 70 ≤ BG ≤ 180: error = 0                (in range, skip)
 | protein: low BG | Protein effect weaker | proteinFactor -= |error| × 0.02 × weight |
 | fat: high BG | Fat resistance stronger | fatCoeff += error × 0.05 × weight |
 | fat: low BG | Fat resistance weaker | fatCoeff -= |error| × 0.05 × weight |
-| overlap | Distributed at 30% weight to all three curves | Smaller adjustments |
+| overlap | Excluded from learning | Overlap produces noise-level adjustments; 5h/6h provide cleaner signal |
 
 **Step 5: Apply with clamping**
 
@@ -873,7 +879,7 @@ The V2 Macro Dosing settings page (Settings → V2 Macro Dosing) provides direct
 - BG Floor slider (70–130 mg/dL, step 5)
 
 **Section: Fat Absorption**
-- Fat Coefficient slider (0.30–2.00, step 0.01)
+- Fat Coefficient slider (0.30–1.20, step 0.01)
 
 **Section: Protein Absorption**
 - Protein Factor slider (0.10–0.80, step 0.01)

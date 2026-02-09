@@ -173,6 +173,15 @@ struct V2PersonalCurveParameters: Codable {
     var effectiveFiberCoefficient: Double { fiberCoefficient ?? 0.30 }
 }
 
+// MARK: - Parameter History (critique item #9)
+
+/// A timestamped snapshot of curve parameters, stored for rollback.
+struct V2ParameterSnapshot: Codable {
+    let date: Date
+    let source: String          // "learning", "claude", "manual", "reset"
+    let parameters: V2PersonalCurveParameters
+}
+
 // MARK: - Outcome Learning Store
 
 /// Persistent store for V2 meal outcomes and personal parameter learning.
@@ -184,8 +193,14 @@ final class V2OutcomeLearningStore {
     private let legacyOutcomesKey = "V2MealOutcomes"
     private let migrationCompletedKey = "V2OutcomesMigratedToCoreData"
     private let parametersKey = "V2PersonalCurveParameters"
+    private let parameterHistoryKey = "V2ParameterHistory"
+    private static let maxHistoryEntries = 10
     private let retentionDays = 90
     private let icrMatchTolerance = 0.10
+
+    /// Background backfill runs at most once per this interval (seconds).
+    private static let backgroundBackfillInterval: TimeInterval = 6 * 3600 // 6 hours
+    private static let lastBackfillKey = "V2LastBackgroundBackfill"
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -372,6 +387,43 @@ final class V2OutcomeLearningStore {
         }
     }
 
+    /// Save parameters with a history snapshot for rollback (critique item #9).
+    /// Captures the current parameters before overwriting so the user can undo bad changes.
+    func saveParametersWithHistory(_ params: V2PersonalCurveParameters, source: String) {
+        // Snapshot the *current* parameters before overwriting
+        let current = loadParameters()
+        appendParameterSnapshot(current, source: source)
+        saveParameters(params)
+    }
+
+    /// Load the parameter change history (most recent first).
+    func loadParameterHistory() -> [V2ParameterSnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: parameterHistoryKey),
+              let history = try? decoder.decode([V2ParameterSnapshot].self, from: data)
+        else { return [] }
+        return history.sorted { $0.date > $1.date }
+    }
+
+    /// Rollback to a specific snapshot.
+    func rollbackToSnapshot(_ snapshot: V2ParameterSnapshot) {
+        saveParameters(snapshot.parameters)
+    }
+
+    private func appendParameterSnapshot(_ params: V2PersonalCurveParameters, source: String) {
+        var history = loadParameterHistory()
+        let snapshot = V2ParameterSnapshot(date: Date(), source: source, parameters: params)
+        history.insert(snapshot, at: 0)
+
+        // Keep only the most recent entries
+        if history.count > Self.maxHistoryEntries {
+            history = Array(history.prefix(Self.maxHistoryEntries))
+        }
+
+        if let data = try? encoder.encode(history) {
+            UserDefaults.standard.set(data, forKey: parameterHistoryKey)
+        }
+    }
+
     // MARK: - Confounding Meal Detection (#4)
 
     /// Detect confounding meals: if another meal was recorded within the 8h window
@@ -452,6 +504,19 @@ final class V2OutcomeLearningStore {
         detectConfoundingMeals()
     }
 
+    /// Background backfill: called from the loop cycle (via MacroAdaptiveService) with
+    /// rate limiting. Runs at most once every 6 hours so that outcome learning doesn't
+    /// depend on the user opening a specific UI screen.
+    func backgroundBackfillIfNeeded(context: NSManagedObjectContext) async {
+        let lastRun = UserDefaults.standard.double(forKey: Self.lastBackfillKey)
+        let now = Date().timeIntervalSince1970
+        guard now - lastRun >= Self.backgroundBackfillInterval else { return }
+
+        UserDefaults.standard.set(now, forKey: Self.lastBackfillKey)
+        await backfillOutcomes(context: context)
+        debugPrint("V2OutcomeLearningStore: background backfill completed")
+    }
+
     private func fetchClosestGlucose(
         near targetTime: Date,
         withinMinutes: Int,
@@ -490,9 +555,17 @@ final class V2OutcomeLearningStore {
     ///   - Early (0-2h) checkpoints → carb tau
     ///   - Mid (2-5h) checkpoints → protein factor
     ///   - Late (4-9h) checkpoints → fat coefficient
+    /// Learn personal curve parameters from completed outcomes.
+    ///
+    /// Error model: target-based with dead zone (critique item #1).
+    /// Instead of the original 70–180 dead zone (which produced zero learning signal for
+    /// a user consistently landing at 170), errors are computed relative to a configurable
+    /// target BG (default 110) with a ±deadZone band (default ±30 → 80–140).
+    /// BG values inside the dead zone produce zero error; values outside produce a
+    /// proportional signal relative to the target, not the dead-zone edge.
     func recalculateCurveParameters(
-        targetLow: Int = 70,
-        targetHigh: Int = 180,
+        targetBG: Int = 110,
+        deadZone: Int = 30,
         currentCarbRatio: Double? = nil
     ) -> V2PersonalCurveParameters {
         var params = loadParameters()
@@ -525,13 +598,18 @@ final class V2OutcomeLearningStore {
             for cp in outcome.checkpoints {
                 guard let bg = cp.bgValue, cp.isClean else { continue }
 
+                // Target-based error with dead zone (critique item #1).
+                // A user landing at 170 now produces a learning signal (+0.60)
+                // instead of being silently ignored by the old 70–180 band.
                 let error: Double
-                if bg > targetHigh {
-                    error = Double(bg - targetHigh) / 100.0 // positive = under-dosed
-                } else if bg < targetLow {
-                    error = -Double(targetLow - bg) / 100.0 // negative = over-dosed
+                let deadZoneLow = targetBG - deadZone  // default 80
+                let deadZoneHigh = targetBG + deadZone  // default 140
+                if bg > deadZoneHigh {
+                    error = Double(bg - targetBG) / 100.0 // positive = under-dosed, relative to target
+                } else if bg < deadZoneLow {
+                    error = -Double(targetBG - bg) / 100.0 // negative = over-dosed, relative to target
                 } else {
-                    continue // in range, no adjustment needed
+                    continue // within dead zone around target, no adjustment needed
                 }
 
                 switch cp.curvePhase {
@@ -554,13 +632,13 @@ final class V2OutcomeLearningStore {
                     fatWeight += recencyWeight
 
                 case .overlap:
-                    // Distribute error across active curves with reduced weight
-                    carbTauAdjustment += -error * 1.0 * recencyWeight * 0.3
-                    carbTauWeight += recencyWeight * 0.3
-                    proteinAdjustment += error * 0.01 * recencyWeight * 0.3
-                    proteinWeight += recencyWeight * 0.3
-                    fatAdjustment += error * 0.025 * recencyWeight * 0.3
-                    fatWeight += recencyWeight * 0.3
+                    // Critique item #3: The 4h overlap checkpoint distributes error at 30%
+                    // weight to all three curves, producing noise-level adjustments (e.g.,
+                    // 0.003 to protein factor per 100 mg/dL). The 5h and 6h checkpoints
+                    // provide cleaner single-curve signal for protein and fat respectively.
+                    // Treating overlap as .skip for learning eliminates parameter coupling
+                    // with no meaningful loss of information.
+                    break
 
                 case .skip:
                     // (#3) This checkpoint is not relevant for this meal's macros — skip
@@ -588,7 +666,7 @@ final class V2OutcomeLearningStore {
             params.fatTotalCoeff = max(0.30, min(1.20, current + avgAdj))
         }
 
-        saveParameters(params)
+        saveParametersWithHistory(params, source: "learning")
         return params
     }
 

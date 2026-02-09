@@ -293,14 +293,49 @@ struct V2MacroDosingSettingsView: BaseView {
                 }
                 .listRowBackground(Color.chart)
 
-                // MARK: - Reset
-                Section {
+                // MARK: - Reset & History (critique item #9)
+                Section(header: Text("Parameter Management")) {
                     Button("Reset Curve Parameters to Defaults") {
-                        let defaults = V2PersonalCurveParameters()
-                        V2OutcomeLearningStore.shared.saveParameters(defaults)
+                        V2OutcomeLearningStore.shared.saveParametersWithHistory(
+                            V2PersonalCurveParameters(), source: "reset"
+                        )
                         loadCurveParameters()
                     }
                     .foregroundStyle(.red)
+
+                    let history = V2OutcomeLearningStore.shared.loadParameterHistory()
+                    if !history.isEmpty {
+                        DisclosureGroup("Parameter History (\(history.count))") {
+                            ForEach(Array(history.enumerated()), id: \.offset) { _, snapshot in
+                                Button {
+                                    V2OutcomeLearningStore.shared.rollbackToSnapshot(snapshot)
+                                    loadCurveParameters()
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack {
+                                            Text(snapshot.date, style: .date)
+                                            Text(snapshot.date, style: .time)
+                                            Spacer()
+                                            Text(snapshot.source)
+                                                .font(.caption2)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(.quaternary)
+                                                .clipShape(Capsule())
+                                        }
+                                        .font(.caption)
+                                        HStack(spacing: 12) {
+                                            Text("tau:\(String(format: "%.0f", snapshot.parameters.effectiveCarbTau))")
+                                            Text("prot:\(String(format: "%.2f", snapshot.parameters.effectiveProteinFactor))")
+                                            Text("fat:\(String(format: "%.2f", snapshot.parameters.effectiveFatTotalCoeff))")
+                                        }
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 .listRowBackground(Color.chart)
 

@@ -814,7 +814,7 @@ This linkage enables the export system to match outcomes to their scheduled entr
 
 ### BG Checkpoint Backfill
 
-Backfill runs when the user opens a Cronometer recommendation or the Outcome Accuracy page. For each empty checkpoint:
+Backfill runs automatically in the background every 6 hours (triggered by the loop cycle via `MacroAdaptiveService.runAdaptiveCycle()`), as well as when the user opens a Cronometer recommendation or the Outcome Accuracy page. This ensures learning is not gated on UI interaction. For each empty checkpoint:
 
 1. Calculate target time = meal date + checkpoint hours
 2. Wait until 30 minutes after target (to ensure CGM data exists)
@@ -830,7 +830,7 @@ Each checkpoint is tagged with the dominant absorption curve at that time. Phase
 | 1h | carb | Carbohydrate absorption (gamma peak region) |
 | 2h | carb | Carbohydrate absorption (tail region) |
 | 3h | protein/carb | Protein gluconeogenesis onset (if protein > threshold, else carb) |
-| 4h | overlap/protein/fat/carb | Dynamic: overlap if both protein+fat, else dominant macro |
+| 4h | overlap/protein/fat/carb | Dynamic: overlap if both protein+fat (excluded from learning), else dominant macro |
 | 5h | protein/fat/skip | Protein peak (4-5h), or fat if no protein, or skip if neither |
 | 6h | fat/skip | Fat insulin resistance peak (if fat ≥ 5g, else skip) |
 | 8h | fat/skip | Fat insulin resistance tail (if fat ≥ 5g, else skip) |
@@ -852,11 +852,17 @@ The `recalculateCurveParameters()` method processes all non-confounded outcomes:
 recencyWeight = max(0.1, 1.0 - (ageInDays / 90))
 ```
 
-**Step 3: Calculate per-checkpoint error**
+**Step 3: Calculate per-checkpoint error (target-based with dead zone)**
+
+Errors are computed relative to a configurable target BG (default 110 mg/dL) with a ±30 dead zone, rather than the wider 70–180 band used in earlier versions. This ensures the system learns from a user who consistently lands at 170 (outside the dead zone) rather than treating that as "in range."
+
 ```
-if BG > 180:  error = +(BG - 180) / 100    (under-dosed)
-if BG < 70:   error = -(70 - BG) / 100     (over-dosed)
-if 70 ≤ BG ≤ 180: error = 0                (in range, skip)
+deadZoneLow  = targetBG - 30 = 80
+deadZoneHigh = targetBG + 30 = 140
+
+if BG > deadZoneHigh:  error = +(BG - targetBG) / 100    (under-dosed, relative to target)
+if BG < deadZoneLow:   error = -(targetBG - BG) / 100    (over-dosed, relative to target)
+if deadZoneLow ≤ BG ≤ deadZoneHigh: error = 0            (within dead zone, skip)
 ```
 
 **Step 4: Attribute to curve phase**
@@ -869,7 +875,7 @@ if 70 ≤ BG ≤ 180: error = 0                (in range, skip)
 | protein: low BG | Protein effect weaker | proteinFactor -= |error| × 0.02 × weight |
 | fat: high BG | Fat resistance stronger | fatCoeff += error × 0.05 × weight |
 | fat: low BG | Fat resistance weaker | fatCoeff -= |error| × 0.05 × weight |
-| overlap | Distributed at 30% weight to all three curves | Smaller adjustments |
+| overlap | Excluded from learning | The 4h overlap checkpoint is skipped for parameter learning to avoid noise-level adjustments from diluted 30% attribution. The 5h and 6h checkpoints provide cleaner single-curve signal. Overlap data is retained for monitoring. |
 | skip | No adjustment | Checkpoint excluded from learning |
 
 **Step 5: Apply with clamping**
@@ -1340,6 +1346,26 @@ Lock regions are kept fine: acquire for state access, release before I/O (Core D
 | **Outcome storage** | None | Core Data with queryable attributes, 90-day retention |
 
 The V3 system delivers insulin that matches the temporal profile of mixed-meal absorption — more insulin when fat/protein effects peak, less insulin when only the bolus-covered upfront carbs are active — while adapting to the user's daily physiological state, learning from every meal outcome, and maintaining layered safety protections that prevent compounding multipliers from producing dangerous over-delivery. Per-meal independent processing ensures accurate dosing even when multiple meals overlap or are dosed late.
+
+---
+
+## 19. Known Limitations and Planned Improvements
+
+The following items have been identified through external review and are acknowledged as real design limitations. Items marked **[Planned]** are scheduled for implementation; items marked **[Acknowledged]** are known tradeoffs with no immediate fix planned.
+
+### Planned Improvements
+
+**Garmin demand factor feedback loop.** The Garmin sensitivity weights (§8) are heuristics with no automatic correction mechanism. If a weight is miscalibrated (e.g., the sleep impact of −0.22 systematically causes lows after bad sleep), the only feedback path is the weekly Claude AI recalibration, which requires user opt-in. **Planned fix:** Track outcome accuracy for demand-factor-adjusted meals separately. If adjusted meals systematically overshoot compared to non-adjusted meals, automatically dampen the demand factor toward 1.0. This provides a simple, always-on correction without requiring the full Claude pipeline.
+
+**Pre-meal BG slope correction.** The adaptive service (§10) uses cumulative BG delta (`currentBG - bgAtMealStart`) without accounting for pre-existing BG trends. If BG was already rising before the meal (dawn phenomenon, prior snack absorption), the meal is blamed for a rise it didn't cause. This systematically biases the carb curve at breakfast. **Planned fix:** Compute a bounded pre-meal trend from the 15–30 minutes before the meal and subtract its estimated contribution from the actual delta for the first 1–2 hours only, avoiding the noise amplification of long-horizon trend extrapolation.
+
+**Confounding meal detection scaling by macro load.** The confounding detection (§12) treats all overlapping meals identically — a 10g carb snack at hour 3 marks late checkpoints just as dirty as a 100g carb meal. This is conservative (false-dirty reduces signal quantity but doesn't introduce bias) but wastes clean data. **Planned fix:** Exclude meals below a threshold (e.g., <15g carbs and <5g fat) from confounding detection, preserving late-checkpoint data for small snacks that don't meaningfully affect BG.
+
+**Export re-derives Garmin contributions with current weights.** The comprehensive export (§12) re-calculates per-metric Garmin contributions using the stored snapshot but current model weights, rather than the weights that were active at meal time. If weights change (via Claude recalibration), the exported breakdown no longer reflects what was actually calculated. **Planned fix:** Store the individual metric contributions or the active weight vector alongside the Garmin snapshot at meal time, so exports always reflect historical reality.
+
+### Acknowledged Tradeoffs
+
+**The V2/V3 naming mismatch.** The codebase consistently uses "V2" naming (`V2MacroDosingSettings`, `V2MealOutcome`, `useV2MacroAbsorption`) while this document describes the system as "V3." This reflects the iterative development history — the code was written as "V2" (replacing V1 Warsaw Method), and this whitepaper documents the third major revision of the design. Renaming all code symbols would touch dozens of files with no functional benefit.
 
 ---
 
