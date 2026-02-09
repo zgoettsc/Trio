@@ -43,7 +43,7 @@ struct V2AnalysisHubView: View {
             Section(header: Text("Outcome Learning")) {
                 let store = V2OutcomeLearningStore.shared
                 let outcomes = store.loadAll()
-                let completedCount = outcomes.filter({ !$0.bgCheckpoints.isEmpty }).count
+                let completedCount = outcomes.filter({ $0.checkpoints.contains(where: { $0.bgValue != nil }) }).count
 
                 HStack {
                     Text("Meals recorded")
@@ -61,7 +61,8 @@ struct V2AnalysisHubView: View {
 
                 if completedCount > 0 {
                     let inRange = outcomes.filter { outcome in
-                        guard let peak = outcome.bgCheckpoints.max(by: { $0.bg < $1.bg })?.bg else { return false }
+                        let bgs = outcome.checkpoints.compactMap(\.bgValue)
+                        guard let peak = bgs.max() else { return false }
                         return peak <= 180
                     }.count
                     let pct = Double(inRange) / Double(completedCount) * 100
@@ -97,7 +98,7 @@ struct V2AnalysisHubView: View {
 
         var csv = "mealID,mealDate,carbs,fat,protein,fiber,bgAtMeal,demandFactor\n"
         for o in outcomes {
-            csv += "\(o.mealID),\(o.mealDate),\(o.carbsLogged),\(o.fatLogged),\(o.proteinLogged),\(o.fiberLogged),\(o.bgAtMeal),\(o.insulinDemandFactor)\n"
+            csv += "\(o.mealID),\(o.date),\(o.carbs),\(o.fat),\(o.protein),\(o.fiber),\(o.bgAtMeal),\(o.insulinDemandFactor)\n"
         }
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("v2_meal_outcomes.csv")

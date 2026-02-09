@@ -194,7 +194,7 @@ struct V2DosePreviewView: View {
                         Text(String(format: "Garmin: %.1fx demand", state.v2DemandFactor))
                         Spacer()
                         if let topContrib = state.v2DemandContributions.first {
-                            Text(topContrib.label)
+                            Text(topContrib.description)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
