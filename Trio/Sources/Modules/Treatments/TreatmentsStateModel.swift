@@ -811,6 +811,7 @@ extension Treatments {
                     insulinDemandFactor: demandFactor,
                     safeWindowMinutes: safeWindow,
                     garminSnapshot: nil, // filled in async before save
+                    garminContributions: nil,
                     bgAtMeal: bgAtMeal,
                     carbRatioAtMeal: crAtMeal,
                     isfAtMeal: isfAtMeal,
