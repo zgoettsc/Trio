@@ -917,7 +917,9 @@ if deadZoneLow ≤ BG ≤ deadZoneHigh: error = 0            (within dead zone, 
 
 ### Claude AI Recalibration
 
-When enabled, the `SensitivityRecalibrationService` exports the last 7 days of outcomes (with full Garmin context) to the Claude API for pattern analysis. This runs weekly or on manual trigger (Settings → V2 Macro Dosing → AI Insights).
+When enabled, the `SensitivityRecalibrationService` exports recent outcomes (with full Garmin context) to the Claude API for pattern analysis. The analysis window is configurable: 7, 14, 21, or 30 days (default 14). This runs weekly or on manual trigger (Settings → V2 Macro Dosing → AI Insights).
+
+The 14-day default balances data volume against staleness — 7 days typically yields only 12-15 clean checkpoints after confounding exclusion, which is insufficient for reliable pattern detection. At 2-3 meals/day, 14 days provides ~25-35 clean data points, enough for Claude to separate signal from noise.
 
 #### What Claude Analyzes
 
@@ -925,6 +927,7 @@ Claude receives a structured data prompt containing:
 - Current model parameters (carbTau, proteinFactor, fatCoefficient, fiberCoefficient, protein threshold/plateau)
 - Each meal outcome: macros (carbs, fat, protein, fiber), curve parameters used, BG checkpoints with phase attribution, adaptive adjustments applied, Garmin context snapshot, dosing context (CR, ISF, demand factor)
 - Confounding meal flags and per-checkpoint clean/dirty status
+- Per-phase sample size summary: clean/total checkpoints and meal count for each curve phase (carb, protein, fat)
 
 Claude identifies patterns the rule-based system cannot detect:
 - Time-of-day insulin sensitivity patterns
@@ -937,6 +940,12 @@ Claude identifies patterns the rule-based system cannot detect:
 
 ```json
 {
+  "analysis_window_days": 14,
+  "per_phase_sample_sizes": {
+    "carb": { "clean_checkpoints": 42, "total_checkpoints": 48, "meals_with_data": 28 },
+    "protein": { "clean_checkpoints": 19, "total_checkpoints": 22, "meals_with_data": 19 },
+    "fat": { "clean_checkpoints": 6, "total_checkpoints": 8, "meals_with_data": 6 }
+  },
   "curve_parameter_updates": {
     "carb_tau": { "current": 35, "recommended": 33, "rationale": "...", "confidence": "high" },
     "protein_factor": { "current": 0.35, "recommended": 0.38, "rationale": "...", "confidence": "medium" },
@@ -959,9 +968,11 @@ Claude identifies patterns the rule-based system cannot detect:
   ],
   "explanation": "Natural language summary of findings and recommendations",
   "confidence": "medium",
-  "meals_analyzed": 14
+  "meals_analyzed": 28
 }
 ```
+
+The `per_phase_sample_sizes` block lets users judge recommendation quality: a fat coefficient recommendation based on 6 clean checkpoints deserves more scrutiny than a carb tau recommendation based on 42. Claude is instructed to lower its confidence when sample sizes are small (< 10 clean checkpoints for a phase).
 
 #### Validation Pipeline
 
@@ -1096,6 +1107,7 @@ The V3 settings are organized into a tabbed hub (Settings → V2 Macro Dosing) w
 **Analysis Tab:**
 - Record Meal Outcomes toggle
 - Claude AI Recalibration toggle
+- Analysis Window picker (7 / 14 / 21 / 30 days, default 14) — visible when Claude recalibration is enabled
 - Recorded meal count and BG checkpoint count
 - Link to Meal Outcome Accuracy page
 - Export All Meal Data button

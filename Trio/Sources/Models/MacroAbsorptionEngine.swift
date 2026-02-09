@@ -76,7 +76,7 @@ struct MacroAbsorptionEngine {
     ///   - curveParameters: Personal curve parameters (learned or manually tuned). nil = use defaults
     ///   - safeWindowOverride: User override for safe window minutes. nil = use insulin type default
     ///   - minUpfrontFloor: Absolute minimum upfront % for the fattiest meals (0-1). nil = 0.25.
-    ///     Low-fat meals get up to 70% upfront; the floor sets the minimum for high-fat (≥50g) meals.
+    ///     Low-fat meals get up to 80% upfront; the floor sets the minimum for high-fat (≥50g) meals.
     ///     Prevents simple carb meals from being under-bolused by the CDF calculation alone.
     static func generateEntries(
         carbs: Double,

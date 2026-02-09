@@ -27,6 +27,7 @@ extension Settings {
         @Published var garminEnabled = false
         @Published var v2OutcomeLearningEnabled = true
         @Published var claudeRecalibrationEnabled = true
+        @Published var recalibrationWindowDays: Int = 14
 
         private(set) var buildNumber = ""
         private(set) var versionNumber = ""
@@ -49,6 +50,7 @@ extension Settings {
             subscribeSetting(\.garminEnabled, on: $garminEnabled) { garminEnabled = $0 }
             subscribeSetting(\.v2OutcomeLearningEnabled, on: $v2OutcomeLearningEnabled) { v2OutcomeLearningEnabled = $0 }
             subscribeSetting(\.claudeRecalibrationEnabled, on: $claudeRecalibrationEnabled) { claudeRecalibrationEnabled = $0 }
+            subscribeSetting(\.recalibrationWindowDays, on: $recalibrationWindowDays) { recalibrationWindowDays = $0 }
 
             broadcaster.register(SettingsObserver.self, observer: self)
 

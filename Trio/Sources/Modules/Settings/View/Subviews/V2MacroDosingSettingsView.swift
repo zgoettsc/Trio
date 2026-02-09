@@ -441,6 +441,24 @@ struct V2MacroDosingSettingsView: BaseView {
                     }
 
                     Toggle("Claude AI Recalibration", isOn: $state.claudeRecalibrationEnabled)
+
+                    if state.claudeRecalibrationEnabled {
+                        HStack {
+                            Text("Analysis Window")
+                            Spacer()
+                            Picker("", selection: $state.recalibrationWindowDays) {
+                                Text("7 days").tag(7)
+                                Text("14 days").tag(14)
+                                Text("21 days").tag(21)
+                                Text("30 days").tag(30)
+                            }
+                            .pickerStyle(.menu)
+                        }
+
+                        Text("Longer windows give Claude more data points for pattern detection but may include stale context after setting changes. Default 14 days.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .listRowBackground(Color.chart)
 

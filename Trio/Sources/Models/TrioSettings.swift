@@ -98,6 +98,8 @@ struct TrioSettings: JSON, Equatable {
     var v2OutcomeLearningEnabled: Bool = true
     /// Enable Claude weekly recalibration.
     var claudeRecalibrationEnabled: Bool = true
+    /// Analysis window for Claude recalibration (days). Options: 7, 14, 21, 30. Default 14.
+    var recalibrationWindowDays: Int = 14
 }
 
 extension TrioSettings: Decodable {
@@ -374,6 +376,9 @@ extension TrioSettings: Decodable {
         }
         if let claudeRecalibrationEnabled = try? container.decode(Bool.self, forKey: .claudeRecalibrationEnabled) {
             settings.claudeRecalibrationEnabled = claudeRecalibrationEnabled
+        }
+        if let recalibrationWindowDays = try? container.decode(Int.self, forKey: .recalibrationWindowDays) {
+            settings.recalibrationWindowDays = recalibrationWindowDays
         }
 
         self = settings
