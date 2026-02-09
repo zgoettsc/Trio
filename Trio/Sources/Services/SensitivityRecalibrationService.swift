@@ -143,9 +143,11 @@ final class SensitivityRecalibrationService {
 
     /// Run weekly recalibration analysis.
     /// Returns nil if insufficient data or API unavailable.
+    /// - Parameter lastDays: Must come from `settingsManager.settings.recalibrationWindowDays`.
+    ///   No default — callers must pass the user's setting to prevent silent desync.
     func runRecalibration(
         apiKey: String,
-        lastDays: Int = 14
+        lastDays: Int
     ) async -> RecalibrationResult? {
         let export = outcomeStore.exportForRecalibration(lastDays: lastDays)
 
