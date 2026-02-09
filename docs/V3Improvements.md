@@ -230,6 +230,8 @@ Protected operations:
 
 Lock granularity is kept fine: acquire for state access, release before I/O (Core Data fetches, context.perform). This avoids holding the lock across async operations.
 
+**Design note — deferred logging:** `scaleFutureEntries()` captures log messages as local `String?` variables while the lock is held, then emits them via `debug()` after unlock. An earlier version released and re-acquired the lock around `debug()` calls, which created a race window where another thread could modify `cumulativeScaling` or `ceilingHitCounts` between the read and the subsequent write — a classic lost-update scenario. The deferred pattern keeps the lock region contiguous (single acquire → single release) while still avoiding holding the lock during I/O.
+
 **File:** `MacroAdaptiveService.swift`
 
 ---
