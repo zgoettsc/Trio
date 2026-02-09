@@ -626,6 +626,11 @@ final class MacroAdaptiveService {
         let demandFactor = mealDemandFactors[mealID] ?? 1.0
         let compositeDemand = newCumulative * demandFactor
         var ceilingWasHit = false
+        // Capture log message (if any) to emit after state mutation is complete.
+        // debug() is lightweight (os_log) but we avoid the unlock-relock pattern that
+        // would create a race window between state reads and the final writes below.
+        var logMessage: String?
+
         if compositeDemand > Self.defaultMaxCompositeDemand, demandFactor > 0 {
             let cappedCumulative = Self.defaultMaxCompositeDemand / demandFactor
             ceilingWasHit = true
@@ -641,30 +646,20 @@ final class MacroAdaptiveService {
                 newCumulative = max(Self.minCumulativeScaling, degradedCumulative)
                 ceilingHitCounts[mealID] = 0 // reset counter after degradation
 
-                stateLock.unlock()
-                debug(
-                    .apsManager,
-                    "S2 AUTO-DEGRADE for meal \(mealID.prefix(8)): " +
+                logMessage = "S2 AUTO-DEGRADE for meal \(mealID.prefix(8)): " +
                     "\(hitCount) consecutive ceiling hits → " +
                     "decaying scaling from \(String(format: "%.2f", cappedCumulative))x " +
                     "to \(String(format: "%.2f", newCumulative))x"
-                )
-                stateLock.lock()
             } else {
                 newCumulative = cappedCumulative
 
-                stateLock.unlock()
-                debug(
-                    .apsManager,
-                    "S2 composite ceiling hit for meal \(mealID.prefix(8)): " +
+                logMessage = "S2 composite ceiling hit for meal \(mealID.prefix(8)): " +
                     "demand=\(String(format: "%.2f", demandFactor))x × " +
                     "scaling=\(String(format: "%.2f", currentCumulative * clampedFactor))x = " +
                     "\(String(format: "%.2f", compositeDemand))x > " +
                     "\(String(format: "%.1f", Self.defaultMaxCompositeDemand))x ceiling. " +
                     "Capping scaling to \(String(format: "%.2f", newCumulative))x " +
                     "(hit \(hitCount)/\(Self.ceilingHitDegradationThreshold))"
-                )
-                stateLock.lock()
             }
         } else {
             // No ceiling hit — reset consecutive counter
@@ -676,6 +671,7 @@ final class MacroAdaptiveService {
 
         guard abs(effectiveFactor - 1.0) > 0.01 else {
             stateLock.unlock()
+            if let logMessage { debug(.apsManager, logMessage) }
             return // skip trivial adjustments
         }
 
@@ -683,6 +679,11 @@ final class MacroAdaptiveService {
         lastAdjustmentTime = Date()
         persistCumulativeScaling() // (#9) survive app restart
         stateLock.unlock()
+
+        // Emit log outside the lock — all values were captured while locked
+        if let logMessage {
+            debug(.apsManager, logMessage)
+        }
 
         await context.perform {
             let fetchRequest: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
