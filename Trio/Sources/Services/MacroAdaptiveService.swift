@@ -160,6 +160,15 @@ struct MealModeState {
             effectiveMultiplier = effectiveMultiplier - ratio * max(0, effectiveMultiplier - 1.5)
         }
 
+        if effectiveMultiplier < mealSMBMultiplier {
+            debug(
+                .apsManager,
+                "S2b SMB rate reduced: composite demand \(String(format: "%.2f", compositeDemandFactor))x " +
+                "→ SMB multiplier \(String(format: "%.1f", mealSMBMultiplier))x reduced to " +
+                "\(String(format: "%.1f", effectiveMultiplier))x"
+            )
+        }
+
         let enhancedMinutes = Decimal(Double(truncating: userMaxSMBMinutes as NSDecimalNumber) * effectiveMultiplier)
         return MealModeState(
             isActive: true,
@@ -226,9 +235,9 @@ final class MacroAdaptiveService {
     /// Prevents compounding multipliers from delivering more than 2.5x the base engine calculation.
     private static let defaultMaxCompositeDemand: Double = 2.5
 
-    /// (L1) Buffer time (seconds) before counting an entry as "absorbed".
-    /// Ensures oref has had at least one cycle to act on the entry before we attribute BG impact.
-    private static let absorptionBuffer: TimeInterval = 5 * 60 // one oref cycle
+    /// (L1) Minimum buffer time (seconds) before counting an entry as "absorbed".
+    /// Actual buffer is max(this, timeSinceLastLoop) — adapts to delayed loop cycles.
+    private static let minAbsorptionBuffer: TimeInterval = 5 * 60 // one standard oref cycle
 
     // MARK: - State
 
@@ -334,8 +343,12 @@ final class MacroAdaptiveService {
         mealSMBMultiplier: Double = 2.0,
         bgFloor: Double = 90.0,
         diaHours: Double = 6.0,                    // S1: duration of insulin action in hours
-        iobCurve: IOBDecayCurve = .exponential(peakMinutes: 75) // S1: oref-matching IOB curve
+        iobCurve: IOBDecayCurve = .exponential(peakMinutes: 75), // S1: oref-matching IOB curve
+        lastLoopDate: Date? = nil               // L1: for dynamic absorption buffer
     ) async -> MealModeState {
+        // L1: Dynamic absorption buffer — at least 5min, but longer if the loop is delayed
+        let timeSinceLastLoop = lastLoopDate.map { Date().timeIntervalSince($0) } ?? Self.minAbsorptionBuffer
+        let absorptionBuffer = max(Self.minAbsorptionBuffer, timeSinceLastLoop)
         let hasActiveMeals = !activeMealIDs.isEmpty
 
         let cgmAge: TimeInterval? = cgmTimestamp.map { Date().timeIntervalSince($0) }
@@ -343,7 +356,7 @@ final class MacroAdaptiveService {
         // Compute total remaining carbs across all active meals for Gate 5 (#5)
         var totalRemainingCarbs = 0.0
         for mealID in activeMealIDs {
-            let info = await fetchAbsorbedAndRemainingCarbs(mealID: mealID, context: context)
+            let info = await fetchAbsorbedAndRemainingCarbs(mealID: mealID, context: context, absorptionBuffer: absorptionBuffer)
             totalRemainingCarbs += info.remaining
         }
 
@@ -405,7 +418,8 @@ final class MacroAdaptiveService {
             // Compute absorbed carbs: sum of past entries for this meal
             let absorbedAndRemaining = await fetchAbsorbedAndRemainingCarbs(
                 mealID: mealID,
-                context: context
+                context: context,
+                absorptionBuffer: absorptionBuffer
             )
 
             let absorbedCarbs = absorbedAndRemaining.absorbed
@@ -504,13 +518,15 @@ final class MacroAdaptiveService {
     // MARK: - Entry Analysis
 
     /// Fetch absorbed (past) and remaining (future) carbs for a meal.
-    /// (L1) Uses an absorption buffer so entries are only counted as "absorbed" after oref has had
-    /// at least one cycle to act on them.
+    /// (L1) Uses a dynamic absorption buffer: max(5min, timeSinceLastLoop).
+    /// Entries are only counted as "absorbed" after oref has had at least one cycle to act on them.
     func fetchAbsorbedAndRemainingCarbs(
         mealID: String,
-        context: NSManagedObjectContext
+        context: NSManagedObjectContext,
+        absorptionBuffer: TimeInterval? = nil
     ) async -> (absorbed: Double, remaining: Double, minutesSinceFirst: Double) {
-        await context.perform {
+        let buffer = absorptionBuffer ?? Self.minAbsorptionBuffer
+        return await context.perform {
             let fetchRequest: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
             fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
                 NSPredicate(format: "fpuID == %@", UUID(uuidString: mealID)! as CVarArg),
@@ -521,8 +537,8 @@ final class MacroAdaptiveService {
             do {
                 let entries = try context.fetch(fetchRequest)
                 let now = Date()
-                // (L1) Only count entries as absorbed after oref has had one cycle to process them
-                let effectiveNow = now.addingTimeInterval(-MacroAdaptiveService.absorptionBuffer)
+                // (L1) Only count entries as absorbed after oref has had at least one cycle
+                let effectiveNow = now.addingTimeInterval(-buffer)
                 var absorbed = 0.0
                 var remaining = 0.0
                 var earliestDate: Date?
@@ -569,7 +585,17 @@ final class MacroAdaptiveService {
         let demandFactor = getMealDemandFactor(mealID: mealID)
         let compositeDemand = newCumulative * demandFactor
         if compositeDemand > Self.defaultMaxCompositeDemand, demandFactor > 0 {
-            newCumulative = Self.defaultMaxCompositeDemand / demandFactor
+            let cappedCumulative = Self.defaultMaxCompositeDemand / demandFactor
+            debug(
+                .apsManager,
+                "S2 composite ceiling hit for meal \(mealID.prefix(8)): " +
+                "demand=\(String(format: "%.2f", demandFactor))x × " +
+                "scaling=\(String(format: "%.2f", newCumulative))x = " +
+                "\(String(format: "%.2f", compositeDemand))x > " +
+                "\(String(format: "%.1f", Self.defaultMaxCompositeDemand))x ceiling. " +
+                "Capping scaling to \(String(format: "%.2f", cappedCumulative))x"
+            )
+            newCumulative = cappedCumulative
         }
 
         let finalCumulative = min(Self.maxCumulativeScaling, max(Self.minCumulativeScaling, newCumulative))

@@ -86,6 +86,10 @@ if compositeDemand > Self.defaultMaxCompositeDemand, demandFactor > 0 {
 
 This prevents 2.5x amount × 3.0x rate scenarios.
 
+**Review finding #3:** Need logging when the ceiling is hit to evaluate whether 2.5x is too aggressive.
+
+**Fix applied:** Added `debug(.apsManager, ...)` logging for both the composite ceiling hit (with demand/scaling/composite values) and the SMB rate reduction (with before/after multiplier values). This enables post-hoc analysis of whether the ceiling is constraining legitimate needs.
+
 **Files:** `MacroAdaptiveService.swift`
 
 ---
@@ -124,20 +128,25 @@ defer { isAdjustingProteinConstraints = false }
 
 ## Part 2: Logic Corrections
 
-### L1. Fix Absorbed Carbs Timing with Absorption Buffer [IMPLEMENTED]
+### L1. Fix Absorbed Carbs Timing with Dynamic Absorption Buffer [IMPLEMENTED]
 
 **Priority: MEDIUM**
 
 **Problem:** `fetchAbsorbedAndRemainingCarbs()` classified entries as "absorbed" if `entryDate <= now`. An entry 30 seconds old may not have driven any SMB yet, inflating `absorbedCarbs`.
 
-**Implementation:** Added a 5-minute buffer (`absorptionBuffer = 5 * 60`):
+**Initial implementation:** Hardcoded 5-minute buffer.
+
+**Review finding:** If the loop is delayed (phone backgrounded, Bluetooth reconnection), 5 minutes could be wrong. The buffer should adapt to actual loop timing.
+
+**Final implementation:** Dynamic buffer using `max(5min, timeSinceLastLoop)`:
 ```swift
-let effectiveNow = now.addingTimeInterval(-MacroAdaptiveService.absorptionBuffer)
+let timeSinceLastLoop = lastLoopDate.map { Date().timeIntervalSince($0) } ?? Self.minAbsorptionBuffer
+let absorptionBuffer = max(Self.minAbsorptionBuffer, timeSinceLastLoop)
 ```
 
-Entries are only counted as "absorbed" after oref has had at least one cycle to act on them.
+`APSManager` passes `lastLoopDate` to `runAdaptiveCycle()`, which threads it to both `fetchAbsorbedAndRemainingCarbs()` call sites. External callers (like APSManager's proportional attribution) default to the 5-minute minimum.
 
-**File:** `MacroAdaptiveService.swift`
+**Files:** `MacroAdaptiveService.swift`, `APSManager.swift`
 
 ---
 
@@ -206,20 +215,20 @@ The combined macro totals are still shown for display, but the engine processes 
 
 **Review finding:** `simulateDetermineBasal()` takes a single `simulatedCarbsAmount` scalar. V2's value is distributing entries across hours. A single carb amount simulates a bolus-wizard spike, not V2's gradual coverage.
 
-**Fix applied:** Built a lightweight Swift-side V2-aware prediction for the "with treatment" line that uses the entry schedule directly:
+**Fix applied:** Built a lightweight Swift-side V2-aware prediction that uses the entry schedule directly.
+
+**Second review finding:** The original implementation used oref's IOB prediction for the "no treatment" line and the lightweight model for "with treatment". Different models have different error characteristics, so the gap between lines would include model divergence, not just treatment effect. Users would misinterpret the visual.
+
+**Final implementation:** Both forecast lines use the same `predict()` function with different parameters:
+- "No treatment": `predict(bolusUnits: 0, meals: [], ...)` — only existing IOB decay
+- "With treatment": `predict(bolusUnits: proposed, meals: selectedMeals, ...)` — full V2 prediction
 
 ```swift
-// For each 5-min step, sum gamma CDF contributions from each meal at its own timestamp
-for meal in selectedMeals {
-    let totalMinutes = mealMinutesAgo + minutesAhead
-    let absorbed = MacroAbsorptionEngine.gammaCDFValue(tau: tau, atMinutes: totalMinutes)
-    carbBGDelta += (totalCarbs * absorbed / cr) * isf
-}
+private func predict(bolusUnits: Double, meals: [V2DetectedMeal], demandFactor: Double, tau: Double)
+    -> [(date: Date, value: Double)]
 ```
 
-This models the gradual SMB-driven coverage that V2 actually delivers, rather than the bolus-like spike oref would predict from a single carb scalar. The "no treatment" line still uses oref's IOB-only prediction.
-
-Falls back to oref simulation data if ISF/CR aren't available.
+The shared model uses ISF/CR-based BG prediction with per-meal gamma CDF contributions. Because both lines use identical math, the gap is purely the treatment effect — zero model divergence.
 
 **Files:** `V2ForecastChart.swift`, `V2DosePreviewView.swift`, `TreatmentsStateModel.swift`
 
@@ -276,7 +285,7 @@ Tabbed hub with Nutrition / Engine / Garmin / Analysis tabs replacing the single
 | T6 | Cronometer shortcut preserved in V2 feed | UX | Done |
 | U1 | V2 Hub settings page (4 tabs) | UX | Done |
 
-### Post-Review Fixes (from external safety review)
+### Post-Review Fixes (from external safety reviews)
 
 | Finding | Fix | Impact |
 |---------|-----|--------|
@@ -284,7 +293,10 @@ Tabbed hub with Nutrition / Engine / Garmin / Analysis tabs replacing the single
 | Multi-meal sum discards temporal info | Per-meal independent generateEntries with own timestamp | Prevents over-delivery for old meals |
 | Configurable safety ceiling | Hardcoded at 2.5x, removed parameter | Prevents users widening safety boundary |
 | SMB rate not in composite cap | Rate reduction when composite > 1.5x | Prevents high amount × high rate |
+| No ceiling-hit visibility | Added debug logging for ceiling hits + rate reductions | Enables post-hoc analysis |
 | Dual simulation can't model V2 entries | Lightweight V2-aware prediction using entry schedule | Accurate forecast for distributed dosing |
+| Forecast model divergence between lines | Same predict() function for both lines | Gap = pure treatment effect |
+| L1 hardcoded 5min buffer | Dynamic max(5min, timeSinceLastLoop) from APSManager | Adapts to delayed loop cycles |
 | S4 slider ping-pong | Re-entrancy guard on onChange handlers | Prevents infinite loop |
 
 ### Not Implemented (Accepted or Low Priority)
@@ -292,32 +304,28 @@ Tabbed hub with Nutrition / Engine / Garmin / Analysis tabs replacing the single
 | # | Item | Reason |
 |---|------|--------|
 | S5 | Time-weighted Gate 5 | Current behavior errs toward safety (over-restrictive) |
-| L1 note | Derive buffer from actual loop timestamp | 5-minute buffer is robust for standard CGM timing |
-| Persistence | Move insulin records from UserDefaults to Core Data | Works fine for current data volume, can revisit |
+| Persistence | Move insulin records from UserDefaults to Core Data | Works for current volume; not transactional but data is a tracking heuristic, not delivery record. Composite ceiling limits worst case on corruption. |
 
 ---
 
 ### File Summary
 
-**Modified files (8):**
-- `MacroAdaptiveService.swift` — IOB curves, composite ceiling, rate limiting, absorption buffer, thread safety
-- `APSManager.swift` — Curve type selection, DIA passing, proportional SMB attribution
+**Modified files (6):**
+- `MacroAdaptiveService.swift` — IOB curves, composite ceiling, rate limiting, dynamic absorption buffer, ceiling logging, thread safety
+- `APSManager.swift` — Curve type selection, DIA/lastLoopDate passing, proportional SMB attribution
 - `V2MacroDosingSettingsView.swift` — Fat slider cap, protein validation with re-entrancy guard
 - `TreatmentsRootView.swift` — V1/V2 toggle, MacroDecayChart removal
 - `TreatmentsStateModel.swift` — V2 meal feed, per-meal entries, V2 chart data
-- `V2TreatmentView.swift` — Per-meal independent processing, selected meals passthrough
-- `V2DosePreviewView.swift` — Per-meal upfront calculation, late meal handling
-- `V2ForecastChart.swift` — V2-aware lightweight BG prediction
 - `Screen.swift` — V2 Hub routing
 
-**New files (7):**
+**New files (10):**
 - `V2DetectedMeal.swift` — Meal feed model
-- `V2TreatmentView.swift` — V2 flow container
+- `V2TreatmentView.swift` — V2 flow container with per-meal independent processing
 - `V2MealCardView.swift` — Meal card component
-- `V2DosePreviewView.swift` — Dose preview + adjustments
-- `V2ForecastChart.swift` — Two-line BG forecast
+- `V2DosePreviewView.swift` — Dose preview with per-meal upfront calculation
+- `V2ForecastChart.swift` — Two-line BG forecast with shared prediction model
 - `V2ManualMealEntryView.swift` — Manual entry form
-- `V2MacroHubView.swift` — Settings hub
+- `V2MacroHubView.swift` — Settings hub (4 tabs)
 - `V2NutritionSettingsView.swift` — Nutrition settings tab
 - `V2GarminSettingsView.swift` — Garmin settings tab
 - `V2AnalysisHubView.swift` — Analysis hub tab

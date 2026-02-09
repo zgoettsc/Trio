@@ -535,7 +535,8 @@ final class BaseAPSManager: APSManager, Injectable {
                         mealSMBMultiplier: NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue,
                         bgFloor: NSDecimalNumber(decimal: trioSettings.mealModeBGFloor).doubleValue,
                         diaHours: diaHoursValue,
-                        iobCurve: iobCurve
+                        iobCurve: iobCurve,
+                        lastLoopDate: lastLoopDate
                     )
 
                     debug(.apsManager, "V2 adaptive cycle: mealMode=\(mealMode.isActive), effectiveSMBMinutes=\(mealMode.effectiveMaxSMBMinutes)")
