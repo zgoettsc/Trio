@@ -378,8 +378,12 @@ extension Treatments {
             .onAppear {
                 configureView {
                     state.isActive = true
-                    // Default mode from V2 settings toggle
-                    if state.useV2MacroAbsorption {
+                    // Default mode from V2 settings toggle — read from settingsManager
+                    // eagerly since state.useV2MacroAbsorption isn't populated until
+                    // loadV2DetectedMeals() runs asynchronously.
+                    let v2Enabled = state.settingsManager.settings.useV2MacroAbsorption
+                    state.useV2MacroAbsorption = v2Enabled
+                    if v2Enabled {
                         treatmentMode = .v2
                     }
                     Task { @MainActor in
