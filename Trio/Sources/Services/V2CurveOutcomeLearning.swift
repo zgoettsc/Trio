@@ -189,10 +189,22 @@ final class V2OutcomeLearningStore {
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var migrationAttempted = false
 
-    private init() {
-        // Run one-time migration from UserDefaults to Core Data on first access
+    private init() {}
+
+    /// Ensure migration has been attempted before any Core Data access.
+    /// Called lazily on first save/load/update rather than in init() to avoid
+    /// racing with CoreDataStack.initializeStack() during app launch.
+    private func ensureMigrated() {
+        guard !migrationAttempted else { return }
+        migrationAttempted = true
         migrateFromUserDefaultsIfNeeded()
+    }
+
+    /// Check if the Core Data persistent store is loaded and ready.
+    private var isStoreReady: Bool {
+        !CoreDataStack.shared.persistentContainer.persistentStoreCoordinator.persistentStores.isEmpty
     }
 
     // MARK: - Core Data ↔ Struct Conversion
@@ -259,6 +271,11 @@ final class V2OutcomeLearningStore {
 
     private func migrateFromUserDefaultsIfNeeded() {
         guard !UserDefaults.standard.bool(forKey: migrationCompletedKey) else { return }
+        guard isStoreReady else {
+            debugPrint("V2OutcomeLearningStore: Core Data store not ready, deferring migration")
+            migrationAttempted = false // Allow retry on next access
+            return
+        }
         guard let data = UserDefaults.standard.data(forKey: legacyOutcomesKey) else {
             UserDefaults.standard.set(true, forKey: migrationCompletedKey)
             return
@@ -293,6 +310,11 @@ final class V2OutcomeLearningStore {
     // MARK: - Outcome Storage (Core Data)
 
     func save(_ outcome: V2MealOutcome) {
+        ensureMigrated()
+        guard isStoreReady else {
+            debugPrint("V2OutcomeLearningStore: Core Data not ready, cannot save outcome")
+            return
+        }
         let context = CoreDataStack.shared.newTaskContext()
         context.performAndWait {
             _ = toStored(outcome, in: context)
@@ -301,6 +323,8 @@ final class V2OutcomeLearningStore {
     }
 
     func loadAll() -> [V2MealOutcome] {
+        ensureMigrated()
+        guard isStoreReady else { return [] }
         let context = CoreDataStack.shared.newTaskContext()
         var results: [V2MealOutcome] = []
         let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date()) ?? Date()
@@ -317,6 +341,7 @@ final class V2OutcomeLearningStore {
     }
 
     func update(_ outcome: V2MealOutcome) {
+        guard isStoreReady else { return }
         let context = CoreDataStack.shared.newTaskContext()
         context.performAndWait {
             let request = V2MealOutcomeStored.fetchRequest()
