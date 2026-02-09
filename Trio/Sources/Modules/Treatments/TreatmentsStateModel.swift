@@ -1559,15 +1559,23 @@ extension Treatments.StateModel {
     func loadV2DetectedMeals() async {
         useV2MacroAbsorption = settings.settings.useV2MacroAbsorption
 
-        // Fetch recent day-level meals from the nutrition health service
-        guard let recentDays = try? await nutritionHealthService.fetchRecentMeals(hours: 8) else {
+        // Fetch today's meals from the nutrition health service.
+        // Cronometer writes all Apple Health entries with midnight (00:00) timestamps,
+        // so we must query from start-of-day rather than a rolling hour window.
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: Date())
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? Date()
+        guard let recentDays = try? await nutritionHealthService.fetchMeals(from: startOfDay, to: endOfDay) else {
             v2DetectedMeals = []
             return
         }
 
-        // Get already-dosed meal dates from V2 outcome records
+        // Get already-dosed meals from V2 outcome records for today.
+        // Cronometer entries have midnight timestamps, so we can't match on date.
+        // Instead, match on macro fingerprint: an outcome with the same carbs/fat/protein
+        // (within 1g tolerance) created today means this entry was already dosed.
         let outcomes = V2OutcomeLearningStore.shared.loadAll()
-        let dosedDates = outcomes.map { $0.date }
+        let todayOutcomes = outcomes.filter { calendar.isDateInToday($0.date) }
 
         // Flatten day-level data into individual entries for the meal feed
         var meals: [V2DetectedMeal] = []
@@ -1576,7 +1584,11 @@ extension Treatments.StateModel {
                 // Skip entries with no macros
                 guard entry.carbs > 0 || entry.fat > 0 || entry.protein > 0 else { continue }
 
-                let isDosed = dosedDates.contains(where: { abs($0.timeIntervalSince(entry.date)) < 300 })
+                let isDosed = todayOutcomes.contains(where: {
+                    abs($0.carbs - entry.carbs) < 1.0 &&
+                    abs($0.fat - entry.fat) < 1.0 &&
+                    abs($0.protein - entry.protein) < 1.0
+                })
                 meals.append(V2DetectedMeal(
                     date: entry.date,
                     label: inferMealLabel(for: entry.date),
