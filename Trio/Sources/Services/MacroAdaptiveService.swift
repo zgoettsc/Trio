@@ -239,6 +239,19 @@ final class MacroAdaptiveService {
     /// Actual buffer is max(this, timeSinceLastLoop) — adapts to delayed loop cycles.
     private static let minAbsorptionBuffer: TimeInterval = 5 * 60 // one standard oref cycle
 
+    /// Auto-degradation: if a meal hits the composite ceiling this many consecutive times,
+    /// decay its cumulativeScaling toward 1.0 to reduce aggressiveness.
+    private static let ceilingHitDegradationThreshold = 3
+    private static let degradationDecayFactor = 0.8 // multiply cumulative by this on degradation
+
+    // MARK: - Thread Safety
+
+    /// Protects all mutable instance state from concurrent access.
+    /// runAdaptiveCycle is called from the loop timer; recordMealInsulin can be called
+    /// from bolus delivery paths. This lock covers cumulativeScaling, mealInsulinRecords,
+    /// mealDemandFactors, lastAdjustmentTime, adjustmentHistory, and ceilingHitCounts.
+    private let stateLock = NSLock()
+
     // MARK: - State
 
     private var lastAdjustmentTime: Date?
@@ -250,6 +263,9 @@ final class MacroAdaptiveService {
 
     /// (S2) Per-meal demand factor from Garmin/engine at meal creation time.
     private var mealDemandFactors: [String: Double] = [:]
+
+    /// Auto-degradation: consecutive ceiling hits per meal.
+    private var ceilingHitCounts: [String: Int] = [:]
 
     // MARK: - Persistence Keys (for #9: survive app restart)
 
@@ -362,11 +378,13 @@ final class MacroAdaptiveService {
 
         // Compute maximum composite demand across active meals for rate limiting
         var maxComposite = 1.0
+        stateLock.lock()
         for mealID in activeMealIDs {
-            let demand = getMealDemandFactor(mealID: mealID)
+            let demand = mealDemandFactors[mealID] ?? 1.0
             let cumulative = cumulativeScaling[mealID] ?? 1.0
             maxComposite = max(maxComposite, demand * cumulative)
         }
+        stateLock.unlock()
 
         // Always evaluate meal-mode state (independent of adaptive adjustments)
         let mealMode = MealModeState.evaluate(
@@ -393,9 +411,10 @@ final class MacroAdaptiveService {
         }
 
         // Check damping interval
-        if let lastTime = lastAdjustmentTime,
-           Date().timeIntervalSince(lastTime) < Self.dampingInterval
-        {
+        stateLock.lock()
+        let lastTime = lastAdjustmentTime
+        stateLock.unlock()
+        if let lastTime, Date().timeIntervalSince(lastTime) < Self.dampingInterval {
             return mealMode
         }
 
@@ -457,6 +476,8 @@ final class MacroAdaptiveService {
             )
 
             // Record adjustment for audit trail
+            stateLock.lock()
+            let recordedCumulative = cumulativeScaling[mealID] ?? 1.0
             let adjustment = AdaptiveAdjustment(
                 timestamp: Date(),
                 actualBG: bg,
@@ -464,10 +485,11 @@ final class MacroAdaptiveService {
                 error: error,
                 trendError: 0,
                 scalingFactor: blendedScaling,
-                cumulativeScaling: cumulativeScaling[mealID] ?? 1.0,
+                cumulativeScaling: recordedCumulative,
                 mealID: mealID
             )
             adjustmentHistory.append(adjustment)
+            stateLock.unlock()
         }
 
         return mealMode
@@ -476,7 +498,10 @@ final class MacroAdaptiveService {
     // MARK: - Meal-Attributed IOB Tracking (S1: decay-aware)
 
     /// Record insulin attributed to a specific meal with a timestamp for decay modeling.
+    /// Thread-safe: may be called from bolus delivery path concurrent with loop timer.
     func recordMealInsulin(mealID: String, units: Double) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         var records = mealInsulinRecords[mealID] ?? []
         records.append(MealInsulinRecord(units: units, timestamp: Date()))
         mealInsulinRecords[mealID] = records
@@ -486,8 +511,12 @@ final class MacroAdaptiveService {
     /// (S1) Get the decay-adjusted meal-attributed IOB for a specific meal.
     /// Uses the same insulin curve model as oref (bilinear or exponential) so that
     /// meal-attributed IOB tracks system IOB accurately.
+    /// Thread-safe.
     func getMealAttributedIOB(mealID: String, diaHours: Double = 6.0, curve: IOBDecayCurve = .exponential(peakMinutes: 75)) -> Double {
-        guard let records = mealInsulinRecords[mealID] else { return 0 }
+        stateLock.lock()
+        let records = mealInsulinRecords[mealID]
+        stateLock.unlock()
+        guard let records else { return 0 }
         let now = Date()
         return records.reduce(0.0) { total, record in
             let minsAgo = now.timeIntervalSince(record.timestamp) / 60.0
@@ -497,21 +526,31 @@ final class MacroAdaptiveService {
     }
 
     /// Get the total (non-decayed) insulin ever attributed to a meal. Useful for outcome reporting.
+    /// Thread-safe.
     func getTotalMealInsulin(mealID: String) -> Double {
-        guard let records = mealInsulinRecords[mealID] else { return 0 }
+        stateLock.lock()
+        let records = mealInsulinRecords[mealID]
+        stateLock.unlock()
+        guard let records else { return 0 }
         return records.reduce(0.0) { $0 + $1.units }
     }
 
     // MARK: - Demand Factor Tracking (S2)
 
     /// Record the Garmin/engine demand factor for a meal at creation time.
+    /// Thread-safe.
     func recordMealDemandFactor(mealID: String, factor: Double) {
+        stateLock.lock()
         mealDemandFactors[mealID] = factor
         persistDemandFactors()
+        stateLock.unlock()
     }
 
     /// Get the recorded demand factor for a meal (defaults to 1.0 if unknown).
+    /// Thread-safe.
     func getMealDemandFactor(mealID: String) -> Double {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         return mealDemandFactors[mealID] ?? 1.0
     }
 
@@ -566,6 +605,8 @@ final class MacroAdaptiveService {
     /// Only modifies entries with actualDate in the future.
     /// (S2) Enforces hardcoded composite ceiling: demand factor × cumulative scaling ≤ 2.5x.
     /// The ceiling is intentionally not configurable — it's a safety boundary, not a preference.
+    /// Auto-degrades if the ceiling is hit repeatedly (reduces aggressiveness automatically).
+    /// Thread-safe.
     func scaleFutureEntries(
         mealID: String,
         scalingFactor: Double,
@@ -574,38 +615,75 @@ final class MacroAdaptiveService {
         // Clamp single-cycle scaling
         let clampedFactor = min(Self.maxCycleScaling, max(Self.minCycleScaling, scalingFactor))
 
+        stateLock.lock()
+
         // Track cumulative scaling
         let currentCumulative = cumulativeScaling[mealID] ?? 1.0
         var newCumulative = currentCumulative * clampedFactor
         newCumulative = min(Self.maxCumulativeScaling, max(Self.minCumulativeScaling, newCumulative))
 
         // (S2) Composite ceiling: demand factor × cumulative scaling must stay within bounds.
-        // This prevents Garmin demand (up to 1.67x) × adaptive scaling (up to 2.0x) from compounding
-        // beyond the safe maximum. Hardcoded — not user-configurable.
-        let demandFactor = getMealDemandFactor(mealID: mealID)
+        let demandFactor = mealDemandFactors[mealID] ?? 1.0
         let compositeDemand = newCumulative * demandFactor
+        var ceilingWasHit = false
+        // Capture log message (if any) to emit after state mutation is complete.
+        // debug() is lightweight (os_log) but we avoid the unlock-relock pattern that
+        // would create a race window between state reads and the final writes below.
+        var logMessage: String?
+
         if compositeDemand > Self.defaultMaxCompositeDemand, demandFactor > 0 {
             let cappedCumulative = Self.defaultMaxCompositeDemand / demandFactor
-            debug(
-                .apsManager,
-                "S2 composite ceiling hit for meal \(mealID.prefix(8)): " +
-                "demand=\(String(format: "%.2f", demandFactor))x × " +
-                "scaling=\(String(format: "%.2f", newCumulative))x = " +
-                "\(String(format: "%.2f", compositeDemand))x > " +
-                "\(String(format: "%.1f", Self.defaultMaxCompositeDemand))x ceiling. " +
-                "Capping scaling to \(String(format: "%.2f", cappedCumulative))x"
-            )
-            newCumulative = cappedCumulative
+            ceilingWasHit = true
+
+            // Auto-degradation: track consecutive ceiling hits
+            let hitCount = (ceilingHitCounts[mealID] ?? 0) + 1
+            ceilingHitCounts[mealID] = hitCount
+
+            if hitCount >= Self.ceilingHitDegradationThreshold {
+                // Engine is consistently hitting the ceiling — decay scaling toward 1.0
+                // to reduce aggressiveness automatically (no user intervention needed)
+                let degradedCumulative = cappedCumulative * Self.degradationDecayFactor
+                newCumulative = max(Self.minCumulativeScaling, degradedCumulative)
+                ceilingHitCounts[mealID] = 0 // reset counter after degradation
+
+                logMessage = "S2 AUTO-DEGRADE for meal \(mealID.prefix(8)): " +
+                    "\(hitCount) consecutive ceiling hits → " +
+                    "decaying scaling from \(String(format: "%.2f", cappedCumulative))x " +
+                    "to \(String(format: "%.2f", newCumulative))x"
+            } else {
+                newCumulative = cappedCumulative
+
+                logMessage = "S2 composite ceiling hit for meal \(mealID.prefix(8)): " +
+                    "demand=\(String(format: "%.2f", demandFactor))x × " +
+                    "scaling=\(String(format: "%.2f", currentCumulative * clampedFactor))x = " +
+                    "\(String(format: "%.2f", compositeDemand))x > " +
+                    "\(String(format: "%.1f", Self.defaultMaxCompositeDemand))x ceiling. " +
+                    "Capping scaling to \(String(format: "%.2f", newCumulative))x " +
+                    "(hit \(hitCount)/\(Self.ceilingHitDegradationThreshold))"
+            }
+        } else {
+            // No ceiling hit — reset consecutive counter
+            ceilingHitCounts[mealID] = 0
         }
 
         let finalCumulative = min(Self.maxCumulativeScaling, max(Self.minCumulativeScaling, newCumulative))
         let effectiveFactor = finalCumulative / currentCumulative
 
-        guard abs(effectiveFactor - 1.0) > 0.01 else { return } // skip trivial adjustments
+        guard abs(effectiveFactor - 1.0) > 0.01 else {
+            stateLock.unlock()
+            if let logMessage { debug(.apsManager, logMessage) }
+            return // skip trivial adjustments
+        }
 
         cumulativeScaling[mealID] = finalCumulative
-        persistCumulativeScaling() // (#9) survive app restart
         lastAdjustmentTime = Date()
+        persistCumulativeScaling() // (#9) survive app restart
+        stateLock.unlock()
+
+        // Emit log outside the lock — all values were captured while locked
+        if let logMessage {
+            debug(.apsManager, logMessage)
+        }
 
         await context.perform {
             let fetchRequest: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
@@ -664,12 +742,16 @@ final class MacroAdaptiveService {
     }
 
     /// Reset state for a completed meal.
+    /// Thread-safe.
     func mealCompleted(mealID: String) {
+        stateLock.lock()
         cumulativeScaling.removeValue(forKey: mealID)
         mealInsulinRecords.removeValue(forKey: mealID)
         mealDemandFactors.removeValue(forKey: mealID)
+        ceilingHitCounts.removeValue(forKey: mealID)
         persistCumulativeScaling()
         persistInsulinRecords()
         persistDemandFactors()
+        stateLock.unlock()
     }
 }
