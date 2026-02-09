@@ -63,6 +63,22 @@ struct V2DosePreviewView: View {
         selectedMeals.first(where: { $0.isLate })
     }
 
+    /// Per-meal upfront carbs: each meal is processed independently through generateEntries
+    /// using its own timestamp, so partially-absorbed carbs from older meals are handled correctly.
+    /// This avoids the temporal information loss of summing macros across meal times.
+    private var perMealUpfrontGrams: Double {
+        // For each meal, compute upfront carbs at its own elapsed time using the gamma CDF
+        selectedMeals.reduce(0.0) { total, meal in
+            let elapsed = max(0, meal.minutesAgo)
+            let tau = state.v2TauCarb ?? 35
+            // Gamma CDF at elapsed time gives fraction already absorbed
+            let alreadyAbsorbed = MacroAbsorptionEngine.gammaCDFValue(tau: tau, atMinutes: elapsed)
+            // The upfront fraction is at least the already-absorbed amount
+            let effectiveUpfront = max(upfrontPercent, alreadyAbsorbed)
+            return total + meal.carbs * effectiveUpfront
+        }
+    }
+
     /// The meal label for display
     private var mealLabel: String {
         if selectedMeals.isEmpty { return "Correction" }
@@ -354,8 +370,12 @@ struct V2DosePreviewView: View {
     private func recalculate() {
         // Apply upfront percent change back to state
         state.v2UpfrontPercentOverride = upfrontPercent
-        let newUpfrontCarbs = combinedCarbs * upfrontPercent
-        state.carbs = Decimal(newUpfrontCarbs)
+
+        // Per-meal independent upfront calculation:
+        // Each meal uses its own elapsed time to compute effective upfront carbs,
+        // so a 20-min-old granola bar doesn't generate entries for already-absorbed carbs.
+        let totalUpfront = perMealUpfrontGrams
+        state.carbs = Decimal(totalUpfront)
 
         Task {
             await state.updateForecasts()

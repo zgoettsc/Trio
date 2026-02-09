@@ -20,6 +20,8 @@ struct V2MacroDosingSettingsView: BaseView {
 
     // Track whether parameters have been customized (vs. defaults)
     @State private var paramsLoaded = false
+    // Re-entrancy guard: prevents ping-pong between threshold/plateau onChange handlers
+    @State private var isAdjustingProteinConstraints = false
 
     var body: some View {
         Form {
@@ -153,6 +155,9 @@ struct V2MacroDosingSettingsView: BaseView {
                     }
                     Slider(value: $proteinThreshold, in: 5 ... 30, step: 1)
                         .onChange(of: proteinThreshold) { _, newValue in
+                            guard !isAdjustingProteinConstraints else { return }
+                            isAdjustingProteinConstraints = true
+                            defer { isAdjustingProteinConstraints = false }
                             // S4: Ensure plateau stays above threshold
                             if newValue >= proteinPlateau {
                                 proteinPlateau = min(newValue + 5, 80)
@@ -174,6 +179,9 @@ struct V2MacroDosingSettingsView: BaseView {
                     }
                     Slider(value: $proteinPlateau, in: 20 ... 80, step: 1)
                         .onChange(of: proteinPlateau) { _, newValue in
+                            guard !isAdjustingProteinConstraints else { return }
+                            isAdjustingProteinConstraints = true
+                            defer { isAdjustingProteinConstraints = false }
                             // S4: Ensure threshold stays below plateau
                             if newValue <= proteinThreshold {
                                 proteinThreshold = max(newValue - 5, 5)

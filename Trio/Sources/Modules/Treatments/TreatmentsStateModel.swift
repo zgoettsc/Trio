@@ -153,6 +153,7 @@ extension Treatments {
         var useV2MacroAbsorption: Bool = false     // reflects setting for mode toggle default
         var v2DetectedMeals: [V2DetectedMeal] = [] // meals from HealthKit observer for the meal feed
         var v2NoTreatmentPrediction: [Int] = []    // BG prediction without intervention (for two-line chart)
+        var v2SelectedMealsForChart: [V2DetectedMeal]? // Selected meals with timestamps for V2 forecast chart
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
         var preprocessedData: [(id: UUID, forecast: Forecast, forecastValue: ForecastValue)] = []
@@ -1606,6 +1607,40 @@ extension Treatments.StateModel {
             healthKitID: nil
         )
         v2DetectedMeals.insert(meal, at: 0)
+    }
+
+    /// Prepare V2 treatment entries for multiple meals independently.
+    /// Each meal runs through generateEntries() with its own timestamp, preserving temporal information.
+    /// This ensures a granola bar from 20 min ago doesn't generate entries for already-absorbed carbs.
+    @MainActor
+    func prepareV2IndependentMealEntries(meals: [V2DetectedMeal], upfrontPercent: Double, demandFactor: Double) {
+        let trioSettings = settings.settings
+        let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+        let curveParams = V2OutcomeLearningStore.shared.loadParameters()
+
+        // Store the per-meal entries for the engine
+        // Each meal gets its own mealID and its own set of timed entries
+        var totalUpfrontCarbs = 0.0
+
+        for meal in meals {
+            let result = MacroAbsorptionEngine.generateEntries(
+                carbs: meal.carbs,
+                fat: meal.fat,
+                protein: meal.protein,
+                fiber: meal.fiber,
+                mealTime: meal.date, // Use the MEAL's timestamp, not "now"
+                insulinDemandFactor: demandFactor,
+                upfrontPercent: upfrontPercent,
+                insulinType: insulinType,
+                curveParameters: curveParams,
+                safeWindowOverride: trioSettings.v2SafeWindowMinutes
+            )
+
+            totalUpfrontCarbs += result.upfrontCarbs
+        }
+
+        // Set carbs to the total upfront amount for the bolus calculator
+        carbs = Decimal(totalUpfrontCarbs)
     }
 
     /// Infer a meal label from the time of day.

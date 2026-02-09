@@ -505,9 +505,21 @@ final class BaseAPSManager: APSManager, Injectable {
                     let crValue: Double = storage.retrieve(OpenAPS.Settings.carbRatios, as: CarbRatios.self)
                         .flatMap { $0.schedule.first.map { NSDecimalNumber(decimal: $0.ratio).doubleValue } } ?? 10
 
-                    // S1: Get DIA in seconds from pump settings for decay-aware IOB
-                    let diaHours = settingsManager.pumpSettings.insulinActionCurve
-                    let diaSeconds = NSDecimalNumber(decimal: diaHours).doubleValue * 3600
+                    // S1: Get DIA and insulin curve type for oref-matching IOB decay
+                    let diaHoursDecimal = settingsManager.pumpSettings.insulinActionCurve
+                    let diaHoursValue = NSDecimalNumber(decimal: diaHoursDecimal).doubleValue
+
+                    // Build IOB decay curve matching the user's oref insulin model
+                    let preferences = settingsManager.preferences
+                    let iobCurve: IOBDecayCurve
+                    switch preferences.curve {
+                    case .bilinear:
+                        iobCurve = .bilinear
+                    case .ultraRapid:
+                        iobCurve = .exponential(peakMinutes: 55)
+                    case .rapidActing:
+                        iobCurve = .exponential(peakMinutes: 75)
+                    }
 
                     let mealMode = await macroAdaptiveService.runAdaptiveCycle(
                         currentBG: latestBG,
@@ -522,7 +534,8 @@ final class BaseAPSManager: APSManager, Injectable {
                         userMaxSMBMinutes: settingsManager.preferences.maxSMBBasalMinutes,
                         mealSMBMultiplier: NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue,
                         bgFloor: NSDecimalNumber(decimal: trioSettings.mealModeBGFloor).doubleValue,
-                        dia: diaSeconds
+                        diaHours: diaHoursValue,
+                        iobCurve: iobCurve
                     )
 
                     debug(.apsManager, "V2 adaptive cycle: mealMode=\(mealMode.isActive), effectiveSMBMinutes=\(mealMode.effectiveMaxSMBMinutes)")

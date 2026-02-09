@@ -16,6 +16,67 @@ struct MealInsulinRecord: Codable {
     let timestamp: Date
 }
 
+// MARK: - IOB Decay Curves (ported from trio-oref/lib/iob/calculate.js)
+
+/// Models insulin-on-board decay using the same curves as oref.
+/// Supports bilinear, rapid-acting (exponential), and ultra-rapid (exponential) models.
+enum IOBDecayCurve {
+    case bilinear
+    case exponential(peakMinutes: Double) // rapid-acting: 75, ultra-rapid: 55
+
+    /// Compute the fraction of insulin remaining (IOB) at `minsAgo` minutes after delivery.
+    /// Matches oref's iobCalc output exactly.
+    func fractionRemaining(minsAgo: Double, diaHours: Double) -> Double {
+        guard minsAgo >= 0, diaHours > 0 else { return minsAgo < 0 ? 1.0 : 0.0 }
+
+        switch self {
+        case .bilinear:
+            return bilinearIOB(minsAgo: minsAgo, diaHours: diaHours)
+        case .exponential(let peakMinutes):
+            return exponentialIOB(minsAgo: minsAgo, diaHours: diaHours, peak: peakMinutes)
+        }
+    }
+
+    /// Bilinear model — piecewise quadratic polynomials.
+    /// Ported from iobCalcBilinear in trio-oref/lib/iob/calculate.js
+    private func bilinearIOB(minsAgo: Double, diaHours: Double) -> Double {
+        let defaultDIA: Double = 3.0
+        let peak: Double = 75.0
+        let end: Double = 180.0
+
+        let timeScalar = defaultDIA / diaHours
+        let scaledMinsAgo = timeScalar * minsAgo
+
+        if scaledMinsAgo >= end { return 0.0 }
+
+        if scaledMinsAgo < peak {
+            let x1 = (scaledMinsAgo / 5.0) + 1.0
+            return (-0.001852 * x1 * x1) + (0.001852 * x1) + 1.0
+        } else {
+            let x2 = (scaledMinsAgo - peak) / 5.0
+            return (0.001323 * x2 * x2) + (-0.054233 * x2) + 0.555560
+        }
+    }
+
+    /// Exponential model — from LoopKit/Loop.
+    /// Ported from iobCalcExponential in trio-oref/lib/iob/calculate.js
+    private func exponentialIOB(minsAgo: Double, diaHours: Double, peak: Double) -> Double {
+        let end = diaHours * 60.0 // end of insulin activity in minutes
+
+        guard minsAgo < end else { return 0.0 }
+
+        // Formula from https://github.com/LoopKit/Loop/issues/388#issuecomment-317938473
+        let tau = peak * (1.0 - peak / end) / (1.0 - 2.0 * peak / end)
+        let a = 2.0 * tau / end
+        let S = 1.0 / (1.0 - a + (1.0 + a) * exp(-end / tau))
+
+        let iobContrib = 1.0 - S * (1.0 - a) * (
+            (pow(minsAgo, 2) / (tau * end * (1.0 - a)) - minsAgo / tau - 1.0) * exp(-minsAgo / tau) + 1.0
+        )
+        return max(0, iobContrib)
+    }
+}
+
 // MARK: - Meal Mode State
 
 /// Evaluates whether meal-mode SMB enhancement should be active.
@@ -46,7 +107,8 @@ struct MealModeState {
         carbRatio: Double,
         userMaxSMBMinutes: Decimal,
         mealSMBMultiplier: Double,  // user setting, default 2.0
-        bgFloor: Double             // user setting, default 90 mg/dL
+        bgFloor: Double,            // user setting, default 90 mg/dL
+        compositeDemandFactor: Double = 1.0 // current composite demand (Garmin × adaptive)
     ) -> MealModeState {
         let baseState = MealModeState(isActive: false, effectiveMaxSMBMinutes: userMaxSMBMinutes)
 
@@ -85,8 +147,20 @@ struct MealModeState {
             guard currentIOB <= remainingInsulinNeed * 1.2 else { return baseState } // 20% buffer
         }
 
-        // All gates pass: enable meal-mode enhanced SMBs
-        let enhancedMinutes = Decimal(Double(truncating: userMaxSMBMinutes as NSDecimalNumber) * mealSMBMultiplier)
+        // All gates pass: enable meal-mode enhanced SMBs.
+        // When composite demand (Garmin × adaptive) is already high, reduce the SMB rate multiplier
+        // to avoid front-loading a large insulin commitment before BG data can confirm it's needed.
+        var effectiveMultiplier = mealSMBMultiplier
+        if compositeDemandFactor > 2.0 {
+            // Above 2.0x composite demand, cap SMB multiplier at 1.5x
+            effectiveMultiplier = min(effectiveMultiplier, 1.5)
+        } else if compositeDemandFactor > 1.5 {
+            // Between 1.5-2.0x, linearly reduce from full multiplier toward 1.5x
+            let ratio = (compositeDemandFactor - 1.5) / 0.5 // 0.0 at 1.5x, 1.0 at 2.0x
+            effectiveMultiplier = effectiveMultiplier - ratio * max(0, effectiveMultiplier - 1.5)
+        }
+
+        let enhancedMinutes = Decimal(Double(truncating: userMaxSMBMinutes as NSDecimalNumber) * effectiveMultiplier)
         return MealModeState(
             isActive: true,
             effectiveMaxSMBMinutes: enhancedMinutes
@@ -259,8 +333,8 @@ final class MacroAdaptiveService {
         userMaxSMBMinutes: Decimal,
         mealSMBMultiplier: Double = 2.0,
         bgFloor: Double = 90.0,
-        dia: TimeInterval = 6 * 3600,           // S1: duration of insulin action in seconds
-        maxCompositeDemand: Double? = nil        // S2: composite ceiling override (nil = use default 2.5)
+        diaHours: Double = 6.0,                    // S1: duration of insulin action in hours
+        iobCurve: IOBDecayCurve = .exponential(peakMinutes: 75) // S1: oref-matching IOB curve
     ) async -> MealModeState {
         let hasActiveMeals = !activeMealIDs.isEmpty
 
@@ -271,6 +345,14 @@ final class MacroAdaptiveService {
         for mealID in activeMealIDs {
             let info = await fetchAbsorbedAndRemainingCarbs(mealID: mealID, context: context)
             totalRemainingCarbs += info.remaining
+        }
+
+        // Compute maximum composite demand across active meals for rate limiting
+        var maxComposite = 1.0
+        for mealID in activeMealIDs {
+            let demand = getMealDemandFactor(mealID: mealID)
+            let cumulative = cumulativeScaling[mealID] ?? 1.0
+            maxComposite = max(maxComposite, demand * cumulative)
         }
 
         // Always evaluate meal-mode state (independent of adaptive adjustments)
@@ -284,7 +366,8 @@ final class MacroAdaptiveService {
             carbRatio: cr,
             userMaxSMBMinutes: userMaxSMBMinutes,
             mealSMBMultiplier: mealSMBMultiplier,
-            bgFloor: bgFloor
+            bgFloor: bgFloor,
+            compositeDemandFactor: maxComposite
         )
 
         // Adaptive entry adjustment (only if we have data and active meals)
@@ -331,8 +414,8 @@ final class MacroAdaptiveService {
             // Skip if no entries have been absorbed yet
             guard absorbedCarbs > 0, remainingCarbs > 0 else { continue }
 
-            // (#1) Use meal-attributed IOB with DIA-based decay (S1)
-            let mealIOB = getMealAttributedIOB(mealID: mealID, dia: dia)
+            // (#1) Use meal-attributed IOB with oref-matching decay curve (S1)
+            let mealIOB = getMealAttributedIOB(mealID: mealID, diaHours: diaHours, curve: iobCurve)
 
             // Predicted BG impact: absorbed carbs raise BG, meal-attributed IOB lowers it
             let predictedBGImpact = (absorbedCarbs / cr) * isf - mealIOB * isf
@@ -352,13 +435,11 @@ final class MacroAdaptiveService {
             // Blend: apply 50% of correction immediately (prevents overreaction)
             let blendedScaling = 1.0 + (rawScaling - 1.0) * 0.5
 
-            // Scale future entries (S2: with composite ceiling)
-            let ceiling = maxCompositeDemand ?? Self.defaultMaxCompositeDemand
+            // Scale future entries (S2: with hardcoded composite ceiling)
             await scaleFutureEntries(
                 mealID: mealID,
                 scalingFactor: blendedScaling,
-                context: context,
-                maxCompositeDemand: ceiling
+                context: context
             )
 
             // Record adjustment for audit trail
@@ -389,15 +470,15 @@ final class MacroAdaptiveService {
     }
 
     /// (S1) Get the decay-adjusted meal-attributed IOB for a specific meal.
-    /// Applies a linear decay model using the user's DIA so that insulin delivered
-    /// hours ago at the start of a long meal is not counted as still active.
-    func getMealAttributedIOB(mealID: String, dia: TimeInterval = 6 * 3600) -> Double {
+    /// Uses the same insulin curve model as oref (bilinear or exponential) so that
+    /// meal-attributed IOB tracks system IOB accurately.
+    func getMealAttributedIOB(mealID: String, diaHours: Double = 6.0, curve: IOBDecayCurve = .exponential(peakMinutes: 75)) -> Double {
         guard let records = mealInsulinRecords[mealID] else { return 0 }
         let now = Date()
         return records.reduce(0.0) { total, record in
-            let age = now.timeIntervalSince(record.timestamp)
-            let fractionRemaining = max(0, 1.0 - age / dia)
-            return total + record.units * fractionRemaining
+            let minsAgo = now.timeIntervalSince(record.timestamp) / 60.0
+            let fraction = curve.fractionRemaining(minsAgo: minsAgo, diaHours: diaHours)
+            return total + record.units * fraction
         }
     }
 
@@ -467,12 +548,12 @@ final class MacroAdaptiveService {
 
     /// Scale future entries for a given mealID by the adjustment factor.
     /// Only modifies entries with actualDate in the future.
-    /// (S2) Enforces composite ceiling: demand factor × cumulative scaling ≤ maxCompositeDemand.
+    /// (S2) Enforces hardcoded composite ceiling: demand factor × cumulative scaling ≤ 2.5x.
+    /// The ceiling is intentionally not configurable — it's a safety boundary, not a preference.
     func scaleFutureEntries(
         mealID: String,
         scalingFactor: Double,
-        context: NSManagedObjectContext,
-        maxCompositeDemand: Double = defaultMaxCompositeDemand
+        context: NSManagedObjectContext
     ) async {
         // Clamp single-cycle scaling
         let clampedFactor = min(Self.maxCycleScaling, max(Self.minCycleScaling, scalingFactor))
@@ -484,11 +565,11 @@ final class MacroAdaptiveService {
 
         // (S2) Composite ceiling: demand factor × cumulative scaling must stay within bounds.
         // This prevents Garmin demand (up to 1.67x) × adaptive scaling (up to 2.0x) from compounding
-        // beyond the configured maximum.
+        // beyond the safe maximum. Hardcoded — not user-configurable.
         let demandFactor = getMealDemandFactor(mealID: mealID)
         let compositeDemand = newCumulative * demandFactor
-        if compositeDemand > maxCompositeDemand, demandFactor > 0 {
-            newCumulative = maxCompositeDemand / demandFactor
+        if compositeDemand > Self.defaultMaxCompositeDemand, demandFactor > 0 {
+            newCumulative = Self.defaultMaxCompositeDemand / demandFactor
         }
 
         let finalCumulative = min(Self.maxCumulativeScaling, max(Self.minCumulativeScaling, newCumulative))

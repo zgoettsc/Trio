@@ -28,9 +28,71 @@ struct V2ForecastChart: View {
         }.sorted { $0.date < $1.date }
     }
 
-    /// Build the "with treatment" forecast line from the state's prediction data.
-    /// Uses the COB prediction (or UAM if available) as the primary forecast.
+    /// Build the "with treatment" forecast using a lightweight V2-aware prediction.
+    ///
+    /// Instead of calling oref's simulateDetermineBasal (which takes a single carb scalar and
+    /// can't model V2's distributed entries across hours), this uses a simplified ISF/CR-based
+    /// model that accounts for the timed entry schedule directly.
+    ///
+    /// Falls back to oref simulation data if available.
     private var withTreatmentForecast: [(date: Date, value: Double)] {
+        let currentBG = Double(truncating: state.currentBG as NSDecimalNumber)
+        guard currentBG > 0 else { return [] }
+
+        let now = Date()
+        let cr = Double(truncating: state.carbRatio as NSDecimalNumber)
+        let isf = Double(truncating: state.isf as NSDecimalNumber)
+        let iob = Double(truncating: state.iob as NSDecimalNumber)
+        guard cr > 0, isf > 0 else {
+            // Fall back to oref predictions if ISF/CR unavailable
+            return orefWithTreatmentForecast
+        }
+
+        // Build a per-5-min entry schedule from selected meals
+        let selectedMeals = state.v2SelectedMealsForChart ?? []
+        let upfrontPct = state.v2UpfrontPercentOverride ?? state.v2CurveSuggestedPercent ?? 0.20
+        let demandFactor = state.v2DemandFactor
+        let tau = state.v2TauCarb ?? 35.0
+
+        // Predict BG at each 5-min step over 6 hours
+        // Model: BG(t) = currentBG + carbImpact(t) - insulinImpact(t)
+        let steps = 73 // 6h * 12 steps/h + 1
+        var forecast: [(date: Date, value: Double)] = []
+        var cumulativeCarbBG = 0.0
+        let bolusUnits = Double(truncating: state.amount as NSDecimalNumber)
+
+        // Estimate upfront bolus impact over time (simplified exponential decay)
+        // and distributed carb entry impact
+        for step in 0 ..< steps {
+            let minutesAhead = Double(step * 5)
+            let date = now.addingTimeInterval(minutesAhead * 60)
+
+            // Carb impact: sum gamma PDF contributions from distributed entries
+            var carbBGDelta = 0.0
+            for meal in selectedMeals {
+                let mealMinutesAgo = now.timeIntervalSince(meal.date) / 60.0
+                let totalMinutes = mealMinutesAgo + minutesAhead
+                // Gamma CDF gives cumulative absorption fraction at this time
+                let absorbed = MacroAbsorptionEngine.gammaCDFValue(tau: tau, atMinutes: totalMinutes)
+                let totalCarbs = meal.carbs * demandFactor
+                carbBGDelta += (totalCarbs * absorbed / cr) * isf
+            }
+
+            // Insulin impact: upfront bolus + existing IOB
+            let bolusMinutes = minutesAhead
+            let bolusAbsorbed = min(1.0, bolusMinutes / (4.0 * 60.0)) // simplified 4h absorption
+            let iobDecay = max(0, 1.0 - minutesAhead / (6.0 * 60.0))
+            let insulinBGDelta = (bolusUnits * bolusAbsorbed + iob * (1.0 - iobDecay)) * isf
+
+            let predictedBG = max(40, currentBG + carbBGDelta - insulinBGDelta)
+            forecast.append((date, predictedBG))
+        }
+
+        return forecast
+    }
+
+    /// Fallback: oref simulation predictions (less accurate for V2 distributed entries)
+    private var orefWithTreatmentForecast: [(date: Date, value: Double)] {
         guard let predictions = state.simulatedDetermination?.predictions else { return [] }
         let values = predictions.cob ?? predictions.uam ?? predictions.iob ?? []
         let now = Date()

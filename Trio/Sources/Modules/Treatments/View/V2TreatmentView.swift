@@ -81,9 +81,7 @@ struct V2TreatmentView: View {
                         combinedFat: combinedFat,
                         combinedProtein: combinedProtein,
                         combinedFiber: combinedFiber,
-                        selectedMeals: selectedMealIndices.compactMap { idx in
-                            idx < state.v2DetectedMeals.count ? state.v2DetectedMeals[idx] : nil
-                        },
+                        selectedMeals: selectedMealsList,
                         onBack: { currentStep = .mealFeed },
                         onSwitchToV1: onSwitchToV1
                     )
@@ -245,13 +243,24 @@ struct V2TreatmentView: View {
     }
 
     private func applySelectionToState() {
+        // Use combined macros for the bolus calculator display,
+        // but the V2 engine will process each meal independently via selectedMeals.
         state.carbs = Decimal(combinedCarbs)
         state.fat = Decimal(combinedFat)
         state.protein = Decimal(combinedProtein)
         state.fiber = Decimal(combinedFiber)
+        // Pass selected meals with timestamps to state for the V2 forecast chart
+        state.v2SelectedMealsForChart = selectedMealsList
         Task {
             await state.updateForecasts()
             state.insulinCalculated = await state.calculateInsulin()
+        }
+    }
+
+    /// The selected meals with their original timestamps preserved for independent entry generation.
+    private var selectedMealsList: [V2DetectedMeal] {
+        selectedMealIndices.compactMap { idx in
+            idx < state.v2DetectedMeals.count ? state.v2DetectedMeals[idx] : nil
         }
     }
 
