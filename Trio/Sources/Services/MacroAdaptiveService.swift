@@ -362,6 +362,10 @@ final class MacroAdaptiveService {
         iobCurve: IOBDecayCurve = .exponential(peakMinutes: 75), // S1: oref-matching IOB curve
         lastLoopDate: Date? = nil               // L1: for dynamic absorption buffer
     ) async -> MealModeState {
+        // Background backfill: run rate-limited outcome backfill so learning doesn't
+        // depend on the user opening a specific UI screen (critique item #4).
+        await V2OutcomeLearningStore.shared.backgroundBackfillIfNeeded(context: context)
+
         // L1: Dynamic absorption buffer — at least 5min, but longer if the loop is delayed
         let timeSinceLastLoop = lastLoopDate.map { Date().timeIntervalSince($0) } ?? Self.minAbsorptionBuffer
         let absorptionBuffer = max(Self.minAbsorptionBuffer, timeSinceLastLoop)

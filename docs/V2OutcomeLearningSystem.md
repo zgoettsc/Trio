@@ -43,27 +43,29 @@ Each step is described below.
 | `isfAtMeal` | Your active insulin sensitivity factor | Context for understanding BG response magnitude |
 | `mealSMBMultiplier` | SMB multiplier setting in effect | How aggressively SMBs were enhanced |
 | `mealModeWasActive` | Whether meal-mode SMB was active | Dosing context |
-| `checkpoints` | 6 BG checkpoints (all nil initially) | The slots that get backfilled with actual BG |
+| `checkpoints` | 7 BG checkpoints (all nil initially) | The slots that get backfilled with actual BG |
 | `hasConfoundingMeal` | Whether a subsequent meal was detected | Marks outcome as unreliable if another meal interfered |
 
-### The 6 Checkpoints
+### The 7 Checkpoints
 
-Each outcome starts with 6 empty BG checkpoints, each tagged with which absorption curve dominates at that time:
+Each outcome starts with 7 empty BG checkpoints, each tagged with which absorption curve dominates at that time:
 
 | Checkpoint | Time After Meal | Curve Phase | What It Tests |
 |------------|----------------|-------------|---------------|
 | 1h | +1 hour | `carb` | Was the upfront bolus right? Did carbs absorb as predicted? |
 | 2h | +2 hours | `carb` | Tail end of carb absorption — was tau correct? |
-| 3h | +3 hours | `protein` | Protein gluconeogenesis onset — is protein factor right? |
-| 4h | +4 hours | `overlap` | Multiple curves active — shared attribution |
-| 6h | +6 hours | `fat` | Peak of fat insulin resistance — is fat coefficient right? |
-| 8h | +8 hours | `fat` | Tail of fat effect — was the fat curve duration correct? |
+| 3h | +3 hours | `protein`/`carb` | Protein gluconeogenesis onset (if protein > threshold, else carb) |
+| 4h | +4 hours | `overlap`/dynamic | Multiple curves active — excluded from learning to avoid parameter coupling |
+| 5h | +5 hours | `protein`/`fat`/`skip` | Protein peak (4-5h), or fat if no protein, or skip if neither |
+| 6h | +6 hours | `fat`/`skip` | Peak of fat insulin resistance — is fat coefficient right? |
+| 8h | +8 hours | `fat`/`skip` | Tail of fat effect — was the fat curve duration correct? |
 
 ---
 
 ## Step 2: Backfilling BG Checkpoints
 
 **When backfill runs:**
+- Automatically in the background every 6 hours (triggered by the loop cycle via `MacroAdaptiveService`)
 - Every time you open a Cronometer meal recommendation (fetching a new meal or selecting from the picker)
 - Every time you open the Outcome Accuracy page (Settings → V2 Macro Dosing → Meal Outcome Accuracy)
 
@@ -156,10 +158,10 @@ The learning system adjusts the five curve parameters based on BG errors at each
 1. **Filter outcomes**: Only use meals that are not confounded (`hasConfoundingMeal == false`) and have at least one BG checkpoint filled
 2. **ICR matching**: If a current carb ratio is provided, only use outcomes where the carb ratio at meal time was within ±10% of the current ratio. This prevents learning from meals dosed under very different pump settings
 3. **Recency weighting**: Recent meals count more. Weight = `max(0.1, 1.0 - (age in days / 90))`. A meal from today has weight ~1.0; a meal from 45 days ago has weight ~0.5; a meal from 90 days ago has weight 0.1
-4. **Error calculation**: For each checkpoint with a BG value:
-   - If BG > 180: error = `+(BG - 180) / 100` (positive = under-dosed)
-   - If BG < 70: error = `-(70 - BG) / 100` (negative = over-dosed)
-   - If BG 70–180: error = 0 (in range, no adjustment)
+4. **Error calculation**: For each checkpoint with a BG value, errors are computed relative to a target BG (default 110 mg/dL) with a ±30 dead zone (80–140):
+   - If BG > 140: error = `+(BG - 110) / 100` (positive = under-dosed, relative to target)
+   - If BG < 80: error = `-(110 - BG) / 100` (negative = over-dosed, relative to target)
+   - If BG 80–140: error = 0 (within dead zone, no adjustment)
 5. **Phase attribution**: The error is attributed to the curve that dominates at that checkpoint's time:
 
 | Curve Phase | Error Direction | Parameter Adjustment |
@@ -177,7 +179,7 @@ The learning system adjusts the five curve parameters based on BG errors at each
 | Parameter | Minimum | Maximum |
 |-----------|---------|---------|
 | Carb Tau | 20 min | 60 min |
-| Protein Factor | 0.10 | 0.60 |
+| Protein Factor | 0.10 | 0.80 |
 | Fat Coefficient | 0.30 | 1.20 |
 
 7. **Save**: Updated parameters are persisted to UserDefaults via `V2OutcomeLearningStore.saveParameters()`
@@ -266,8 +268,8 @@ Several safeguards prevent the system from learning incorrect patterns:
 3. **ICR matching**: Outcomes from very different pump settings (>10% carb ratio change) are excluded, preventing learning across profile switches
 4. **Recency weighting**: Old data has minimal influence (weight 0.1 at 90 days vs 1.0 today)
 5. **Parameter clamping**: Values cannot go outside physiologically reasonable ranges (e.g., carb tau stays between 20–60 min)
-6. **In-range exclusion**: Checkpoints where BG was 70–180 contribute zero error — the system only adjusts when something went wrong
-7. **Overlap dampening**: Checkpoints in the overlap phase (4h) attribute error at 30% weight to each curve, preventing over-correction when multiple curves are active
+6. **Dead-zone exclusion**: Checkpoints where BG is within ±30 of the 110 mg/dL target (80–140) contribute zero error — the system only adjusts for clinically meaningful deviations
+7. **Overlap exclusion**: Checkpoints in the overlap phase (4h) are excluded from learning to avoid diluted, noise-level parameter coupling — the 5h and 6h checkpoints provide cleaner single-curve signal
 
 ---
 
