@@ -126,6 +126,41 @@ defer { isAdjustingProteinConstraints = false }
 
 ---
 
+### S5. Auto-Degradation on Repeated Composite Ceiling Hits [IMPLEMENTED]
+
+**Priority: HIGH**
+**Risk: Engine can get stuck at the ceiling with no automatic recovery**
+
+**Problem:**
+If the BG-adaptive loop is consistently pushing demand upward (e.g., due to a slow-absorbing meal causing repeated positive BG errors), the cumulative scaling will hit the composite ceiling every cycle. The engine is capped at the ceiling, but it's still running at maximum aggressiveness — if the ceiling turns out to be too high, the user is stuck at an elevated delivery rate with no automatic pullback.
+
+**Implementation:**
+When a meal hits the composite ceiling 3 consecutive times, `scaleFutureEntries()` automatically decays the cumulative scaling by 0.8x:
+
+```swift
+private static let ceilingHitDegradationThreshold = 3
+private static let degradationDecayFactor = 0.8
+
+// In scaleFutureEntries, after detecting ceiling hit:
+if hitCount >= Self.ceilingHitDegradationThreshold {
+    let degradedCumulative = cappedCumulative * Self.degradationDecayFactor
+    newCumulative = max(Self.minCumulativeScaling, degradedCumulative)
+    ceilingHitCounts[mealID] = 0  // reset counter after degradation
+}
+```
+
+This means:
+- Cycle 1-2: ceiling hit, counter increments, scaling stays at ceiling
+- Cycle 3: ceiling hit again, auto-degrade fires, scaling drops to 80% of ceiling
+- If ceiling is hit 3 more times: scaling drops to 64% of ceiling, etc.
+- If a cycle does NOT hit the ceiling: counter resets, no degradation
+
+This provides automatic self-correction without user intervention and pairs with the ceiling hit logging (S2) for post-hoc analysis.
+
+**File:** `MacroAdaptiveService.swift`
+
+---
+
 ## Part 2: Logic Corrections
 
 ### L1. Fix Absorbed Carbs Timing with Dynamic Absorption Buffer [IMPLEMENTED]
@@ -155,6 +190,45 @@ let absorptionBuffer = max(Self.minAbsorptionBuffer, timeSinceLastLoop)
 **Priority: LOW**
 
 **Implementation:** Added `NSLock` for `gate3FailedLastCycle` static flag.
+
+**File:** `MacroAdaptiveService.swift`
+
+---
+
+### L4. Comprehensive Thread Safety for MacroAdaptiveService [IMPLEMENTED]
+
+**Priority: HIGH**
+**Risk: Data races between loop timer and bolus delivery paths**
+
+**Problem:**
+`MacroAdaptiveService` has multiple entry points that can execute concurrently:
+- `runAdaptiveCycle()` is called from the loop timer every 5 minutes
+- `recordMealInsulin()` is called from bolus delivery (including SMB deliveries)
+- `recordMealDemandFactor()` is called when a new meal is created
+- `mealCompleted()` is called when a meal finishes absorbing
+
+These all read/write shared mutable state (`cumulativeScaling`, `mealInsulinRecords`, `mealDemandFactors`, `lastAdjustmentTime`, `adjustmentHistory`, `ceilingHitCounts`). Without synchronization, concurrent access can corrupt state.
+
+**Implementation:**
+Single `NSLock` (`stateLock`) protecting all mutable instance state. Every read or write of shared state acquires the lock:
+
+```swift
+private let stateLock = NSLock()
+```
+
+Protected operations:
+- `recordMealInsulin()` — full method under lock (was already done)
+- `getMealAttributedIOB()` — snapshot records under lock, compute outside
+- `getTotalMealInsulin()` — snapshot records under lock
+- `recordMealDemandFactor()` — write + persist under lock
+- `getMealDemandFactor()` — read under lock
+- `runAdaptiveCycle()` composite demand loop — read demand factors + cumulative scaling under lock
+- `runAdaptiveCycle()` damping check — read `lastAdjustmentTime` under lock
+- `runAdaptiveCycle()` adjustment recording — read `cumulativeScaling` + append `adjustmentHistory` under lock
+- `scaleFutureEntries()` — all cumulative scaling reads/writes, ceiling hit tracking, persist under lock
+- `mealCompleted()` — all state cleanup under lock
+
+Lock granularity is kept fine: acquire for state access, release before I/O (Core Data fetches, context.perform). This avoids holding the lock across async operations.
 
 **File:** `MacroAdaptiveService.swift`
 
@@ -274,8 +348,10 @@ Tabbed hub with Nutrition / Engine / Garmin / Analysis tabs replacing the single
 | S2b | SMB rate reduction when composite demand > 1.5x | Safety | Done |
 | S3 | Fat slider cap 2.00 -> 1.20 | Safety | Done |
 | S4 | Protein plateau/threshold validation with re-entrancy guard | Safety | Done |
+| S5 | Auto-degradation on repeated composite ceiling hits | Safety | Done |
 | L1 | Absorbed carbs 5-minute timing buffer | Logic | Done |
 | L2 | Gate 3 NSLock thread safety | Logic | Done |
+| L4 | Comprehensive thread safety for MacroAdaptiveService shared state | Logic | Done |
 | L3 | Proportional SMB attribution by remaining carbs | Logic | Done |
 | T1 | V1/V2 segmented toggle on treatment page | UX | Done |
 | T2 | MacroDecayChartView removed from treatment screen | UX | Done |
@@ -298,20 +374,23 @@ Tabbed hub with Nutrition / Engine / Garmin / Analysis tabs replacing the single
 | Forecast model divergence between lines | Same predict() function for both lines | Gap = pure treatment effect |
 | L1 hardcoded 5min buffer | Dynamic max(5min, timeSinceLastLoop) from APSManager | Adapts to delayed loop cycles |
 | S4 slider ping-pong | Re-entrancy guard on onChange handlers | Prevents infinite loop |
+| No automatic fallback on repeated ceiling | Auto-degradation: 3 consecutive ceiling hits decays cumulativeScaling by 0.8x | Self-correcting without user intervention |
+| Shared mutable state unprotected | NSLock wrapping all mutable state in MacroAdaptiveService | Prevents data races from concurrent loop/bolus paths |
 
 ### Not Implemented (Accepted or Low Priority)
 
 | # | Item | Reason |
 |---|------|--------|
-| S5 | Time-weighted Gate 5 | Current behavior errs toward safety (over-restrictive) |
-| Persistence | Move insulin records from UserDefaults to Core Data | Works for current volume; not transactional but data is a tracking heuristic, not delivery record. Composite ceiling limits worst case on corruption. |
+| — | Time-weighted Gate 5 | Current behavior errs toward safety (over-restrictive) |
+| — | Move insulin records from UserDefaults to Core Data | Works for current volume; not transactional but data is a tracking heuristic, not delivery record. Composite ceiling limits worst case on corruption. |
+| — | Persistence: move all state to Core Data | UserDefaults is adequate for the handful of lightweight dictionaries. Composite ceiling + auto-degradation limit worst case on corruption. |
 
 ---
 
 ### File Summary
 
 **Modified files (6):**
-- `MacroAdaptiveService.swift` — IOB curves, composite ceiling, rate limiting, dynamic absorption buffer, ceiling logging, thread safety
+- `MacroAdaptiveService.swift` — IOB curves, composite ceiling, rate limiting, dynamic absorption buffer, ceiling logging, auto-degradation, comprehensive thread safety (NSLock)
 - `APSManager.swift` — Curve type selection, DIA/lastLoopDate passing, proportional SMB attribution
 - `V2MacroDosingSettingsView.swift` — Fat slider cap, protein validation with re-entrancy guard
 - `TreatmentsRootView.swift` — V1/V2 toggle, MacroDecayChart removal
