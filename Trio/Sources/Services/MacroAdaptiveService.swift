@@ -231,6 +231,16 @@ final class MacroAdaptiveService {
     /// Maximum CGM age for adjustments (seconds)
     private static let maxCGMAge: TimeInterval = 15 * 60 // 15 minutes
 
+    /// Time-based confidence ramp: adaptive scaling is suppressed early in a meal when
+    /// very few entries have been absorbed and any BG movement produces large relative errors.
+    /// At t=0 the confidence multiplier is 0; it reaches 1.0 at this many minutes.
+    /// Combined with the existing 50% damping, effective scaling at t=15min ≈ 0.17.
+    private static let confidenceRampMinutes: Double = 45
+
+    /// Fat threshold for confidence ramp exemption: meals below this fat amount (grams)
+    /// skip the time-based ramp because simple carbs produce legitimate BG signal early.
+    private static let confidenceRampFatExemptionGrams: Double = 5.0
+
     /// (S2) Default maximum composite demand multiplier (Garmin demand × adaptive scaling).
     /// Prevents compounding multipliers from delivering more than 2.5x the base engine calculation.
     private static let defaultMaxCompositeDemand: Double = 2.5
@@ -341,6 +351,8 @@ final class MacroAdaptiveService {
     ///   - cr: Current carb ratio (grams per unit)
     ///   - activeMealIDs: Set of mealIDs that have future entries
     ///   - mealStartBGs: Map of mealID -> BG at meal start (from V2MealOutcome.bgAtMeal)
+    ///   - mealFatGrams: Map of mealID -> fat grams (for time-based confidence ramp exemption)
+    ///   - mealDates: Map of mealID -> meal detection time (for time-based confidence ramp)
     ///   - context: Core Data context for fetching/updating entries
     ///   - userMaxSMBMinutes: User's configured maxSMBBasalMinutes
     ///   - mealSMBMultiplier: Meal-mode multiplier (default 2.0)
@@ -354,6 +366,8 @@ final class MacroAdaptiveService {
         cr: Double,
         activeMealIDs: Set<String>,
         mealStartBGs: [String: Double] = [:],
+        mealFatGrams: [String: Double] = [:],
+        mealDates: [String: Date] = [:],
         context: NSManagedObjectContext,
         userMaxSMBMinutes: Decimal,
         mealSMBMultiplier: Double = 2.0,
@@ -470,7 +484,17 @@ final class MacroAdaptiveService {
             let rawScaling = 1.0 + (error / Self.scalingConstant)
 
             // Blend: apply 50% of correction immediately (prevents overreaction)
-            let blendedScaling = 1.0 + (rawScaling - 1.0) * 0.5
+            var blendedScaling = 1.0 + (rawScaling - 1.0) * 0.5
+
+            // Time-based confidence damping: suppress adaptive scaling early in a meal when
+            // very few entries have been absorbed and BG movement is mostly noise or pre-meal trend.
+            // Low-fat meals (<5g) are exempt because simple carbs produce legitimate BG signal early.
+            let mealFat = mealFatGrams[mealID] ?? 0
+            if mealFat >= Self.confidenceRampFatExemptionGrams {
+                let minutesSinceMeal = mealDates[mealID].map { Date().timeIntervalSince($0) / 60.0 } ?? Self.confidenceRampMinutes
+                let confidenceFactor = min(1.0, minutesSinceMeal / Self.confidenceRampMinutes)
+                blendedScaling = 1.0 + (blendedScaling - 1.0) * confidenceFactor
+            }
 
             // Scale future entries (S2: with hardcoded composite ceiling)
             await scaleFutureEntries(

@@ -249,7 +249,7 @@ The 0.3 min/g coefficient is conservative — fiber's effect is real but smaller
 |-----------|---------|-------|-----------|
 | τ_base (Carb Tau) | 35 min | 20–60 min | V2PersonalCurveParameters.carbTau |
 | Fat slowing coefficient | 0.8 min/g | Fixed | Hardcoded |
-| Fiber slowing coefficient | 0.3 min/g | 0.00–1.00 | Tunable via recalibration |
+| Fiber slowing coefficient | 0.3 min/g | 0.00–1.00 | Tunable via Claude AI recalibration only (not exposed in Engine Tab UI) |
 | Fiber threshold | 5g | Fixed | Hardcoded |
 
 The base τ is tunable via the settings slider or learned from early (0–2h) checkpoint errors.
@@ -283,6 +283,8 @@ The total glucose-equivalent from protein is:
 ```
 proteinGlucoseEquiv = protein_grams × proteinGlucoFactor(protein_grams)
 ```
+
+> **Note on parameterization:** The factor is applied to *total* protein grams, not grams above threshold. This produces convex saturation kinetics — the marginal conversion rate increases with protein intake, matching the gradual activation of gluconeogenesis pathways. At 20g the effective conversion is 7% of total protein (1.4g); at 40g it reaches 35% (14.0g). The `maxFactor` parameter is calibrated against this total-gram formulation and is not directly comparable to marginal conversion rates reported in literature. If porting these parameters to a model that applies the factor only to protein above threshold, the coefficients will need recalibration.
 
 **Example values:**
 
@@ -660,9 +662,11 @@ The most recent CGM reading must be less than 10 minutes old. Stale data (sensor
 **Gate 5: IOB vs Remaining Absorption**
 Current IOB must not exceed 120% of the remaining insulin need. Specifically:
 ```
-remainingInsulinNeed = remainingCarbsForActiveMeals / carbRatio
+remainingInsulinNeed = remainingEntryGrams / carbRatio
 if currentIOB > remainingInsulinNeed × 1.2: gate fails
 ```
+Where `remainingEntryGrams` is the sum of all future V3 entries for active meals — carb, protein, and fat entries alike. All three entry types are stored uniformly as carb-equivalent grams in `CarbEntryStored` (protein entries represent glucose-equivalents from gluconeogenesis; fat entries represent insulin-resistance-equivalents), so dividing by `carbRatio` yields the correct total insulin need.
+
 This prevents insulin stacking — if the IOB already covers the remaining predicted absorption plus a 20% buffer, there's no need to deliver enhanced SMBs.
 
 ### Implementation
@@ -691,8 +695,10 @@ The adaptive service runs before each oref cycle (approximately every 5 minutes)
 
 1. **Calculate predicted BG impact** from the meal:
    ```
-   predictedImpact = (absorbedCarbs / carbRatio) × ISF - mealIOB × ISF
+   predictedImpact = (absorbedEntryGrams / carbRatio) × ISF - mealIOB × ISF
    ```
+   Where `absorbedEntryGrams` is the sum of all past V3 entries for this meal (carb, protein, and fat). All entry types are stored as carb-equivalent grams, so dividing by `carbRatio` yields insulin-equivalents for the total absorbed load.
+
    Uses **meal-attributed IOB** (insulin specifically recorded for this meal via `recordMealInsulin`) rather than total system IOB, preventing correction boluses from confounding the prediction.
 
    **oref-Matching IOB Decay:** Meal-attributed IOB models insulin decay using the same curves as oref, not a simple accumulator. The system supports two decay models that match oref exactly:
@@ -722,29 +728,38 @@ The adaptive service runs before each oref cycle (approximately every 5 minutes)
    ```
    The 50% damping prevents overreaction to transient fluctuations.
 
-5. **Apply to future entries:** All remaining FPU entries for this meal are scaled by the blended factor.
+5. **Time-based confidence damping** (for meals with ≥ 5g fat):
+   ```
+   confidenceFactor = min(1.0, minutesSinceMeal / 45)
+   blendedScaling = 1.0 + (blendedScaling - 1.0) × confidenceFactor
+   ```
+   Early in a meal, very few entries have been absorbed and the predicted impact is near zero. Any BG movement — even noise or a pre-meal trend — produces a large relative error. The confidence ramp suppresses adaptive scaling during the first 45 minutes, reaching full effect only after enough absorption has occurred for the error signal to be meaningful. At t=15min the effective correction is `0.5 × 0.33 = 0.17` of raw; at t=30min it's `0.5 × 0.67 = 0.33`.
 
-### Absorbed Carbs Timing with Dynamic Buffer
+   **Low-fat meals (< 5g fat) are exempt** from the time ramp. Simple carbs (glucose tabs, juice, low-fat snacks) have short τ values and produce legitimate BG signal within 15 minutes. The time ramp exists to protect against noise amplification in high-fat meals where τ is 60+ minutes and early absorption is negligible.
 
-Entries are classified as "absorbed" only after a dynamic buffer period has elapsed past their scheduled time. This prevents counting entries as absorbed before oref has had a chance to deliver insulin for them:
+6. **Apply to future entries:** All remaining FPU entries for this meal are scaled by the blended factor.
+
+### Absorbed Entry Timing with Dynamic Buffer
+
+Entries (of all types — carb, protein, and fat) are classified as "absorbed" only after a dynamic buffer period has elapsed past their scheduled time. This prevents counting entries as absorbed before oref has had a chance to deliver insulin for them:
 
 ```
 absorptionBuffer = max(5 minutes, timeSinceLastLoop)
 absorbed = entries where entryDate + absorptionBuffer ≤ now
 ```
 
-When the loop is delayed (phone backgrounded, Bluetooth reconnection), the buffer automatically extends to match the actual loop interval, preventing false inflation of absorbed carbs.
+When the loop is delayed (phone backgrounded, Bluetooth reconnection), the buffer automatically extends to match the actual loop interval, preventing false inflation of absorbed entry totals.
 
 ### Proportional SMB Attribution
 
-When multiple meals are active simultaneously, SMB insulin is attributed proportionally by remaining carbs rather than split equally:
+When multiple meals are active simultaneously, SMB insulin is attributed proportionally by remaining entry grams (all types) rather than split equally:
 
 ```
-mealShare = mealRemainingCarbs / totalRemainingCarbs
+mealShare = mealRemainingEntryGrams / totalRemainingEntryGrams
 mealInsulin = smbUnits × mealShare
 ```
 
-This ensures that a large meal with 50g remaining carbs receives proportionally more insulin attribution than a small snack with 5g remaining, keeping each meal's IOB tracking accurate.
+This ensures that a large meal with 50g of remaining entries receives proportionally more insulin attribution than a small snack with 5g remaining, keeping each meal's IOB tracking accurate.
 
 ### Safety Limits
 
@@ -898,14 +913,16 @@ if deadZoneLow ≤ BG ≤ deadZoneHigh: error = 0            (within dead zone, 
 
 | Phase | Error Direction | Adjustment |
 |-------|----------------|------------|
-| carb: high BG | Carbs absorbed faster than predicted | τ -= error × 2.0 × weight |
-| carb: low BG | Carbs absorbed slower | τ += |error| × 2.0 × weight |
+| carb: high BG | More upfront insulin needed next time | τ -= error × 2.0 × weight |
+| carb: low BG | Less upfront insulin needed next time | τ += |error| × 2.0 × weight |
 | protein: high BG | Protein effect stronger | proteinFactor += error × 0.02 × weight |
 | protein: low BG | Protein effect weaker | proteinFactor -= |error| × 0.02 × weight |
 | fat: high BG | Fat resistance stronger | fatCoeff += error × 0.05 × weight |
 | fat: low BG | Fat resistance weaker | fatCoeff -= |error| × 0.05 × weight |
 | overlap | Excluded from learning | The 4h overlap checkpoint is skipped for parameter learning to avoid noise-level adjustments from diluted 30% attribution. The 5h and 6h checkpoints provide cleaner single-curve signal. Overlap data is retained for monitoring. |
 | skip | No adjustment | Checkpoint excluded from learning |
+
+> **Note on τ adjustment direction:** The carb-phase τ adjustment is a *dosing correction*, not a model correction. When BG ends up high at a carb-phase checkpoint (1–2h), the system decreases τ — this shifts the gamma curve earlier, placing more carbs into the upfront bolus window for the next meal. The intent is "deliver more insulin sooner next time," not "the model thinks carbs absorbed faster." A pure model correction for high BG would increase τ (carbs arrived late, so model their slower absorption), but this would *reduce* the upfront portion and worsen the next meal's outcome. The dosing correction produces the therapeutically correct response.
 
 **Step 5: Apply with clamping**
 
