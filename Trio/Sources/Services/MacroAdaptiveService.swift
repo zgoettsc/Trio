@@ -7,6 +7,15 @@ import Foundation
 // three-curve model to actual CGM, adjusts remaining future entries,
 // and evaluates meal-mode SMB enhancement.
 
+// MARK: - Meal Insulin Record (S1: IOB Decay)
+
+/// A single insulin delivery event attributed to a meal, with a timestamp
+/// so we can model decay using the user's DIA.
+struct MealInsulinRecord: Codable {
+    let units: Double
+    let timestamp: Date
+}
+
 // MARK: - Meal Mode State
 
 /// Evaluates whether meal-mode SMB enhancement should be active.
@@ -18,7 +27,12 @@ struct MealModeState {
     /// Hysteresis flag for Gate 3 trend threshold.
     /// Once the gate fails (trend drops below threshold), require trend to recover
     /// to reEnableThreshold before re-enabling — prevents rapid toggling near CGM noise floor.
-    private static var gate3FailedLastCycle = false
+    private static let gate3Lock = NSLock()
+    private static var _gate3FailedLastCycle = false
+    private static var gate3FailedLastCycle: Bool {
+        get { gate3Lock.lock(); defer { gate3Lock.unlock() }; return _gate3FailedLastCycle }
+        set { gate3Lock.lock(); defer { gate3Lock.unlock() }; _gate3FailedLastCycle = newValue }
+    }
 
     /// Evaluate all safety gates for meal-mode SMB enhancement.
     /// If ANY gate fails, maxSMB reverts to the user's base value instantly.
@@ -134,30 +148,83 @@ final class MacroAdaptiveService {
     /// Maximum CGM age for adjustments (seconds)
     private static let maxCGMAge: TimeInterval = 15 * 60 // 15 minutes
 
+    /// (S2) Default maximum composite demand multiplier (Garmin demand × adaptive scaling).
+    /// Prevents compounding multipliers from delivering more than 2.5x the base engine calculation.
+    private static let defaultMaxCompositeDemand: Double = 2.5
+
+    /// (L1) Buffer time (seconds) before counting an entry as "absorbed".
+    /// Ensures oref has had at least one cycle to act on the entry before we attribute BG impact.
+    private static let absorptionBuffer: TimeInterval = 5 * 60 // one oref cycle
+
     // MARK: - State
 
     private var lastAdjustmentTime: Date?
     private var cumulativeScaling: [String: Double] = [:] // mealID -> cumulative factor
     private var adjustmentHistory: [AdaptiveAdjustment] = []
-    private var mealAttributedIOB: [String: Double] = [:] // mealID -> insulin attributed to this meal
+
+    /// (S1) Per-meal timestamped insulin records for decay-aware IOB tracking.
+    private var mealInsulinRecords: [String: [MealInsulinRecord]] = [:]
+
+    /// (S2) Per-meal demand factor from Garmin/engine at meal creation time.
+    private var mealDemandFactors: [String: Double] = [:]
 
     // MARK: - Persistence Keys (for #9: survive app restart)
 
     private static let cumulativeScalingKey = "V2CumulativeScaling"
+    private static let insulinRecordsKey = "V2MealInsulinRecords"
+    private static let demandFactorsKey = "V2MealDemandFactors"
 
-    /// Restore persisted cumulative scaling state on init.
+    /// Restore persisted state on init.
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.cumulativeScalingKey),
            let restored = try? JSONDecoder().decode([String: Double].self, from: data)
         {
             cumulativeScaling = restored
         }
+        if let data = UserDefaults.standard.data(forKey: Self.insulinRecordsKey),
+           let restored = try? JSONDecoder().decode([String: [MealInsulinRecord]].self, from: data)
+        {
+            mealInsulinRecords = restored
+        }
+        if let data = UserDefaults.standard.data(forKey: Self.demandFactorsKey),
+           let restored = try? JSONDecoder().decode([String: Double].self, from: data)
+        {
+            mealDemandFactors = restored
+        }
+        pruneExpiredInsulinRecords()
     }
 
     /// Persist cumulative scaling to UserDefaults so it survives app restarts (#9).
     private func persistCumulativeScaling() {
         if let data = try? JSONEncoder().encode(cumulativeScaling) {
             UserDefaults.standard.set(data, forKey: Self.cumulativeScalingKey)
+        }
+    }
+
+    /// Persist insulin records to UserDefaults.
+    private func persistInsulinRecords() {
+        if let data = try? JSONEncoder().encode(mealInsulinRecords) {
+            UserDefaults.standard.set(data, forKey: Self.insulinRecordsKey)
+        }
+    }
+
+    /// Persist demand factors to UserDefaults.
+    private func persistDemandFactors() {
+        if let data = try? JSONEncoder().encode(mealDemandFactors) {
+            UserDefaults.standard.set(data, forKey: Self.demandFactorsKey)
+        }
+    }
+
+    /// Remove insulin records older than maxAge (DIA + 1 hour buffer) to prevent unbounded growth.
+    private func pruneExpiredInsulinRecords(maxAge: TimeInterval = 7 * 3600) {
+        let cutoff = Date().addingTimeInterval(-maxAge)
+        for (mealID, records) in mealInsulinRecords {
+            let filtered = records.filter { $0.timestamp > cutoff }
+            if filtered.isEmpty {
+                mealInsulinRecords.removeValue(forKey: mealID)
+            } else {
+                mealInsulinRecords[mealID] = filtered
+            }
         }
     }
 
@@ -191,7 +258,9 @@ final class MacroAdaptiveService {
         context: NSManagedObjectContext,
         userMaxSMBMinutes: Decimal,
         mealSMBMultiplier: Double = 2.0,
-        bgFloor: Double = 90.0
+        bgFloor: Double = 90.0,
+        dia: TimeInterval = 6 * 3600,           // S1: duration of insulin action in seconds
+        maxCompositeDemand: Double? = nil        // S2: composite ceiling override (nil = use default 2.5)
     ) async -> MealModeState {
         let hasActiveMeals = !activeMealIDs.isEmpty
 
@@ -262,8 +331,8 @@ final class MacroAdaptiveService {
             // Skip if no entries have been absorbed yet
             guard absorbedCarbs > 0, remainingCarbs > 0 else { continue }
 
-            // (#1) Use meal-attributed IOB instead of total system IOB
-            let mealIOB = getMealAttributedIOB(mealID: mealID)
+            // (#1) Use meal-attributed IOB with DIA-based decay (S1)
+            let mealIOB = getMealAttributedIOB(mealID: mealID, dia: dia)
 
             // Predicted BG impact: absorbed carbs raise BG, meal-attributed IOB lowers it
             let predictedBGImpact = (absorbedCarbs / cr) * isf - mealIOB * isf
@@ -283,11 +352,13 @@ final class MacroAdaptiveService {
             // Blend: apply 50% of correction immediately (prevents overreaction)
             let blendedScaling = 1.0 + (rawScaling - 1.0) * 0.5
 
-            // Scale future entries
+            // Scale future entries (S2: with composite ceiling)
+            let ceiling = maxCompositeDemand ?? Self.defaultMaxCompositeDemand
             await scaleFutureEntries(
                 mealID: mealID,
                 scalingFactor: blendedScaling,
-                context: context
+                context: context,
+                maxCompositeDemand: ceiling
             )
 
             // Record adjustment for audit trail
@@ -307,22 +378,54 @@ final class MacroAdaptiveService {
         return mealMode
     }
 
-    // MARK: - Meal-Attributed IOB Tracking (#1)
+    // MARK: - Meal-Attributed IOB Tracking (S1: decay-aware)
 
-    /// Record insulin attributed to a specific meal (upfront bolus + SMBs during meal entries).
+    /// Record insulin attributed to a specific meal with a timestamp for decay modeling.
     func recordMealInsulin(mealID: String, units: Double) {
-        mealAttributedIOB[mealID] = (mealAttributedIOB[mealID] ?? 0) + units
+        var records = mealInsulinRecords[mealID] ?? []
+        records.append(MealInsulinRecord(units: units, timestamp: Date()))
+        mealInsulinRecords[mealID] = records
+        persistInsulinRecords()
     }
 
-    /// Get the meal-attributed IOB for a specific meal.
-    func getMealAttributedIOB(mealID: String) -> Double {
-        return mealAttributedIOB[mealID] ?? 0
+    /// (S1) Get the decay-adjusted meal-attributed IOB for a specific meal.
+    /// Applies a linear decay model using the user's DIA so that insulin delivered
+    /// hours ago at the start of a long meal is not counted as still active.
+    func getMealAttributedIOB(mealID: String, dia: TimeInterval = 6 * 3600) -> Double {
+        guard let records = mealInsulinRecords[mealID] else { return 0 }
+        let now = Date()
+        return records.reduce(0.0) { total, record in
+            let age = now.timeIntervalSince(record.timestamp)
+            let fractionRemaining = max(0, 1.0 - age / dia)
+            return total + record.units * fractionRemaining
+        }
+    }
+
+    /// Get the total (non-decayed) insulin ever attributed to a meal. Useful for outcome reporting.
+    func getTotalMealInsulin(mealID: String) -> Double {
+        guard let records = mealInsulinRecords[mealID] else { return 0 }
+        return records.reduce(0.0) { $0 + $1.units }
+    }
+
+    // MARK: - Demand Factor Tracking (S2)
+
+    /// Record the Garmin/engine demand factor for a meal at creation time.
+    func recordMealDemandFactor(mealID: String, factor: Double) {
+        mealDemandFactors[mealID] = factor
+        persistDemandFactors()
+    }
+
+    /// Get the recorded demand factor for a meal (defaults to 1.0 if unknown).
+    func getMealDemandFactor(mealID: String) -> Double {
+        return mealDemandFactors[mealID] ?? 1.0
     }
 
     // MARK: - Entry Analysis
 
     /// Fetch absorbed (past) and remaining (future) carbs for a meal.
-    private func fetchAbsorbedAndRemainingCarbs(
+    /// (L1) Uses an absorption buffer so entries are only counted as "absorbed" after oref has had
+    /// at least one cycle to act on them.
+    func fetchAbsorbedAndRemainingCarbs(
         mealID: String,
         context: NSManagedObjectContext
     ) async -> (absorbed: Double, remaining: Double, minutesSinceFirst: Double) {
@@ -337,6 +440,8 @@ final class MacroAdaptiveService {
             do {
                 let entries = try context.fetch(fetchRequest)
                 let now = Date()
+                // (L1) Only count entries as absorbed after oref has had one cycle to process them
+                let effectiveNow = now.addingTimeInterval(-MacroAdaptiveService.absorptionBuffer)
                 var absorbed = 0.0
                 var remaining = 0.0
                 var earliestDate: Date?
@@ -345,7 +450,7 @@ final class MacroAdaptiveService {
                     guard let entryDate = entry.date else { continue }
                     if earliestDate == nil { earliestDate = entryDate }
 
-                    if entryDate <= now {
+                    if entryDate <= effectiveNow {
                         absorbed += entry.carbs
                     } else {
                         remaining += entry.carbs
@@ -362,17 +467,30 @@ final class MacroAdaptiveService {
 
     /// Scale future entries for a given mealID by the adjustment factor.
     /// Only modifies entries with actualDate in the future.
+    /// (S2) Enforces composite ceiling: demand factor × cumulative scaling ≤ maxCompositeDemand.
     func scaleFutureEntries(
         mealID: String,
         scalingFactor: Double,
-        context: NSManagedObjectContext
+        context: NSManagedObjectContext,
+        maxCompositeDemand: Double = defaultMaxCompositeDemand
     ) async {
         // Clamp single-cycle scaling
         let clampedFactor = min(Self.maxCycleScaling, max(Self.minCycleScaling, scalingFactor))
 
         // Track cumulative scaling
         let currentCumulative = cumulativeScaling[mealID] ?? 1.0
-        let newCumulative = currentCumulative * clampedFactor
+        var newCumulative = currentCumulative * clampedFactor
+        newCumulative = min(Self.maxCumulativeScaling, max(Self.minCumulativeScaling, newCumulative))
+
+        // (S2) Composite ceiling: demand factor × cumulative scaling must stay within bounds.
+        // This prevents Garmin demand (up to 1.67x) × adaptive scaling (up to 2.0x) from compounding
+        // beyond the configured maximum.
+        let demandFactor = getMealDemandFactor(mealID: mealID)
+        let compositeDemand = newCumulative * demandFactor
+        if compositeDemand > maxCompositeDemand, demandFactor > 0 {
+            newCumulative = maxCompositeDemand / demandFactor
+        }
+
         let finalCumulative = min(Self.maxCumulativeScaling, max(Self.minCumulativeScaling, newCumulative))
         let effectiveFactor = finalCumulative / currentCumulative
 
@@ -441,7 +559,10 @@ final class MacroAdaptiveService {
     /// Reset state for a completed meal.
     func mealCompleted(mealID: String) {
         cumulativeScaling.removeValue(forKey: mealID)
-        mealAttributedIOB.removeValue(forKey: mealID)
-        persistCumulativeScaling() // (#9) persist cleanup
+        mealInsulinRecords.removeValue(forKey: mealID)
+        mealDemandFactors.removeValue(forKey: mealID)
+        persistCumulativeScaling()
+        persistInsulinRecords()
+        persistDemandFactors()
     }
 }

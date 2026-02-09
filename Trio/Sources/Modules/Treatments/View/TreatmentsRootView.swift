@@ -5,6 +5,12 @@ import SwiftUI
 import Swinject
 
 extension Treatments {
+    /// Treatment mode for the V1/V2 toggle
+    enum TreatmentMode: String {
+        case v1 = "Standard"
+        case v2 = "V2 Macro"
+    }
+
     struct RootView: BaseView {
         enum FocusedField {
             case carbs
@@ -19,6 +25,9 @@ extension Treatments {
 
         @State var state = StateModel()
 
+        /// V1/V2 mode toggle — defaults from the V2 settings toggle, overridable per session
+        @State private var treatmentMode: TreatmentMode = .v1
+
         @State private var showPresetSheet = false
         @State private var autofocus: Bool = true
         @State private var calculatorDetent = PresentationDetent.large
@@ -28,12 +37,6 @@ extension Treatments {
         @State private var showPhotoCarbSheet = false
         @State private var showAPIKeyRequiredAlert = false
         @StateObject private var aiInsightsState = AIInsightsConfig.StateModel()
-
-        @FetchRequest(
-            entity: CarbEntryStored.entity(),
-            sortDescriptors: [NSSortDescriptor(keyPath: \CarbEntryStored.date, ascending: false)],
-            predicate: NSPredicate.fpusForChart
-        ) private var fpuEntries: FetchedResults<CarbEntryStored>
 
         private enum Config {
             static let dividerHeight: CGFloat = 2
@@ -324,6 +327,179 @@ extension Treatments {
         }
 
         var body: some View {
+            VStack(spacing: 0) {
+                // V1/V2 mode toggle — always visible at top
+                Picker("Treatment Mode", selection: $treatmentMode) {
+                    Text(TreatmentMode.v1.rawValue).tag(TreatmentMode.v1)
+                    Text(TreatmentMode.v2.rawValue).tag(TreatmentMode.v2)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+                // Render the appropriate treatment flow
+                switch treatmentMode {
+                case .v1:
+                    v1Content
+                case .v2:
+                    V2TreatmentView(
+                        state: state,
+                        resolver: resolver,
+                        onSwitchToV1: { treatmentMode = .v1 }
+                    )
+                }
+            }
+            .scrollContentBackground(.hidden).background(appState.trioBackgroundColor(for: colorScheme))
+            .blur(radius: state.showInfo ? 3 : 0)
+            .navigationTitle("Treatments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(content: {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        state.hideModal()
+                    } label: {
+                        Text("Close")
+                    }
+                }
+                if treatmentMode == .v1, state.displayPresets {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(action: {
+                            showPresetSheet = true
+                        }, label: {
+                            HStack {
+                                Text("Presets")
+                                Image(systemName: "plus")
+                            }
+                        })
+                    }
+                }
+            })
+            .onAppear {
+                configureView {
+                    state.isActive = true
+                    // Default mode from V2 settings toggle
+                    if state.useV2MacroAbsorption {
+                        treatmentMode = .v2
+                    }
+                    Task { @MainActor in
+                        state.insulinCalculated = await state.calculateInsulin()
+                    }
+                }
+            }
+            .onDisappear {
+                state.isActive = false
+                state.addButtonPressed = false
+                state.cleanupTreatmentState()
+            }
+            .sheet(isPresented: $state.showInfo) {
+                PopupView(state: state)
+            }
+            .sheet(isPresented: $showPresetSheet, onDismiss: {
+                showPresetSheet = false
+            }) {
+                MealPresetView(state: state)
+            }
+            .alert("Error while processing Treatment", isPresented: $state.showDeterminationFailureAlert) {
+                Button("OK", role: .cancel) {
+                    state.hideModal()
+                }
+            } message: {
+                Text("\(state.determinationFailureMessage)")
+            }
+            .alert("API Key Required", isPresented: $showAPIKeyRequiredAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Please configure your Claude API key in Settings → AI Insights → API Configuration to use Photo Carb Estimation.")
+            }
+            .sheet(isPresented: $showPhotoCarbSheet) {
+                AIInsightsConfig.PhotoCarbEstimateView(
+                    state: aiInsightsState,
+                    onAcceptCarbs: { carbs in
+                        state.carbs = carbs
+                        handleDebouncedInput()
+                    }
+                )
+            }
+            .sheet(isPresented: $state.showCronometerSheet) {
+                if let meal = state.cronometerMeal {
+                    CronometerMealRecommendationView(
+                        meal: meal,
+                        recommendedCarbs: state.cronometerRecommendedCarbs,
+                        recommendedFat: state.cronometerRecommendedFat,
+                        recommendedProtein: state.cronometerRecommendedProtein,
+                        adjustmentFactor: state.cronometerAdjustmentFactor,
+                        fpuCarbEquivalents: state.cronometerFPUCarbEquivalents,
+                        fpuDurationHours: state.cronometerFPUDurationHours,
+                        predictedEventualBG: state.cronometerPredictedEventualBG,
+                        predictedMinBG: state.cronometerPredictedMinBG,
+                        currentBG: Int(NSDecimalNumber(decimal: state.currentBG).intValue),
+                        units: state.units.rawValue,
+                        glucoseHistory: state.glucoseFromPersistence.prefix(48).compactMap { g in
+                            guard let date = g.date else { return nil }
+                            return CronometerMealRecommendationView.GlucosePoint(date: date, value: Int(g.glucose))
+                        },
+                        predictionCurve: state.cronometerPredictionCurve,
+                        outcomeStats: state.cronometerOutcomeStats,
+                        mealPrediction: state.cronometerMealPrediction,
+                        isLateMeal: state.cronometerMealIsLate,
+                        minutesSinceMeal: state.cronometerMealMinutesAgo,
+                        decayAdjustedCarbs: state.cronometerDecayAdjustedCarbs,
+                        isFactorLocked: state.cronometerFactorLocked,
+                        v2UpfrontCarbs: state.v2UpfrontCarbs,
+                        v2UpfrontPercent: state.v2UpfrontPercent,
+                        v2CurveSuggestedPercent: state.v2CurveSuggestedPercent,
+                        v2TauCarb: state.v2TauCarb,
+                        v2FatTotalEquiv: state.v2FatTotalEquiv,
+                        v2SafeWindowMinutes: state.v2SafeWindowMinutes,
+                        v2DemandFactor: state.v2DemandFactor,
+                        v2CarbRatio: state.carbRatio > 0 ? Double(truncating: state.carbRatio as NSDecimalNumber) : nil,
+                        onApply: { carbs, fat, protein, fiber in
+                            state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein, fiber: fiber)
+                            handleDebouncedInput()
+                        },
+                        onAdjustFactor: { newFactor in
+                            state.adjustCronometerFactor(newFactor)
+                        },
+                        onToggleFactorLock: {
+                            state.toggleCronometerFactorLock()
+                        },
+                        onAdjustV2Upfront: { newPercent in
+                            state.adjustV2UpfrontPercent(newPercent)
+                        },
+                        onDismiss: {
+                            state.showCronometerSheet = false
+                        }
+                    )
+                }
+            }
+            .sheet(isPresented: $state.showMealPickerSheet) {
+                CronometerMealPickerView(
+                    meals: state.cronometerAvailableMeals,
+                    alreadyDosedMealDates: state.cronometerAlreadyDosedDates,
+                    onSelect: { meal in
+                        Task {
+                            await state.selectCronometerMeal(meal)
+                        }
+                    },
+                    onDismiss: {
+                        state.showMealPickerSheet = false
+                    }
+                )
+            }
+            .alert("Cronometer", isPresented: Binding(
+                get: { state.cronometerError != nil },
+                set: { if !$0 { state.cronometerError = nil } }
+            )) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(state.cronometerError ?? "")
+            }
+        }
+
+        // MARK: - V1 Content (original treatment view, without MacroDecayChart)
+
+        private var v1Content: some View {
             ZStack(alignment: .center) {
                 VStack {
                     List {
@@ -331,16 +507,6 @@ extension Treatments {
                             ForecastChart(state: state)
                                 .padding(.vertical)
                         }.listRowBackground(Color.chart)
-
-                        // V2 Macro Decay Chart
-                        let macroBreakdown = MacroOnBoardCalculator.currentBreakdown(from: Array(fpuEntries))
-                        if macroBreakdown.hasV2Entries {
-                            Section(header: Text("Macro Absorption")) {
-                                let decayPoints = MacroOnBoardCalculator.decayTimeline(from: Array(fpuEntries))
-                                MacroDecayChartView(decayPoints: decayPoints, breakdown: macroBreakdown)
-                                    .padding(.vertical, 4)
-                            }.listRowBackground(Color.chart)
-                        }
 
                         Section {
                             carbsTextField()
@@ -351,7 +517,6 @@ extension Treatments {
 
                             // Time
                             HStack {
-                                // Semi-hacky workaround to make sure the List renders the horizontal divider properly between the `Time` and `Note` rows within the Section
                                 HStack {
                                     Text("")
                                     Image(systemName: "clock").padding(.leading, -7)
@@ -374,9 +539,7 @@ extension Treatments {
                                     ).controlSize(.mini)
                                         .labelsHidden()
                                         .onChange(of: state.date) { _, _ in
-                                            // Trigger simulation when date changes to update forecasts for backdated carbs
                                             Task {
-                                                // `updateForecasts()` does update the `simulatedDetermination` of type `Determination?` var on the main thread, so I can use this to pass its cob value into the bolus calc manager
                                                 await state.updateForecasts()
                                                 state.insulinCalculated = await state.calculateInsulin()
                                             }
@@ -509,149 +672,6 @@ extension Treatments {
             }
             .padding(.top)
             .ignoresSafeArea(edges: .top)
-            .scrollContentBackground(.hidden).background(appState.trioBackgroundColor(for: colorScheme))
-            .blur(radius: state.showInfo ? 3 : 0)
-            .navigationTitle("Treatments")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(content: {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        state.hideModal()
-                    } label: {
-                        Text("Close")
-                    }
-                }
-                if state.displayPresets {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: {
-                            showPresetSheet = true
-                        }, label: {
-                            HStack {
-                                Text("Presets")
-                                Image(systemName: "plus")
-                            }
-                        })
-                    }
-                }
-            })
-            .onAppear {
-                configureView {
-                    state.isActive = true
-                    Task { @MainActor in
-                        state.insulinCalculated = await state.calculateInsulin()
-                    }
-                }
-            }
-            .onDisappear {
-                state.isActive = false
-                state.addButtonPressed = false
-
-                // Cancel all Combine subscriptions and unregister State from broadcaster
-                state.cleanupTreatmentState()
-            }
-            .sheet(isPresented: $state.showInfo) {
-                PopupView(state: state)
-            }
-            .sheet(isPresented: $showPresetSheet, onDismiss: {
-                showPresetSheet = false
-            }) {
-                MealPresetView(state: state)
-            }
-            .alert("Error while processing Treatment", isPresented: $state.showDeterminationFailureAlert) {
-                Button("OK", role: .cancel) {
-                    state.hideModal()
-                }
-            } message: {
-                Text("\(state.determinationFailureMessage)")
-            }
-            .alert("API Key Required", isPresented: $showAPIKeyRequiredAlert) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text("Please configure your Claude API key in Settings → AI Insights → API Configuration to use Photo Carb Estimation.")
-            }
-            .sheet(isPresented: $showPhotoCarbSheet) {
-                AIInsightsConfig.PhotoCarbEstimateView(
-                    state: aiInsightsState,
-                    onAcceptCarbs: { carbs in
-                        state.carbs = carbs
-                        handleDebouncedInput()
-                    }
-                )
-            }
-            .sheet(isPresented: $state.showCronometerSheet) {
-                if let meal = state.cronometerMeal {
-                    CronometerMealRecommendationView(
-                        meal: meal,
-                        recommendedCarbs: state.cronometerRecommendedCarbs,
-                        recommendedFat: state.cronometerRecommendedFat,
-                        recommendedProtein: state.cronometerRecommendedProtein,
-                        adjustmentFactor: state.cronometerAdjustmentFactor,
-                        fpuCarbEquivalents: state.cronometerFPUCarbEquivalents,
-                        fpuDurationHours: state.cronometerFPUDurationHours,
-                        predictedEventualBG: state.cronometerPredictedEventualBG,
-                        predictedMinBG: state.cronometerPredictedMinBG,
-                        currentBG: Int(NSDecimalNumber(decimal: state.currentBG).intValue),
-                        units: state.units.rawValue,
-                        glucoseHistory: state.glucoseFromPersistence.prefix(48).compactMap { g in
-                            guard let date = g.date else { return nil }
-                            return CronometerMealRecommendationView.GlucosePoint(date: date, value: Int(g.glucose))
-                        },
-                        predictionCurve: state.cronometerPredictionCurve,
-                        outcomeStats: state.cronometerOutcomeStats,
-                        mealPrediction: state.cronometerMealPrediction,
-                        isLateMeal: state.cronometerMealIsLate,
-                        minutesSinceMeal: state.cronometerMealMinutesAgo,
-                        decayAdjustedCarbs: state.cronometerDecayAdjustedCarbs,
-                        isFactorLocked: state.cronometerFactorLocked,
-                        v2UpfrontCarbs: state.v2UpfrontCarbs,
-                        v2UpfrontPercent: state.v2UpfrontPercent,
-                        v2CurveSuggestedPercent: state.v2CurveSuggestedPercent,
-                        v2TauCarb: state.v2TauCarb,
-                        v2FatTotalEquiv: state.v2FatTotalEquiv,
-                        v2SafeWindowMinutes: state.v2SafeWindowMinutes,
-                        v2DemandFactor: state.v2DemandFactor,
-                        v2CarbRatio: state.carbRatio > 0 ? Double(truncating: state.carbRatio as NSDecimalNumber) : nil,
-                        onApply: { carbs, fat, protein, fiber in
-                            state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein, fiber: fiber)
-                            handleDebouncedInput()
-                        },
-                        onAdjustFactor: { newFactor in
-                            state.adjustCronometerFactor(newFactor)
-                        },
-                        onToggleFactorLock: {
-                            state.toggleCronometerFactorLock()
-                        },
-                        onAdjustV2Upfront: { newPercent in
-                            state.adjustV2UpfrontPercent(newPercent)
-                        },
-                        onDismiss: {
-                            state.showCronometerSheet = false
-                        }
-                    )
-                }
-            }
-            .sheet(isPresented: $state.showMealPickerSheet) {
-                CronometerMealPickerView(
-                    meals: state.cronometerAvailableMeals,
-                    alreadyDosedMealDates: state.cronometerAlreadyDosedDates,
-                    onSelect: { meal in
-                        Task {
-                            await state.selectCronometerMeal(meal)
-                        }
-                    },
-                    onDismiss: {
-                        state.showMealPickerSheet = false
-                    }
-                )
-            }
-            .alert("Cronometer", isPresented: Binding(
-                get: { state.cronometerError != nil },
-                set: { if !$0 { state.cronometerError = nil } }
-            )) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(state.cronometerError ?? "")
-            }
         }
 
         var progressText: ProgressText {

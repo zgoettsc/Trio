@@ -148,6 +148,11 @@ extension Treatments {
         var v2SafeWindowMinutes: Int?             // safe window used for display
         var showV2AdjustSlider: Bool = false       // show/hide inline slider
         var v2PendingOutcome: V2MealOutcome?       // outcome to save after saveMeal() sets the engine mealID
+
+        // V3: New V2 treatment flow state
+        var useV2MacroAbsorption: Bool = false     // reflects setting for mode toggle default
+        var v2DetectedMeals: [V2DetectedMeal] = [] // meals from HealthKit observer for the meal feed
+        var v2NoTreatmentPrediction: [Int] = []    // BG prediction without intervention (for two-line chart)
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
         var preprocessedData: [(id: UUID, forecast: Forecast, forecastValue: ForecastValue)] = []
@@ -1540,5 +1545,79 @@ private extension Set where Element == Forecast {
 private extension Predictions {
     var isEmpty: Bool {
         iob == nil && zt == nil && cob == nil && uam == nil
+    }
+}
+
+// MARK: - V3: V2 Treatment Flow Methods
+
+extension Treatments.StateModel {
+    /// Load detected meals from HealthKit/Cronometer for the V2 meal feed.
+    /// Reads from the NutritionHealthService and maps to V2DetectedMeal.
+    @MainActor
+    func loadV2DetectedMeals() async {
+        useV2MacroAbsorption = settings.settings.useV2MacroAbsorption
+
+        // Fetch recent day-level meals from the nutrition health service
+        guard let recentDays = try? await nutritionHealthService.fetchRecentMeals(hours: 8) else {
+            v2DetectedMeals = []
+            return
+        }
+
+        // Get already-dosed meal dates from V2 outcome records
+        let outcomes = V2OutcomeLearningStore.shared.loadAll()
+        let dosedDates = outcomes.map { $0.mealDate }
+
+        // Flatten day-level data into individual entries for the meal feed
+        var meals: [V2DetectedMeal] = []
+        for day in recentDays {
+            for entry in day.entries {
+                // Skip entries with no macros
+                guard entry.carbs > 0 || entry.fat > 0 || entry.protein > 0 else { continue }
+
+                let isDosed = dosedDates.contains(where: { abs($0.timeIntervalSince(entry.date)) < 300 })
+                meals.append(V2DetectedMeal(
+                    date: entry.date,
+                    label: inferMealLabel(for: entry.date),
+                    carbs: entry.carbs,
+                    fat: entry.fat,
+                    protein: entry.protein,
+                    fiber: entry.fiber,
+                    source: entry.source.isEmpty ? "Apple Health" : entry.source,
+                    isDosed: isDosed,
+                    healthKitID: entry.id.uuidString
+                ))
+            }
+        }
+        v2DetectedMeals = meals.sorted { $0.date > $1.date } // Most recent first
+    }
+
+    /// Add a manually entered meal to the V2 detected meals list.
+    @MainActor
+    func addManualV2Meal(carbs: Decimal, fat: Decimal, protein: Decimal, fiber: Decimal) {
+        let meal = V2DetectedMeal(
+            date: Date(),
+            label: "Manual Entry",
+            carbs: Double(truncating: carbs as NSDecimalNumber),
+            fat: Double(truncating: fat as NSDecimalNumber),
+            protein: Double(truncating: protein as NSDecimalNumber),
+            fiber: Double(truncating: fiber as NSDecimalNumber),
+            source: "Manual",
+            isDosed: false,
+            healthKitID: nil
+        )
+        v2DetectedMeals.insert(meal, at: 0)
+    }
+
+    /// Infer a meal label from the time of day.
+    private func inferMealLabel(for date: Date) -> String {
+        let hour = Calendar.current.component(.hour, from: date)
+        switch hour {
+        case 5 ..< 10: return "Breakfast"
+        case 10 ..< 12: return "Morning Snack"
+        case 12 ..< 14: return "Lunch"
+        case 14 ..< 17: return "Afternoon Snack"
+        case 17 ..< 21: return "Dinner"
+        default: return "Snack"
+        }
     }
 }

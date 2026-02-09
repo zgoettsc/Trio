@@ -505,6 +505,10 @@ final class BaseAPSManager: APSManager, Injectable {
                     let crValue: Double = storage.retrieve(OpenAPS.Settings.carbRatios, as: CarbRatios.self)
                         .flatMap { $0.schedule.first.map { NSDecimalNumber(decimal: $0.ratio).doubleValue } } ?? 10
 
+                    // S1: Get DIA in seconds from pump settings for decay-aware IOB
+                    let diaHours = settingsManager.pumpSettings.insulinActionCurve
+                    let diaSeconds = NSDecimalNumber(decimal: diaHours).doubleValue * 3600
+
                     let mealMode = await macroAdaptiveService.runAdaptiveCycle(
                         currentBG: latestBG,
                         bgTrend: bgTrend,
@@ -517,7 +521,8 @@ final class BaseAPSManager: APSManager, Injectable {
                         context: privateContext,
                         userMaxSMBMinutes: settingsManager.preferences.maxSMBBasalMinutes,
                         mealSMBMultiplier: NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue,
-                        bgFloor: NSDecimalNumber(decimal: trioSettings.mealModeBGFloor).doubleValue
+                        bgFloor: NSDecimalNumber(decimal: trioSettings.mealModeBGFloor).doubleValue,
+                        dia: diaSeconds
                     )
 
                     debug(.apsManager, "V2 adaptive cycle: mealMode=\(mealMode.isActive), effectiveSMBMinutes=\(mealMode.effectiveMaxSMBMinutes)")
@@ -805,13 +810,32 @@ final class BaseAPSManager: APSManager, Injectable {
         bolusProgress.send(0)
 
         // V2: Record SMB insulin for meal-attributed IOB tracking
+        // (L3) Attribute proportionally by remaining carbs, not equally
         if settingsManager.settings.useV2MacroAbsorption {
             let activeMealIDs = await MacroAdaptiveService.activeMealIDs(context: privateContext)
             if !activeMealIDs.isEmpty {
-                // Attribute equally across active meals (proportional split)
-                let perMeal = smbUnits / Double(activeMealIDs.count)
+                var remainingPerMeal: [String: Double] = [:]
+                var totalRemaining = 0.0
                 for mealID in activeMealIDs {
-                    macroAdaptiveService.recordMealInsulin(mealID: mealID, units: perMeal)
+                    let info = await macroAdaptiveService.fetchAbsorbedAndRemainingCarbs(
+                        mealID: mealID, context: privateContext
+                    )
+                    remainingPerMeal[mealID] = info.remaining
+                    totalRemaining += info.remaining
+                }
+
+                if totalRemaining > 0 {
+                    for mealID in activeMealIDs {
+                        let proportion = (remainingPerMeal[mealID] ?? 0) / totalRemaining
+                        let attributed = smbUnits * proportion
+                        macroAdaptiveService.recordMealInsulin(mealID: mealID, units: attributed)
+                    }
+                } else {
+                    // Fallback to equal split if no remaining carbs data
+                    let perMeal = smbUnits / Double(activeMealIDs.count)
+                    for mealID in activeMealIDs {
+                        macroAdaptiveService.recordMealInsulin(mealID: mealID, units: perMeal)
+                    }
                 }
                 debug(.apsManager, "V2: Recorded SMB \(String(format: "%.3f", smbUnits))U across \(activeMealIDs.count) meal(s)")
             }
