@@ -839,6 +839,8 @@ Each checkpoint is tagged with the dominant absorption curve at that time. Phase
 
 When a subsequent meal is eaten before all checkpoints complete, individual checkpoints are marked `isClean = false` when the confounding meal's start time falls before that checkpoint's target time. This preserves early checkpoints (1h, 2h) that are clean even when a snack at 3h contaminates later checkpoints. The detection runs automatically during BG backfill.
 
+Small snacks below a macro-load threshold (**< 15g carbs AND < 5g fat**) are excluded from confounding detection, as they don't produce enough glucose impact to meaningfully contaminate late-phase checkpoints. This preserves clean learning data from meals followed by minor snacks.
+
 ### Rule-Based Parameter Recalibration
 
 The `recalculateCurveParameters()` method processes all non-confounded outcomes:
@@ -1359,9 +1361,9 @@ The following items have been identified through external review and are acknowl
 
 **Pre-meal BG slope correction.** The adaptive service (§10) uses cumulative BG delta (`currentBG - bgAtMealStart`) without accounting for pre-existing BG trends. If BG was already rising before the meal (dawn phenomenon, prior snack absorption), the meal is blamed for a rise it didn't cause. This systematically biases the carb curve at breakfast. **Planned fix:** Compute a bounded pre-meal trend from the 15–30 minutes before the meal and subtract its estimated contribution from the actual delta for the first 1–2 hours only, avoiding the noise amplification of long-horizon trend extrapolation.
 
-**Confounding meal detection scaling by macro load.** The confounding detection (§12) treats all overlapping meals identically — a 10g carb snack at hour 3 marks late checkpoints just as dirty as a 100g carb meal. This is conservative (false-dirty reduces signal quantity but doesn't introduce bias) but wastes clean data. **Planned fix:** Exclude meals below a threshold (e.g., <15g carbs and <5g fat) from confounding detection, preserving late-checkpoint data for small snacks that don't meaningfully affect BG.
+**~~Confounding meal detection scaling by macro load.~~** Implemented — small snacks (< 15g carbs AND < 5g fat) are now excluded from confounding detection. See §12 Confounding Meal Detection.
 
-**Export re-derives Garmin contributions with current weights.** The comprehensive export (§12) re-calculates per-metric Garmin contributions using the stored snapshot but current model weights, rather than the weights that were active at meal time. If weights change (via Claude recalibration), the exported breakdown no longer reflects what was actually calculated. **Planned fix:** Store the individual metric contributions or the active weight vector alongside the Garmin snapshot at meal time, so exports always reflect historical reality.
+**~~Export re-derives Garmin contributions with current weights.~~** Implemented — per-metric Garmin contributions are now captured and stored at meal time in `V2MealOutcome.garminContributions`. The export uses stored contributions when available, falling back to re-derivation only for legacy outcomes recorded before this change.
 
 ### Acknowledged Tradeoffs
 

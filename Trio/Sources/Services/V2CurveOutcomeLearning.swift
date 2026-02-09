@@ -37,6 +37,11 @@ struct V2MealOutcome: Codable, Identifiable {
     // Garmin context at meal time (nil if unavailable)
     let garminSnapshot: GarminContextSnapshot?
 
+    // Garmin per-metric contributions captured at meal time (critique item #10).
+    // Stored so exports reflect the weights that were active when the meal was dosed,
+    // not the current weights which may have changed via recalibration.
+    let garminContributions: [V2GarminContribution]?
+
     // Dosing context
     let bgAtMeal: Int
     let carbRatioAtMeal: Double
@@ -71,7 +76,8 @@ struct V2MealOutcome: Codable, Identifiable {
             tauCarb: tauCarb, proteinFactor: proteinFactor, fatTotalEquiv: fatTotalEquiv,
             upfrontPercent: upfrontPercent, curveSuggestedPercent: curveSuggestedPercent,
             insulinDemandFactor: insulinDemandFactor, safeWindowMinutes: safeWindowMinutes,
-            garminSnapshot: garminSnapshot, bgAtMeal: bgAtMeal,
+            garminSnapshot: garminSnapshot, garminContributions: garminContributions,
+            bgAtMeal: bgAtMeal,
             carbRatioAtMeal: carbRatioAtMeal, isfAtMeal: isfAtMeal,
             mealSMBMultiplier: mealSMBMultiplier, mealModeWasActive: mealModeWasActive,
             adaptiveAdjustments: adaptiveAdjustments, checkpoints: checkpoints,
@@ -79,15 +85,23 @@ struct V2MealOutcome: Codable, Identifiable {
         )
     }
 
-    /// Return a copy with a Garmin snapshot attached.
+    /// Return a copy with a Garmin snapshot (and its contributions) attached.
     func withGarminSnapshot(_ snapshot: GarminContextSnapshot?) -> V2MealOutcome {
-        V2MealOutcome(
+        // Compute contributions at attachment time so they reflect current weights
+        let contributions: [V2GarminContribution]? = snapshot.map { _ in
+            GarminSensitivityModel.computeDemandFactor(from: snapshot).contributions.map {
+                V2GarminContribution(metric: $0.metric, value: $0.value,
+                                     impact: $0.impact, description: $0.description)
+            }
+        }
+        return V2MealOutcome(
             id: id, date: date, mealID: mealID,
             carbs: carbs, fat: fat, protein: protein, fiber: fiber,
             tauCarb: tauCarb, proteinFactor: proteinFactor, fatTotalEquiv: fatTotalEquiv,
             upfrontPercent: upfrontPercent, curveSuggestedPercent: curveSuggestedPercent,
             insulinDemandFactor: insulinDemandFactor, safeWindowMinutes: safeWindowMinutes,
-            garminSnapshot: snapshot, bgAtMeal: bgAtMeal,
+            garminSnapshot: snapshot, garminContributions: contributions,
+            bgAtMeal: bgAtMeal,
             carbRatioAtMeal: carbRatioAtMeal, isfAtMeal: isfAtMeal,
             mealSMBMultiplier: mealSMBMultiplier, mealModeWasActive: mealModeWasActive,
             adaptiveAdjustments: adaptiveAdjustments, checkpoints: checkpoints,
@@ -249,6 +263,7 @@ final class V2OutcomeLearningStore {
         stored.checkpointsJSON = try? encoder.encode(outcome.checkpoints)
         stored.adaptiveAdjustmentsJSON = try? encoder.encode(outcome.adaptiveAdjustments)
         stored.garminSnapshotJSON = try? encoder.encode(outcome.garminSnapshot)
+        stored.garminContributionsJSON = try? encoder.encode(outcome.garminContributions)
         return stored
     }
 
@@ -261,6 +276,8 @@ final class V2OutcomeLearningStore {
             .flatMap { try? decoder.decode([V2MealOutcome.AdaptiveAdjustmentRecord].self, from: $0) } ?? []
         let garmin: GarminContextSnapshot? = stored.garminSnapshotJSON
             .flatMap { try? decoder.decode(GarminContextSnapshot.self, from: $0) }
+        let garminContribs: [V2GarminContribution]? = stored.garminContributionsJSON
+            .flatMap { try? decoder.decode([V2GarminContribution].self, from: $0) }
 
         return V2MealOutcome(
             id: id, date: date, mealID: stored.mealID ?? "",
@@ -268,7 +285,8 @@ final class V2OutcomeLearningStore {
             tauCarb: stored.tauCarb, proteinFactor: stored.proteinFactor, fatTotalEquiv: stored.fatTotalEquiv,
             upfrontPercent: stored.upfrontPercent, curveSuggestedPercent: stored.curveSuggestedPercent,
             insulinDemandFactor: stored.insulinDemandFactor, safeWindowMinutes: Int(stored.safeWindowMinutes),
-            garminSnapshot: garmin, bgAtMeal: Int(stored.bgAtMeal),
+            garminSnapshot: garmin, garminContributions: garminContribs,
+            bgAtMeal: Int(stored.bgAtMeal),
             carbRatioAtMeal: stored.carbRatioAtMeal, isfAtMeal: stored.isfAtMeal,
             mealSMBMultiplier: stored.mealSMBMultiplier, mealModeWasActive: stored.mealModeWasActive,
             adaptiveAdjustments: adjustments, checkpoints: checkpoints,
@@ -436,11 +454,14 @@ final class V2OutcomeLearningStore {
             let mealTime = outcomes[i].date
             let windowEnd = mealTime.addingTimeInterval(8 * 3600)
 
-            // Find any overlapping meals
+            // Find any overlapping meals that are large enough to meaningfully confound.
+            // Small snacks (<15g carbs AND <5g fat) don't produce enough glucose impact
+            // to contaminate late-phase checkpoints (critique item #6).
             let overlappingMeals = outcomes.filter { other in
                 other.id != outcomes[i].id &&
                     other.date > mealTime &&
-                    other.date < windowEnd
+                    other.date < windowEnd &&
+                    (other.carbs >= 15 || other.fat >= 5)
             }
 
             var modified = false
@@ -692,6 +713,15 @@ final class V2OutcomeLearningStore {
             proteinThreshold: proteinThreshold
         )
 
+        // Capture Garmin per-metric contributions at meal time (critique item #10)
+        // so exports reflect the weights that were active when dosing occurred.
+        let contributions: [V2GarminContribution]? = garminSnapshot.map { _ in
+            GarminSensitivityModel.computeDemandFactor(from: garminSnapshot).contributions.map {
+                V2GarminContribution(metric: $0.metric, value: $0.value,
+                                     impact: $0.impact, description: $0.description)
+            }
+        }
+
         return V2MealOutcome(
             id: UUID(),
             date: Date(),
@@ -708,6 +738,7 @@ final class V2OutcomeLearningStore {
             insulinDemandFactor: result.insulinDemandFactor,
             safeWindowMinutes: result.safeWindowMinutes,
             garminSnapshot: garminSnapshot,
+            garminContributions: contributions,
             bgAtMeal: bgAtMeal,
             carbRatioAtMeal: carbRatio,
             isfAtMeal: isf,
@@ -804,15 +835,21 @@ final class V2OutcomeLearningStore {
                 context: context
             )
 
-            // Re-derive Garmin sensitivity contributions from stored snapshot
-            let garminResult = GarminSensitivityModel.computeDemandFactor(from: outcome.garminSnapshot)
-            let garminContributions = garminResult.contributions.map {
-                V2GarminContribution(
-                    metric: $0.metric,
-                    value: $0.value,
-                    impact: $0.impact,
-                    description: $0.description
-                )
+            // Use stored contributions if available (critique item #10); fall back to
+            // re-derivation for legacy outcomes recorded before contributions were stored.
+            let garminContributions: [V2GarminContribution]
+            if let stored = outcome.garminContributions {
+                garminContributions = stored
+            } else {
+                let garminResult = GarminSensitivityModel.computeDemandFactor(from: outcome.garminSnapshot)
+                garminContributions = garminResult.contributions.map {
+                    V2GarminContribution(
+                        metric: $0.metric,
+                        value: $0.value,
+                        impact: $0.impact,
+                        description: $0.description
+                    )
+                }
             }
 
             // Compute dosing summary from stored outcome fields

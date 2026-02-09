@@ -42,6 +42,7 @@ public extension V2MealOutcomeStored {
     @NSManaged var checkpointsJSON: Data?
     @NSManaged var adaptiveAdjustmentsJSON: Data?
     @NSManaged var garminSnapshotJSON: Data?
+    @NSManaged var garminContributionsJSON: Data?  // critique item #10: stored at meal time
 }
 
 extension V2MealOutcomeStored: Identifiable {}
