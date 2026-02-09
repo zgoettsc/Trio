@@ -63,6 +63,30 @@ struct V2MacroDosingSettingsView: BaseView {
                         get: { state.v2SafeWindowOverride != nil },
                         set: { state.v2SafeWindowOverride = $0 ? 45 : nil }
                     ))
+
+                    // MARK: Minimum Upfront Floor
+                    HStack {
+                        Text("Min Upfront Covered")
+                        Spacer()
+                        Text(String(format: "%.0f%%", NSDecimalNumber(decimal: state.v2MinUpfrontFloor).doubleValue * 100))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { NSDecimalNumber(decimal: state.v2MinUpfrontFloor).doubleValue },
+                            set: { state.v2MinUpfrontFloor = Decimal($0) }
+                        ),
+                        in: 0.15 ... 0.70,
+                        step: 0.05
+                    )
+                    insulinInfoBox(
+                        increase: "More insulin upfront — use if you spike early after simple carb meals",
+                        decrease: "Less insulin upfront — more aggressive splitting for all meals"
+                    )
+
+                    Text("Minimum upfront bolus percentage. Low-fat meals get up to 80%; this sets the floor for high-fat meals (≥50g fat). Default 25%.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .listRowBackground(Color.chart)
@@ -250,6 +274,34 @@ struct V2MacroDosingSettingsView: BaseView {
                     let exProteinEquiv = 35 * exProteinFactor
                     let exFatEquiv = MacroAbsorptionEngine.fatCarbEquivalent(fatGrams: 28, maxCoeff: fatCoefficient)
                     let exTau = MacroAbsorptionEngine.carbTau(baseTau: carbTau, fatGrams: 28, fiberGrams: 12, fiberCoefficient: fiberCoefficient)
+                    let exSafeWindow = Double(state.v2SafeWindowOverride ?? (state.insulinType == "ultraRapid" ? 30 : 45))
+                    let exCDF = MacroAbsorptionEngine.gammaCDFValue(tau: exTau, atMinutes: exSafeWindow)
+                    let exFloorVal = NSDecimalNumber(decimal: state.v2MinUpfrontFloor).doubleValue
+                    let exFatMin = MacroAbsorptionEngine.fatScaledMinUpfront(fatGrams: 28, floor: exFloorVal)
+                    let exUpfrontPct = max(exCDF, exFatMin)
+
+                    HStack {
+                        Text("Upfront bolus")
+                        Spacer()
+                        Text(String(format: "%.1fg of 65g (%.0f%%)", 65 * exUpfrontPct, exUpfrontPct * 100))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("  CDF at safe window")
+                        Spacer()
+                        Text(String(format: "%.1f%%", exCDF * 100))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+
+                    HStack {
+                        Text("  Fat-scaled floor")
+                        Spacer()
+                        Text(String(format: "%.1f%% (28g fat)", exFatMin * 100))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
 
                     HStack {
                         Text("Protein glucose-equiv")
@@ -389,6 +441,24 @@ struct V2MacroDosingSettingsView: BaseView {
                     }
 
                     Toggle("Claude AI Recalibration", isOn: $state.claudeRecalibrationEnabled)
+
+                    if state.claudeRecalibrationEnabled {
+                        HStack {
+                            Text("Analysis Window")
+                            Spacer()
+                            Picker("", selection: $state.recalibrationWindowDays) {
+                                Text("7 days").tag(7)
+                                Text("14 days").tag(14)
+                                Text("21 days").tag(21)
+                                Text("30 days").tag(30)
+                            }
+                            .pickerStyle(.menu)
+                        }
+
+                        Text("Longer windows give Claude more data points for pattern detection but may include stale context after setting changes. Default 14 days.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .listRowBackground(Color.chart)
 

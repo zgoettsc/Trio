@@ -380,10 +380,12 @@ When fat delays carbohydrate absorption (shifting τ from 35 to 60+ minutes), a 
 
 ### Curve-Driven Split Calculation
 
-The V2 engine uses the Gamma CDF to calculate exactly what fraction of carbs will be absorbed within a "safe window" — the period during which the upfront bolus insulin is most active:
+The V2 engine uses the Gamma CDF to calculate the fraction of carbs absorbed within a "safe window," then applies a **fat-scaled minimum upfront floor** to prevent under-bolusing simple carb meals:
 
 ```
-upfrontPercent = CDF(safeWindow) = 1 - (1 + safeWindow/τ) × exp(-safeWindow/τ)
+cdfPercent = CDF(safeWindow) = 1 - (1 + safeWindow/τ) × exp(-safeWindow/τ)
+minUpfront = lerp(0.80, floor, clamp(fatGrams / 50, 0, 1))
+effectivePercent = max(cdfPercent, minUpfront)
 ```
 
 The safe window depends on insulin type:
@@ -393,28 +395,40 @@ The safe window depends on insulin type:
 | Ultra-rapid | Fiasp, Lyumjev | 30–45 min | 30 min |
 | Rapid-acting | Humalog, Novolog | 60–90 min | 45 min |
 
+The `floor` is user-configurable (default 25%, range 15–70%). Low-fat meals get up to 80% upfront; the floor sets the absolute minimum for high-fat (≥50g) meals. This ensures simple carb meals get close to standard AID full-bolus behavior while high-fat meals still get aggressive splitting.
+
+| Fat | minUpfront (25% floor) | CDF (rapid-acting) | Effective |
+|-----|----------------------|---------------------|-----------|
+| 0g  | 80.0% | varies | **80.0%** |
+| 3g  | 76.7% | 33.9% | **76.7%** |
+| 28g | 49.2% | 19.6% | **49.2%** |
+| 50g | 25.0% | 12.3% | **25.0%** |
+
 **Example — Pizza (65g carbs, 30g fat, rapid-acting insulin):**
 
 ```
 τ = 35 + (30 × 0.8) = 59 min
-safeWindow = 45 min
-CDF(45) = 1 - (1 + 45/59) × exp(-45/59) = 1 - 1.763 × 0.467 = 0.177
+CDF(45) = 0.177
+fatScaledMin = lerp(0.80, 0.25, 30/50) = 0.47
+effectivePercent = max(0.177, 0.47) = 0.47
 
-→ 17.7% upfront (11.5g as immediate bolus)
-→ 82.3% as future entries (53.5g delivered via SMBs over ~4.7 hours)
+→ 47.0% upfront (30.6g as immediate bolus)
+→ 53.0% as future entries (34.5g via SMBs over ~4.7 hours)
 ```
 
 Compare to a low-fat meal (65g carbs, 3g fat):
 
 ```
 τ = 35 + (3 × 0.8) = 37.4 min
-CDF(45) = 1 - (1 + 45/37.4) × exp(-45/37.4) = 1 - 2.203 × 0.300 = 0.339
+CDF(45) = 0.339
+fatScaledMin = lerp(0.80, 0.25, 3/50) = 0.767
+effectivePercent = max(0.339, 0.767) = 0.767
 
-→ 33.9% upfront (22.0g as immediate bolus)
-→ 66.1% as future entries (43.0g via SMBs)
+→ 76.7% upfront (49.9g as immediate bolus)
+→ 23.3% as future entries (15.1g via SMBs)
 ```
 
-The engine automatically gives a larger upfront bolus for fast-absorbing meals and a smaller one for fat-heavy meals. The user can override this with a slider.
+The engine automatically gives a larger upfront bolus for fast-absorbing simple carb meals and progressively smaller upfront amounts as fat content increases. The user can override with a manual upfront slider (bypasses the fat-scaled floor) or adjust the floor via the "Min Upfront Covered" slider in settings.
 
 ### Safety Invariant
 
@@ -769,7 +783,9 @@ if deadZoneLow ≤ BG ≤ deadZoneHigh: error = 0            (within dead zone, 
 
 ### Claude AI Recalibration
 
-When enabled, the `SensitivityRecalibrationService` exports the last 7 days of outcomes (with full Garmin context) to the Claude API for pattern analysis. This runs weekly or on manual trigger (Settings → V2 Macro Dosing → AI Insights).
+When enabled, the `SensitivityRecalibrationService` exports recent outcomes (with full Garmin context) to the Claude API for pattern analysis. The analysis window is configurable: 7, 14, 21, or 30 days (default 14). This runs weekly or on manual trigger (Settings → V2 Macro Dosing → AI Insights).
+
+The 14-day default balances data volume against staleness — 7 days typically yields only 12-15 clean checkpoints after confounding exclusion, which is insufficient for reliable pattern detection. At 2-3 meals/day, 14 days provides ~25-35 clean data points, enough for Claude to separate signal from noise.
 
 #### What Claude Analyzes
 
@@ -777,6 +793,7 @@ Claude receives a structured data prompt containing:
 - Current model parameters (carbTau, proteinFactor, fatCoefficient, fiberCoefficient, protein threshold/plateau)
 - Each meal outcome: macros (carbs, fat, protein, fiber), curve parameters used, BG checkpoints with phase attribution, adaptive adjustments applied, Garmin context snapshot, dosing context (CR, ISF, demand factor)
 - Confounding meal flags and per-checkpoint clean/dirty status
+- Per-phase sample size summary: clean/total checkpoints and meal count for each curve phase (carb, protein, fat)
 
 Claude identifies patterns the rule-based system cannot detect:
 - Time-of-day insulin sensitivity patterns
@@ -793,6 +810,12 @@ The system prompt defines Claude's role as a diabetes insulin sensitivity calibr
 
 ```json
 {
+  "analysis_window_days": 14,
+  "per_phase_sample_sizes": {
+    "carb": { "clean_checkpoints": 42, "total_checkpoints": 48, "meals_with_data": 28 },
+    "protein": { "clean_checkpoints": 19, "total_checkpoints": 22, "meals_with_data": 19 },
+    "fat": { "clean_checkpoints": 6, "total_checkpoints": 8, "meals_with_data": 6 }
+  },
   "curve_parameter_updates": {
     "carb_tau": { "current": 35, "recommended": 33, "rationale": "...", "confidence": "high" },
     "protein_factor": { "current": 0.35, "recommended": 0.38, "rationale": "...", "confidence": "medium" },
@@ -815,9 +838,11 @@ The system prompt defines Claude's role as a diabetes insulin sensitivity calibr
   ],
   "explanation": "Natural language summary of findings and recommendations",
   "confidence": "medium",
-  "meals_analyzed": 14
+  "meals_analyzed": 28
 }
 ```
+
+The `per_phase_sample_sizes` block lets users judge recommendation quality: a fat coefficient recommendation based on 6 clean checkpoints deserves more scrutiny than a carb tau recommendation based on 42. Claude is instructed to lower its confidence when sample sizes are small (< 10 clean checkpoints for a phase).
 
 #### Validation Pipeline
 
@@ -873,6 +898,7 @@ The V2 Macro Dosing settings page (Settings → V2 Macro Dosing) provides direct
 - Enable/disable toggle
 - Insulin type picker (rapid-acting / ultra-rapid)
 - Safe window display with optional custom override (15–90 min stepper)
+- Min Upfront Covered slider (15–70%, step 5%) — fat-scaled minimum upfront bolus floor
 
 **Section: Meal-Mode SMB Enhancement**
 - SMB Multiplier slider (1.0–3.0x, step 0.1)
@@ -902,6 +928,7 @@ A live preview shows how the current settings would process a reference meal (65
 - Record Meal Outcomes toggle
 - Recorded meal count and BG checkpoint count
 - Claude AI Recalibration toggle
+- Analysis Window picker (7 / 14 / 21 / 30 days, default 14) — visible when Claude recalibration is enabled
 
 **Section: Analysis**
 - Link to Meal Outcome Accuracy page
@@ -913,33 +940,37 @@ A live preview shows how the current settings would process a reference meal (65
 ### Example A: Simple Carb Meal (Rice Bowl)
 
 **Meal:** 75g carbs, 3g fat, 8g protein
-**Settings:** Defaults, rapid-acting insulin, no Garmin
+**Settings:** Defaults (25% floor), rapid-acting insulin, no Garmin
 
 **Carb curve:**
 ```
 τ = 35 + (3 × 0.8) = 37.4 min
-CDF(45) = 1 - (1 + 45/37.4) × exp(-45/37.4) = 0.339
-Upfront: 75 × 0.339 = 25.4g → bolus
-Remaining: 75 × 0.661 = 49.6g → future entries over 177 min
+CDF(45) = 0.339
+fatScaledMin = lerp(0.80, 0.25, 3/50) = 0.767
+effectivePercent = max(0.339, 0.767) = 0.767  ← floor wins
+Upfront: 75 × 0.767 = 57.5g → bolus
+Remaining: 75 × 0.233 = 17.5g → future entries over 177 min
 ```
 
 **Protein:** 8g < 15g threshold → 0g equivalent, no entries
 
 **Fat:** 3g < 5g threshold → 0g equivalent, no entries
 
-**Total:** 25.4g bolus now, 49.6g via SMBs over ~3 hours. No delayed fat/protein effect. This behaves similarly to V1 for a simple carb meal.
+**Total:** 57.5g bolus now, 17.5g via SMBs over ~3 hours. No delayed fat/protein effect. The fat-scaled floor ensures this simple carb meal gets close to standard AID behavior (77% upfront).
 
 ### Example B: Mixed Meal (Cheeseburger and Fries)
 
 **Meal:** 65g carbs, 28g fat, 35g protein
-**Settings:** Defaults, rapid-acting insulin, no Garmin
+**Settings:** Defaults (25% floor), rapid-acting insulin, no Garmin
 
 **Carb curve:**
 ```
 τ = 35 + (28 × 0.8) = 57.4 min
-CDF(45) = 1 - (1 + 45/57.4) × exp(-45/57.4) = 0.196
-Upfront: 65 × 0.196 = 12.7g → bolus
-Remaining: 65 × 0.804 = 52.3g → future entries over 272 min (4.5h)
+CDF(45) = 0.196
+fatScaledMin = lerp(0.80, 0.25, 28/50) = 0.492
+effectivePercent = max(0.196, 0.492) = 0.492  ← floor wins
+Upfront: 65 × 0.492 = 32.0g → bolus
+Remaining: 65 × 0.508 = 33.0g → future entries over 272 min (4.5h)
 ```
 
 **Protein:**
@@ -955,8 +986,8 @@ fatEquiv = 28 × 0.69 = 19.3g
 → 28 entries from 120-540 min (Gaussian, peak at 6h)
 ```
 
-**Total effective carbs:** 12.7 + 52.3 + 9.8 + 19.3 = 94.1g
-**Total delayed:** 81.4g over 9 hours
+**Total effective carbs:** 32.0 + 33.0 + 9.8 + 19.3 = 94.1g
+**Total delayed:** 62.1g over 9 hours
 
 **Compare to V1:**
 ```
@@ -965,11 +996,11 @@ V1: FPU = (35×4 + 28×9) / 100 = 3.92
     carbEquiv = (35×4 + 28×9) / 10 × 0.5 = 19.6g linear over 5 hours
     Upfront bolus: full 65g
 
-V2 total delayed: 81.4g (4.2× more than V1's 19.6g)
-V2 upfront: 12.7g (vs V1's 65g)
+V2 total delayed: 62.1g (3.2× more than V1's 19.6g)
+V2 upfront: 32.0g (vs V1's 65g)
 ```
 
-The V2 system shifts insulin from early delivery (where it causes a dip) to later delivery (where it's actually needed).
+The V2 system delivers roughly half the carbs upfront for this mixed meal and shifts the rest to match the delayed absorption profile.
 
 ### Example C: High-Fat Meal with Bad Sleep (Pizza Night)
 
@@ -995,9 +1026,11 @@ demandFactor = 1.0 / 0.67 = 1.49
 **Carb curve:**
 ```
 τ = 35 + (40 × 0.8) = 67 min
-CDF(30) = 1 - (1 + 30/67) × exp(-30/67) = 0.092  (ultra-rapid: 30 min window)
-Upfront: 80 × 0.092 × 1.49 = 11.0g → bolus
-Remaining: 80 × 0.908 × 1.49 = 108.2g → future entries
+CDF(30) = 0.092  (ultra-rapid: 30 min window)
+fatScaledMin = lerp(0.80, 0.25, 40/50) = 0.36
+effectivePercent = max(0.092, 0.36) = 0.36  ← floor wins
+Upfront: 80 × 0.36 × 1.49 = 42.9g → bolus
+Remaining: 80 × 0.64 × 1.49 = 76.3g → future entries
 ```
 
 **Protein:**
@@ -1013,7 +1046,7 @@ fatEquiv = 40 × 0.69 = 27.6g
 × demandFactor: 27.6 × 1.49 = 41.1g → Gaussian entries
 ```
 
-**Total:** 11.0g bolus now, 154.5g via SMBs over 9 hours. The Garmin context adds 49% more insulin across the board — appropriate for a sleep-deprived, stressed state eating a large fatty meal.
+**Total:** 42.9g bolus now, 122.6g via SMBs over 9 hours. The fat-scaled floor raises the upfront from 9.2% to 36%, while the Garmin context adds 49% more insulin across the board — appropriate for a sleep-deprived, stressed state eating a large fatty meal.
 
 ---
 

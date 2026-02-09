@@ -266,7 +266,8 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     upfrontPercent: upfrontOverride,
                     insulinType: insulinType,
                     curveParameters: curveParams,
-                    safeWindowOverride: trioSettings.v2SafeWindowMinutes
+                    safeWindowOverride: trioSettings.v2SafeWindowMinutes,
+                    minUpfrontFloor: NSDecimalNumber(decimal: trioSettings.v2MinUpfrontFloor).doubleValue
                 )
 
                 // Expose the engine's mealID so outcome tracking can link to these entries

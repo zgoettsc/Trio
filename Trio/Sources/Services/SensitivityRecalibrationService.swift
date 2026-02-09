@@ -95,16 +95,24 @@ final class SensitivityRecalibrationService {
     2. Recommend curve parameter adjustments based on systematic over/under-prediction
     3. Recommend Garmin sensitivity weight adjustments if outcomes suggest certain metrics matter more/less
     4. Flag any concerning patterns (frequent lows, delayed highs correlating with specific contexts)
+    5. Report per-phase sample sizes so users can judge recommendation quality
 
     IMPORTANT:
     - Be conservative — small parameter changes compound over many meals
     - Separate noise from signal — only recommend changes with clear evidence from multiple meals
     - Consider confounding factors before attributing error to model parameters
     - When uncertain, recommend no change rather than a potentially harmful one
+    - Lower your confidence when sample sizes are small (< 10 clean checkpoints for a phase)
 
     OUTPUT FORMAT:
     Respond with a valid JSON object:
     {
+      "analysis_window_days": N,
+      "per_phase_sample_sizes": {
+        "carb": {"clean_checkpoints": N, "total_checkpoints": N, "meals_with_data": N},
+        "protein": {"clean_checkpoints": N, "total_checkpoints": N, "meals_with_data": N},
+        "fat": {"clean_checkpoints": N, "total_checkpoints": N, "meals_with_data": N}
+      },
       "curve_parameter_updates": {
         "carb_tau": {"current": X, "recommended": Y, "rationale": "...", "confidence": "high|medium|low"} | null,
         "protein_factor": {...} | null,
@@ -135,9 +143,11 @@ final class SensitivityRecalibrationService {
 
     /// Run weekly recalibration analysis.
     /// Returns nil if insufficient data or API unavailable.
+    /// - Parameter lastDays: Must come from `settingsManager.settings.recalibrationWindowDays`.
+    ///   No default — callers must pass the user's setting to prevent silent desync.
     func runRecalibration(
         apiKey: String,
-        lastDays: Int = 7
+        lastDays: Int
     ) async -> RecalibrationResult? {
         let export = outcomeStore.exportForRecalibration(lastDays: lastDays)
 
@@ -232,6 +242,20 @@ final class SensitivityRecalibrationService {
                 prompt += "NOTE: Confounding meal detected in observation window\n"
             }
         }
+
+        // Per-phase sample size summary
+        prompt += "\n--- PER-PHASE SAMPLE SIZES ---\n"
+        let allCheckpoints = export.outcomes.flatMap(\.checkpoints)
+        for phase in ["carb", "protein", "fat"] {
+            let phaseEnum: V2BGCheckpoint.CurvePhase = phase == "carb" ? .carb : phase == "protein" ? .protein : .fat
+            let total = allCheckpoints.filter { $0.curvePhase == phaseEnum && $0.bgValue != nil }
+            let clean = total.filter(\.isClean)
+            let mealsWithData = export.outcomes.filter { meal in
+                meal.checkpoints.contains { $0.curvePhase == phaseEnum && $0.bgValue != nil && $0.isClean }
+            }
+            prompt += "\(phase.capitalized) phase: \(clean.count) clean checkpoints (of \(total.count) total) across \(mealsWithData.count) meals\n"
+        }
+        prompt += "\nAnalysis window: \(export.periodDays) days\n"
 
         return prompt
     }

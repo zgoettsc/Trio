@@ -23,9 +23,11 @@ extension Settings {
         @Published var v2SafeWindowOverride: Int?
         @Published var mealModeSMBMultiplier: Decimal = 2.0
         @Published var mealModeBGFloor: Decimal = 90
+        @Published var v2MinUpfrontFloor: Decimal = 0.25
         @Published var garminEnabled = false
         @Published var v2OutcomeLearningEnabled = true
         @Published var claudeRecalibrationEnabled = true
+        @Published var recalibrationWindowDays: Int = 14
 
         private(set) var buildNumber = ""
         private(set) var versionNumber = ""
@@ -44,9 +46,11 @@ extension Settings {
             subscribeSetting(\.v2SafeWindowMinutes, on: $v2SafeWindowOverride) { v2SafeWindowOverride = $0 }
             subscribeSetting(\.mealModeSMBMultiplier, on: $mealModeSMBMultiplier) { mealModeSMBMultiplier = $0 }
             subscribeSetting(\.mealModeBGFloor, on: $mealModeBGFloor) { mealModeBGFloor = $0 }
+            subscribeSetting(\.v2MinUpfrontFloor, on: $v2MinUpfrontFloor) { v2MinUpfrontFloor = $0 }
             subscribeSetting(\.garminEnabled, on: $garminEnabled) { garminEnabled = $0 }
             subscribeSetting(\.v2OutcomeLearningEnabled, on: $v2OutcomeLearningEnabled) { v2OutcomeLearningEnabled = $0 }
             subscribeSetting(\.claudeRecalibrationEnabled, on: $claudeRecalibrationEnabled) { claudeRecalibrationEnabled = $0 }
+            subscribeSetting(\.recalibrationWindowDays, on: $recalibrationWindowDays) { recalibrationWindowDays = $0 }
 
             broadcaster.register(SettingsObserver.self, observer: self)
 

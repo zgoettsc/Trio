@@ -753,7 +753,7 @@ final class V2OutcomeLearningStore {
     // MARK: - Export for Claude Recalibration
 
     /// Export recent outcomes in a structured format for Claude analysis.
-    func exportForRecalibration(lastDays: Int = 7) -> V2RecalibrationExport {
+    func exportForRecalibration(lastDays: Int = 14) -> V2RecalibrationExport {
         let cutoff = Calendar.current.date(byAdding: .day, value: -lastDays, to: Date()) ?? Date()
         let recent = loadAll().filter { $0.date >= cutoff }
         let params = loadParameters()

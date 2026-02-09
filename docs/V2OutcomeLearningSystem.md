@@ -190,10 +190,10 @@ The learning system adjusts the five curve parameters based on BG errors at each
 
 **How it works:**
 
-1. Exports the last 7 days of V2MealOutcome records plus current parameters as structured JSON
+1. Exports recent V2MealOutcome records (configurable: 7/14/21/30 days, default 14) plus current parameters as structured JSON, including per-phase sample size summaries
 2. Sends the data to the Claude API with a specialized system prompt
 3. Claude analyzes patterns across meals: time-of-day effects, specific food combinations, systematic over/under-prediction, Garmin sensitivity correlations
-4. Claude returns recommended parameter changes with confidence levels (high/medium/low) and rationale
+4. Claude returns recommended parameter changes with confidence levels (high/medium/low), rationale, and per-phase sample sizes so users can judge recommendation quality
 5. Only high-confidence recommendations are applied; medium-confidence are logged; low-confidence are discarded
 6. Updated parameters are saved back to the store
 
