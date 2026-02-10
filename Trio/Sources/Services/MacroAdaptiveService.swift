@@ -228,6 +228,25 @@ final class MacroAdaptiveService {
     /// BG ceiling: don't chase extreme highs
     private static let highBGGuard: Double = 300.0
 
+    // MARK: - Low BG Safety Thresholds (Gate 6)
+    //
+    // Two-tier response to protect against phantom COB when BG is critically low.
+    // As future entries' timestamps become "now", oref sees them as COB and may predict
+    // BG will rise — reducing the aggressiveness of low-suspend. These tiers intervene
+    // by zeroing or deleting future entries so oref can respond to the actual low.
+
+    /// Tier 1: Zero imminent entries (next 60min) when BG is below this AND trending down.
+    /// Prevents near-term phantom COB from blunting oref's low-suspend response.
+    private static let tier1BGThreshold: Double = 80.0
+    private static let tier1TrendThreshold: Double = -2.0 // mg/dL per 5min
+    private static let tier1WindowMinutes: Double = 60.0
+
+    /// Tier 2: Delete ALL future entries — emergency low protection.
+    /// Accepts going high later over going dangerously low now.
+    private static let tier2BGHard: Double = 65.0           // unconditional
+    private static let tier2BGSoft: Double = 70.0            // + fast drop required
+    private static let tier2TrendThreshold: Double = -3.0    // mg/dL per 5min
+
     /// Maximum CGM age for adjustments (seconds)
     private static let maxCGMAge: TimeInterval = 15 * 60 // 15 minutes
 
@@ -418,6 +437,23 @@ final class MacroAdaptiveService {
             bgFloor: bgFloor,
             compositeDemandFactor: maxComposite
         )
+
+        // Gate 6: Low BG Safety — runs BEFORE normal adaptive logic (ignores damping interval).
+        // When BG is critically low, zero or delete future entries so oref's low-suspend
+        // isn't blunted by phantom COB materializing from the V3 entry pipeline.
+        if let bg = currentBG, hasActiveMeals {
+            let safetyActioned = await evaluateLowBGSafety(
+                currentBG: bg,
+                bgTrend: bgTrend,
+                activeMealIDs: activeMealIDs,
+                context: context
+            )
+            if safetyActioned {
+                // Safety took action — skip normal adaptive adjustments this cycle.
+                // Return base meal-mode (which will already be inactive due to Gate 2/3).
+                return mealMode
+            }
+        }
 
         // Adaptive entry adjustment (only if we have data and active meals)
         guard let bg = currentBG,
@@ -731,6 +767,137 @@ final class MacroAdaptiveService {
                 }
             } catch {
                 debugPrint("MacroAdaptiveService: failed to scale entries for meal \(mealID): \(error)")
+            }
+        }
+    }
+
+    // MARK: - Low BG Safety (Gate 6): Two-Tier Entry Protection
+    //
+    // When BG is critically low, future V3 entries can interfere with oref's low-suspend
+    // response. As each entry's timestamp becomes "now", oref sees it as COB and predicts
+    // BG will rise — potentially delaying zero-temp or re-enabling SMBs prematurely.
+    //
+    // Tier 1 (BG < 80 + falling ≥ 2 mg/dL/5min): Zero entries in the next 60 minutes.
+    //   Prevents imminent phantom COB while preserving distant entries for recovery.
+    //
+    // Tier 2 (BG < 65, or BG < 70 + falling ≥ 3 mg/dL/5min): Delete ALL future entries.
+    //   Emergency response — accept going high later over going dangerously low now.
+
+    /// Evaluate and execute low-BG safety protection.
+    /// Returns true if any safety action was taken (caller should skip normal adaptive logic).
+    func evaluateLowBGSafety(
+        currentBG: Double,
+        bgTrend: Double?,
+        activeMealIDs: Set<String>,
+        context: NSManagedObjectContext
+    ) async -> Bool {
+        let trend = bgTrend ?? 0.0
+
+        // Tier 2 check first (more aggressive — takes priority)
+        let tier2Triggered = currentBG < Self.tier2BGHard ||
+            (currentBG < Self.tier2BGSoft && trend <= Self.tier2TrendThreshold)
+
+        if tier2Triggered {
+            debug(
+                .apsManager,
+                "⚠️ SAFETY GATE 6 TIER 2: BG \(String(format: "%.0f", currentBG)) " +
+                "trend \(String(format: "%.1f", trend)) — DELETING all future entries " +
+                "for \(activeMealIDs.count) active meal(s)"
+            )
+            for mealID in activeMealIDs {
+                await deleteAllFutureEntries(mealID: mealID, context: context)
+                // Clean up adaptive state for this meal since entries are gone
+                mealCompleted(mealID: mealID)
+            }
+            return true
+        }
+
+        // Tier 1 check
+        let tier1Triggered = currentBG < Self.tier1BGThreshold && trend <= Self.tier1TrendThreshold
+
+        if tier1Triggered {
+            debug(
+                .apsManager,
+                "⚠️ SAFETY GATE 6 TIER 1: BG \(String(format: "%.0f", currentBG)) " +
+                "trend \(String(format: "%.1f", trend)) — zeroing entries in next " +
+                "\(Int(Self.tier1WindowMinutes))min for \(activeMealIDs.count) active meal(s)"
+            )
+            for mealID in activeMealIDs {
+                await zeroImminentEntries(mealID: mealID, windowMinutes: Self.tier1WindowMinutes, context: context)
+            }
+            return true
+        }
+
+        return false
+    }
+
+    /// Tier 1: Zero (set carbs = 0) all future entries within the next `windowMinutes`.
+    /// Entries beyond the window are preserved for when BG recovers.
+    private func zeroImminentEntries(
+        mealID: String,
+        windowMinutes: Double,
+        context: NSManagedObjectContext
+    ) async {
+        let now = Date()
+        let windowEnd = now.addingTimeInterval(windowMinutes * 60)
+
+        await context.perform {
+            let fetchRequest: NSFetchRequest<CarbEntryStored> = CarbEntryStored.fetchRequest()
+            fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                NSPredicate(format: "fpuID == %@", UUID(uuidString: mealID)! as CVarArg),
+                NSPredicate(format: "isFPU == YES"),
+                NSPredicate(format: "date > %@", now as NSDate),
+                NSPredicate(format: "date <= %@", windowEnd as NSDate)
+            ])
+
+            do {
+                let entries = try context.fetch(fetchRequest)
+                guard !entries.isEmpty else { return }
+
+                for entry in entries {
+                    entry.carbs = 0
+                }
+                if context.hasChanges {
+                    try context.save()
+                }
+                debug(
+                    .apsManager,
+                    "  Gate 6 Tier 1: zeroed \(entries.count) entries for meal \(mealID.prefix(8)) " +
+                    "(next \(Int(windowMinutes))min)"
+                )
+            } catch {
+                debugPrint("MacroAdaptiveService: Gate 6 Tier 1 failed for meal \(mealID): \(error)")
+            }
+        }
+    }
+
+    /// Tier 2: Delete ALL future entries for a meal. Emergency low protection.
+    private func deleteAllFutureEntries(
+        mealID: String,
+        context: NSManagedObjectContext
+    ) async {
+        await context.perform {
+            let fetchRequest: NSFetchRequest<NSFetchRequestResult> = CarbEntryStored.fetchRequest()
+            fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                NSPredicate(format: "fpuID == %@", UUID(uuidString: mealID)! as CVarArg),
+                NSPredicate(format: "isFPU == YES"),
+                NSPredicate(format: "date > %@", Date() as NSDate)
+            ])
+
+            let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+            deleteRequest.resultType = .resultTypeCount
+
+            do {
+                let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
+                let count = result?.result as? Int ?? 0
+                if count > 0 {
+                    debug(
+                        .apsManager,
+                        "  Gate 6 Tier 2: DELETED \(count) future entries for meal \(mealID.prefix(8))"
+                    )
+                }
+            } catch {
+                debugPrint("MacroAdaptiveService: Gate 6 Tier 2 failed for meal \(mealID): \(error)")
             }
         }
     }
