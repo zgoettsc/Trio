@@ -103,11 +103,12 @@ struct MacroAbsorptionEngine {
         let tauCarb = carbTau(baseTau: params.effectiveCarbTau, fatGrams: fat, fiberGrams: fiber, fiberCoefficient: params.effectiveFiberCoefficient)
         let curveSuggestedPercent = gammaCDFValue(tau: tauCarb, atMinutes: Double(safeWindowMinutes))
 
-        // Fat-scaled minimum upfront: prevents simple carb meals from being under-bolused.
-        // Low-fat meals get ~80% upfront (close to standard AID); high-fat meals get the floor.
+        // Composition-aware minimum upfront: analyzes full macro mix to determine
+        // how much insulin to deliver upfront. High-carb meals get near-full bolus;
+        // complex mixed meals get appropriate splitting. 50% absolute floor.
         // User override bypasses this — if someone explicitly sets upfront %, use it exactly.
-        let fatMinUpfront = fatScaledMinUpfront(fatGrams: fat, floor: minUpfrontFloor ?? 0.25)
-        let effectivePercent = upfrontPercent ?? max(curveSuggestedPercent, fatMinUpfront)
+        let compositionMin = compositionAwareMinUpfront(carbs: carbs, fat: fat, protein: protein, fiber: fiber)
+        let effectivePercent = upfrontPercent ?? max(curveSuggestedPercent, compositionMin)
 
         // Only generate entries for carbs AFTER the safe window.
         // The upfront portion is covered by the bolus — no entries for it.
@@ -123,7 +124,7 @@ struct MacroAbsorptionEngine {
                 mealTime: mealTime,
                 startAfterMinutes: safeWindowMinutes,
                 endMinutes: Int(carbDuration),
-                intervalMinutes: 10,
+                intervalMinutes: 15,
                 mealID: mealID,
                 note: "carb-absorption"
             )
@@ -177,12 +178,18 @@ struct MacroAbsorptionEngine {
             fatTotalEquiv = 0
         }
 
+        // --- Consolidate entries into 15-minute buckets ---
+        // Multiple curves (carb, protein, fat) may produce entries at overlapping times.
+        // Merge entries that fall within the same 15-minute window to reduce total count.
+        // A typical HFHP meal drops from ~77 entries to ~30.
+        let consolidatedEntries = consolidateEntries(futureEntries, bucketMinutes: 15, mealTime: mealTime, mealID: mealID)
+
         // --- Apply insulin demand factor to ALL future entries ---
         // insulinDemandFactor > 1.0 means more resistant (e.g., 1.25 = bad sleep)
         // Multiply entries to increase insulin demand. Self-documenting.
         let adjustedEntries: [CarbsEntry]
         if abs(insulinDemandFactor - 1.0) > 0.01 {
-            adjustedEntries = futureEntries.map { entry in
+            adjustedEntries = consolidatedEntries.map { entry in
                 CarbsEntry(
                     id: entry.id,
                     createdAt: entry.createdAt,
@@ -197,7 +204,7 @@ struct MacroAbsorptionEngine {
                 )
             }
         } else {
-            adjustedEntries = futureEntries
+            adjustedEntries = consolidatedEntries
         }
 
         // Upfront carbs for bolus recommendation (NOT stored as entries)
@@ -245,19 +252,60 @@ struct MacroAbsorptionEngine {
         return fatGrams * effectiveCoeff
     }
 
-    // MARK: - Fat-Scaled Minimum Upfront Percentage
+    // MARK: - Composition-Aware Minimum Upfront Percentage
 
-    /// Compute a fat-scaled minimum upfront bolus percentage.
+    /// Compute a composition-aware minimum upfront bolus percentage.
     ///
-    /// The Gamma CDF alone under-boluses simple carb meals (e.g., rice bowl gets only
-    /// 34% upfront). This function provides a floor that scales with fat content:
-    /// - 0g fat → 80% upfront (close to standard AID full-bolus behavior)
-    /// - 50g+ fat → `floor` (default 25%, aggressive splitting for HFHP meals)
+    /// The old fat-only approach under-bolused carb-dominant meals. This replacement
+    /// analyzes the full macro mix: the higher the carb fraction, the more upfront
+    /// insulin — because the whole point of split dosing is to cover late fat/protein
+    /// effects for complex meals, NOT to under-cover carb-dominant meals.
     ///
-    /// The formula is a linear interpolation: `lerp(0.80, floor, clamp(fatGrams/50, 0, 1))`
+    /// Key principles:
+    /// - Pure carb meals (juice, rice) → 90-100% upfront (behave like normal oref)
+    /// - Carb-dominant mixed meals (sandwich) → 70-80% upfront
+    /// - Balanced mixed meals (pizza) → 55-65% upfront
+    /// - Fat/protein dominant meals (steak with small side) → 50% upfront (absolute floor)
+    /// - Fiber slows absorption modestly (up to 8% reduction)
+    /// - Fat further modulates via gastric emptying delay (up to 15% reduction)
     ///
-    /// The effective upfront percent is `max(CDF, fatScaledMinUpfront)`, so the CDF
-    /// still matters for very high-fat meals where it may exceed the floor.
+    /// 50% is the absolute floor — we never deliver less than half upfront.
+    static func compositionAwareMinUpfront(
+        carbs: Double,
+        fat: Double,
+        protein: Double,
+        fiber: Double = 0
+    ) -> Double {
+        let totalMacros = carbs + fat + protein
+        guard totalMacros > 0 else { return 0.90 } // no macros = correction only
+
+        // Carb dominance ratio: what fraction of the meal is carbs by weight
+        let carbRatio = carbs / totalMacros
+
+        // Base upfront from macro composition:
+        // carbRatio 1.0 → 95% (pure carb, near-full bolus)
+        // carbRatio 0.5 → ~70%
+        // carbRatio 0.3 → ~55%
+        // carbRatio 0.0 → 50% floor
+        let compositionBase = 0.50 + carbRatio * 0.45  // 50% to 95%
+
+        // Fiber adjustment: high fiber slows glucose absorption modestly
+        // Up to 8% reduction for very high fiber (>15g beyond threshold)
+        let fiberReduction = min(0.08, max(0, fiber - 5) * 0.005)
+
+        // Fat gastric emptying delay: high fat further reduces upfront
+        // but capped at 15% reduction — the composition ratio already accounts
+        // for fat as a fraction of the meal
+        let fatDelay = min(0.15, fat / 50.0 * 0.15)
+
+        let adjusted = compositionBase - fiberReduction - fatDelay
+
+        // Absolute floor: never less than 50% upfront
+        return max(0.50, min(1.0, adjusted))
+    }
+
+    /// Legacy fat-scaled minimum upfront — kept for reference but no longer called.
+    @available(*, deprecated, message: "Use compositionAwareMinUpfront instead")
     static func fatScaledMinUpfront(
         fatGrams: Double,
         floor: Double = 0.25,
@@ -483,6 +531,62 @@ struct MacroAbsorptionEngine {
                 fat: 0,
                 protein: 0,
                 note: "fat-resistance",
+                enteredBy: CarbsEntry.local,
+                isFPU: true,
+                fpuID: mealID
+            )
+        }
+    }
+
+    // MARK: - Entry Consolidation
+
+    /// Merge entries from all three curves into unified time buckets.
+    /// Entries within the same bucket window are summed into a single entry,
+    /// drastically reducing total entry count (e.g., 77 → ~30 for a HFHP dinner).
+    /// The note field combines the source types (e.g., "carb-absorption+protein-gluconeogenesis").
+    static func consolidateEntries(
+        _ entries: [CarbsEntry],
+        bucketMinutes: Int,
+        mealTime: Date,
+        mealID: String
+    ) -> [CarbsEntry] {
+        guard !entries.isEmpty, bucketMinutes > 0 else { return entries }
+
+        let bucketSeconds = Double(bucketMinutes * 60)
+
+        // Group entries by time bucket (offset from mealTime in bucket intervals)
+        var buckets: [Int: (carbs: Double, notes: Set<String>)] = [:]
+
+        for entry in entries {
+            guard let entryDate = entry.actualDate else { continue }
+            let offsetSeconds = entryDate.timeIntervalSince(mealTime)
+            let bucketIndex = Int(offsetSeconds / bucketSeconds)
+            let carbValue = Double(truncating: entry.carbs as NSDecimalNumber)
+            let note = entry.note ?? "combined"
+
+            if var existing = buckets[bucketIndex] {
+                existing.carbs += carbValue
+                existing.notes.insert(note)
+                buckets[bucketIndex] = existing
+            } else {
+                buckets[bucketIndex] = (carbs: carbValue, notes: [note])
+            }
+        }
+
+        // Convert buckets back to entries, sorted by time
+        return buckets.sorted(by: { $0.key < $1.key }).compactMap { bucketIndex, bucket in
+            guard bucket.carbs >= 0.1 else { return nil }
+            let bucketDate = mealTime.addingTimeInterval(Double(bucketIndex) * bucketSeconds)
+            let combinedNote = bucket.notes.sorted().joined(separator: "+")
+
+            return CarbsEntry(
+                id: UUID().uuidString,
+                createdAt: mealTime,
+                actualDate: bucketDate,
+                carbs: Decimal(round(bucket.carbs * 10) / 10),
+                fat: 0,
+                protein: 0,
+                note: combinedNote,
                 enteredBy: CarbsEntry.local,
                 isFPU: true,
                 fpuID: mealID

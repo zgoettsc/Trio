@@ -20,6 +20,8 @@ struct V2DosePreviewView: View {
     @State private var demandOverride: Double = 1.0
     @State private var approach: DosingApproach = .normal
     @State private var showConfirmDialog = false
+    @State private var manualBolusText: String = ""
+    @FocusState private var bolusFieldFocused: Bool
 
     enum DosingApproach: String, CaseIterable {
         case conservative = "Conservative"
@@ -56,6 +58,16 @@ struct V2DosePreviewView: View {
     /// Total effective carb coverage
     private var totalCoverage: Double {
         combinedCarbs + proteinEquiv + fatEquiv
+    }
+
+    /// The recommended total bolus (what "Use Rec" would set)
+    private var recommendedUnits: Double {
+        Double(truncating: state.insulinCalculated as NSDecimalNumber)
+    }
+
+    /// BG correction component = recommended - carb coverage
+    private var correctionUnits: Double {
+        recommendedUnits - upfrontUnits
     }
 
     /// Whether any selected meal is late (>1h old)
@@ -140,7 +152,17 @@ struct V2DosePreviewView: View {
             // Treatment plan
             Section(header: Text("Treatment Plan")) {
                 HStack {
-                    Text("Bolus now")
+                    Text("Recommended bolus")
+                        .fontWeight(.medium)
+                    Spacer()
+                    Text(String(format: "%.1f U", recommendedUnits))
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("  Carb coverage")
+                        .font(.subheadline)
                     Spacer()
                     Text(String(
                         format: "%.1fU for %.0fg (%.0f%% upfront)",
@@ -148,7 +170,19 @@ struct V2DosePreviewView: View {
                         upfrontGrams,
                         upfrontPercent * 100
                     ))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
+                }
+
+                if abs(correctionUnits) > 0.05 {
+                    HStack {
+                        Text("  BG correction + IOB")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(String(format: "%+.1fU", correctionUnits))
+                            .font(.subheadline)
+                            .foregroundStyle(correctionUnits > 0 ? .orange : .green)
+                    }
                 }
 
                 HStack {
@@ -252,7 +286,7 @@ struct V2DosePreviewView: View {
                         }
                         .font(.subheadline)
 
-                        Slider(value: $demandOverride, in: 0.6 ... 1.7, step: 0.1)
+                        Slider(value: $demandOverride, in: 0.7 ... 1.3, step: 0.05)
                             .onChange(of: demandOverride) { _, _ in
                                 recalculate()
                             }
@@ -272,35 +306,37 @@ struct V2DosePreviewView: View {
             }
             .listRowBackground(Color.chart)
 
-            // Bolus entry
+            // Bolus entry — editable field so user can type a custom amount
             Section {
                 HStack {
-                    Text("Bolus")
+                    Text("Insulin to deliver")
                     Spacer()
-                    Text(String(format: "%.1f U", Double(truncating: state.amount as NSDecimalNumber)))
+                    TextField("0.0", text: $manualBolusText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(colorScheme == .dark ? .white : .blue)
+                        .frame(width: 70)
+                        .focused($bolusFieldFocused)
+                        .onChange(of: manualBolusText) { _, newValue in
+                            if let val = Double(newValue), val >= 0 {
+                                state.amount = Decimal(val)
+                            } else if newValue.isEmpty {
+                                state.amount = 0
+                            }
+                        }
+                    Text("U")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
 
                     Button("Use Rec.") {
                         state.amount = state.insulinCalculated
+                        manualBolusText = formatDecimal(state.insulinCalculated)
+                        bolusFieldFocused = false
                     }
                     .font(.caption)
-                    .disabled(state.amount == state.insulinCalculated || state.insulinCalculated == 0)
+                    .disabled(state.insulinCalculated == 0)
                     .buttonStyle(.bordered)
-                }
-
-                if abs(Double(truncating: state.insulinCalculated as NSDecimalNumber) - upfrontUnits) > 0.05 {
-                    HStack {
-                        Image(systemName: "info.circle")
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                        Text(String(
-                            format: "Rec. %.1fU includes BG correction + IOB",
-                            Double(truncating: state.insulinCalculated as NSDecimalNumber)
-                        ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
                 }
 
                 HStack {
@@ -378,9 +414,10 @@ struct V2DosePreviewView: View {
 
     private func initializeDefaults() {
         // Set upfront percent from V2 engine suggestion
-        upfrontPercent = state.v2CurveSuggestedPercent ?? 0.20
+        upfrontPercent = state.v2CurveSuggestedPercent ?? 0.50
         demandOverride = state.v2DemandFactor
         state.amount = state.insulinCalculated
+        manualBolusText = formatDecimal(state.insulinCalculated)
     }
 
     private func recalculate() {
@@ -397,6 +434,7 @@ struct V2DosePreviewView: View {
             await state.updateForecasts()
             state.insulinCalculated = await state.calculateInsulin()
             state.amount = state.insulinCalculated
+            manualBolusText = formatDecimal(state.insulinCalculated)
         }
     }
 
@@ -427,6 +465,10 @@ struct V2DosePreviewView: View {
             }
             return "\(hours)h \(remaining)m ago"
         }
+    }
+
+    private func formatDecimal(_ value: Decimal) -> String {
+        String(format: "%.1f", Double(truncating: value as NSDecimalNumber))
     }
 
     private func macroBlock(_ label: String, value: Double, unit: String, color: Color) -> some View {

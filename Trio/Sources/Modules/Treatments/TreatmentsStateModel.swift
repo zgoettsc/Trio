@@ -977,6 +977,63 @@ extension Treatments {
                         carbsStorage.v2FullCarbsForEngine = fullCarbs
                         carbsStorage.v2UpfrontPercentOverride = upfrontOverride
                     }
+
+                    // V2 outcome learning: create pending outcome if not already set
+                    // (Cronometer path creates it in applyCronometerRecommendation;
+                    //  V2 Macros tab path needs to create it here)
+                    let hasPending = await MainActor.run { v2PendingOutcome != nil }
+                    if !hasPending, trioSettings.v2OutcomeLearningEnabled {
+                        let mealCarbs = await MainActor.run { v2OriginalFullCarbs ?? Double(truncating: carbs as NSDecimalNumber) }
+                        let mealFat = await MainActor.run { Double(truncating: fat as NSDecimalNumber) }
+                        let mealProtein = await MainActor.run { Double(truncating: protein as NSDecimalNumber) }
+                        let mealFiber = await MainActor.run { Double(truncating: fiber as NSDecimalNumber) }
+                        let demandFactor = await MainActor.run { v2DemandFactor }
+                        let upfrontPct = await MainActor.run { v2UpfrontPercentOverride ?? v2CurveSuggestedPercent }
+                        let bgAtMeal = await MainActor.run { Int(NSDecimalNumber(decimal: currentBG).intValue) }
+                        let crAtMeal = await MainActor.run { NSDecimalNumber(decimal: currentCarbRatio).doubleValue }
+                        let isfAtMeal = await MainActor.run { NSDecimalNumber(decimal: currentISF).doubleValue }
+                        let smbMultiplier = NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue
+
+                        let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
+                        let safeWindow = trioSettings.v2SafeWindowMinutes ?? insulinType.defaultSafeWindowMinutes
+                        let outcomeParams = V2OutcomeLearningStore.shared.loadParameters()
+
+                        let outcome = V2MealOutcome(
+                            id: UUID(),
+                            date: Date(),
+                            mealID: "pending",
+                            carbs: mealCarbs,
+                            fat: mealFat,
+                            protein: mealProtein,
+                            fiber: mealFiber,
+                            tauCarb: outcomeParams.effectiveCarbTau,
+                            proteinFactor: outcomeParams.effectiveProteinFactor,
+                            fatTotalEquiv: MacroAbsorptionEngine.fatCarbEquivalent(
+                                fatGrams: mealFat,
+                                maxCoeff: outcomeParams.effectiveFatTotalCoeff
+                            ),
+                            upfrontPercent: upfrontPct ?? 0.65,
+                            curveSuggestedPercent: upfrontPct ?? 0.65,
+                            insulinDemandFactor: demandFactor,
+                            safeWindowMinutes: safeWindow,
+                            garminSnapshot: nil,
+                            garminContributions: nil,
+                            bgAtMeal: bgAtMeal,
+                            carbRatioAtMeal: crAtMeal,
+                            isfAtMeal: isfAtMeal,
+                            mealSMBMultiplier: smbMultiplier,
+                            mealModeWasActive: true,
+                            adaptiveAdjustments: [],
+                            checkpoints: V2BGCheckpoint.computePhases(
+                                carbs: mealCarbs,
+                                fat: mealFat,
+                                protein: mealProtein,
+                                proteinThreshold: outcomeParams.effectiveProteinThreshold
+                            ),
+                            hasConfoundingMeal: false
+                        )
+                        await MainActor.run { v2PendingOutcome = outcome }
+                    }
                 }
 
                 if isCarbsPresent || isFatPresent || isProteinPresent {
@@ -1680,7 +1737,7 @@ extension Treatments.StateModel {
             fiber: totalFiber,
             mealTime: meals.first?.date ?? Date(),
             insulinDemandFactor: v2DemandFactor,
-            upfrontPercent: nil, // Let the engine calculate from CDF + fat-scaled floor
+            upfrontPercent: nil, // Let the engine calculate from CDF + composition-aware floor
             insulinType: insulinType,
             curveParameters: curveParams,
             safeWindowOverride: trioSettings.v2SafeWindowMinutes,

@@ -179,59 +179,7 @@ extension Treatments {
                     }
                     .buttonStyle(.plain)
 
-                    // Open Cronometer to log food (records snapshot baseline first)
-                    Button(action: {
-                        Task {
-                            await state.recordCronometerBaseline()
-                            if let url = URL(string: "cronometer://") {
-                                openURL(url)
-                            }
-                        }
-                    }) {
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.up.forward.app")
-                                .font(.caption2)
-                            Text("Log")
-                                .font(.caption.weight(.medium))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 6)
-                        .background(Color.green.opacity(0.15))
-                        .foregroundColor(.green)
-                        .cornerRadius(8)
-                    }
-                    .buttonStyle(.plain)
-
-                    // Cronometer meal import + dosing recommendation
-                    Button(action: {
-                        Task {
-                            await state.fetchCronometerMeal()
-                            if state.cronometerMeal != nil {
-                                state.showCronometerSheet = true
-                            }
-                        }
-                    }) {
-                        HStack(spacing: 3) {
-                            if state.isFetchingCronometerMeal {
-                                ProgressView()
-                                    .controlSize(.mini)
-                            } else {
-                                Image(systemName: "fork.knife")
-                                    .font(.caption2)
-                            }
-                            Text("Crono")
-                                .font(.caption.weight(.medium))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 6)
-                        .background(Color.orange.opacity(0.15))
-                        .foregroundColor(.orange)
-                        .cornerRadius(8)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(state.isFetchingCronometerMeal)
+                    // Cronometer buttons removed — V2 Macros tab handles meal detection and dosing directly
 
                     Button(action: {
                         state.carbs += 5
@@ -426,80 +374,7 @@ extension Treatments {
                     }
                 )
             }
-            .sheet(isPresented: $state.showCronometerSheet) {
-                if let meal = state.cronometerMeal {
-                    CronometerMealRecommendationView(
-                        meal: meal,
-                        recommendedCarbs: state.cronometerRecommendedCarbs,
-                        recommendedFat: state.cronometerRecommendedFat,
-                        recommendedProtein: state.cronometerRecommendedProtein,
-                        adjustmentFactor: state.cronometerAdjustmentFactor,
-                        fpuCarbEquivalents: state.cronometerFPUCarbEquivalents,
-                        fpuDurationHours: state.cronometerFPUDurationHours,
-                        predictedEventualBG: state.cronometerPredictedEventualBG,
-                        predictedMinBG: state.cronometerPredictedMinBG,
-                        currentBG: Int(NSDecimalNumber(decimal: state.currentBG).intValue),
-                        units: state.units.rawValue,
-                        glucoseHistory: state.glucoseFromPersistence.prefix(48).compactMap { g in
-                            guard let date = g.date else { return nil }
-                            return CronometerMealRecommendationView.GlucosePoint(date: date, value: Int(g.glucose))
-                        },
-                        predictionCurve: state.cronometerPredictionCurve,
-                        outcomeStats: state.cronometerOutcomeStats,
-                        mealPrediction: state.cronometerMealPrediction,
-                        isLateMeal: state.cronometerMealIsLate,
-                        minutesSinceMeal: state.cronometerMealMinutesAgo,
-                        decayAdjustedCarbs: state.cronometerDecayAdjustedCarbs,
-                        isFactorLocked: state.cronometerFactorLocked,
-                        v2UpfrontCarbs: state.v2UpfrontCarbs,
-                        v2UpfrontPercent: state.v2UpfrontPercent,
-                        v2CurveSuggestedPercent: state.v2CurveSuggestedPercent,
-                        v2TauCarb: state.v2TauCarb,
-                        v2FatTotalEquiv: state.v2FatTotalEquiv,
-                        v2SafeWindowMinutes: state.v2SafeWindowMinutes,
-                        v2DemandFactor: state.v2DemandFactor,
-                        v2CarbRatio: state.carbRatio > 0 ? Double(truncating: state.carbRatio as NSDecimalNumber) : nil,
-                        onApply: { carbs, fat, protein, fiber in
-                            state.applyCronometerRecommendation(carbs: carbs, fat: fat, protein: protein, fiber: fiber)
-                            handleDebouncedInput()
-                        },
-                        onAdjustFactor: { newFactor in
-                            state.adjustCronometerFactor(newFactor)
-                        },
-                        onToggleFactorLock: {
-                            state.toggleCronometerFactorLock()
-                        },
-                        onAdjustV2Upfront: { newPercent in
-                            state.adjustV2UpfrontPercent(newPercent)
-                        },
-                        onDismiss: {
-                            state.showCronometerSheet = false
-                        }
-                    )
-                }
-            }
-            .sheet(isPresented: $state.showMealPickerSheet) {
-                CronometerMealPickerView(
-                    meals: state.cronometerAvailableMeals,
-                    alreadyDosedMealDates: state.cronometerAlreadyDosedDates,
-                    onSelect: { meal in
-                        Task {
-                            await state.selectCronometerMeal(meal)
-                        }
-                    },
-                    onDismiss: {
-                        state.showMealPickerSheet = false
-                    }
-                )
-            }
-            .alert("Cronometer", isPresented: Binding(
-                get: { state.cronometerError != nil },
-                set: { if !$0 { state.cronometerError = nil } }
-            )) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(state.cronometerError ?? "")
-            }
+            // Cronometer sheets removed — V2 Macros tab handles meal detection and dosing directly
         }
 
         // MARK: - V1 Content (original treatment view, without MacroDecayChart)

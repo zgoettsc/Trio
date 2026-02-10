@@ -7,8 +7,12 @@ import Foundation
 //
 // Outputs an insulinDemandFactor: multiply entries by this value.
 //   1.0  = normal day
-//   1.25 = 25% more insulin needed (bad sleep, high stress)
-//   0.83 = 17% less insulin needed (good recovery, active yesterday)
+//   1.15 = 15% more insulin needed (bad sleep, high stress)
+//   0.90 = 10% less insulin needed (good recovery, active yesterday)
+//
+// V3 Change: Individual impacts scaled ~50% down from original values so that
+// multiple signals contribute meaningfully before hitting the ±30% demand cap.
+// Demand factor clamped directly to [0.70, 1.30] for a symmetric ±30% range.
 
 // NOTE: Impact weights below are initial heuristics, not regression-derived (#8).
 // They are directionally grounded in literature (Spiegel 1999, Donga 2010, etc.)
@@ -20,8 +24,8 @@ struct GarminSensitivityModel {
 
     /// Result of the sensitivity calculation, with breakdown for UI display.
     struct SensitivityResult {
-        let sensitivityFactor: Double       // 0.60-1.40 (internal)
-        let insulinDemandFactor: Double     // 0.71-1.67 (used in code)
+        let sensitivityFactor: Double       // raw (internal, pre-clamp)
+        let insulinDemandFactor: Double     // 0.70-1.30 (used in code, ±30% cap)
         let contributions: [Contribution]   // breakdown of what affected the result
 
         struct Contribution {
@@ -62,17 +66,17 @@ struct GarminSensitivityModel {
             let desc: String
             switch sleep {
             case ..<40:
-                impact = -0.22
-                desc = "Terrible sleep: 22% more resistant"
+                impact = -0.11
+                desc = "Terrible sleep: 11% more resistant"
             case ..<55:
-                impact = -0.15
-                desc = "Poor sleep: 15% more resistant"
-            case ..<70:
                 impact = -0.08
-                desc = "Fair sleep: 8% more resistant"
+                desc = "Poor sleep: 8% more resistant"
+            case ..<70:
+                impact = -0.04
+                desc = "Fair sleep: 4% more resistant"
             case 85...:
-                impact = 0.05
-                desc = "Great sleep: 5% more sensitive"
+                impact = 0.03
+                desc = "Great sleep: 3% more sensitive"
             default:
                 impact = 0
                 desc = "Normal sleep range"
@@ -86,11 +90,11 @@ struct GarminSensitivityModel {
             let impact: Double
             let desc: String
             if totalSleep < 300 {
-                impact = -0.10
-                desc = "Less than 5h sleep: 10% more resistant"
-            } else if totalSleep < 360 {
                 impact = -0.05
-                desc = "Less than 6h sleep: 5% more resistant"
+                desc = "Less than 5h sleep: 5% more resistant"
+            } else if totalSleep < 360 {
+                impact = -0.03
+                desc = "Less than 6h sleep: 3% more resistant"
             } else {
                 impact = 0
                 desc = "Adequate sleep duration"
@@ -116,17 +120,17 @@ struct GarminSensitivityModel {
             let desc: String
             switch bb {
             case ..<15:
-                impact = -0.18
-                desc = "Critically depleted: 18% more resistant"
+                impact = -0.09
+                desc = "Critically depleted: 9% more resistant"
             case ..<30:
-                impact = -0.12
-                desc = "Low recovery: 12% more resistant"
+                impact = -0.06
+                desc = "Low recovery: 6% more resistant"
             case ..<50:
-                impact = -0.05
-                desc = "Below average recovery: 5% more resistant"
+                impact = -0.03
+                desc = "Below average recovery: 3% more resistant"
             case 75...:
-                impact = 0.05
-                desc = "Well recovered: 5% more sensitive"
+                impact = 0.03
+                desc = "Well recovered: 3% more sensitive"
             default:
                 impact = 0
                 desc = "Normal recovery"
@@ -143,11 +147,11 @@ struct GarminSensitivityModel {
             let impact: Double
             let desc: String
             if stress > 75 {
-                impact = -0.08
-                desc = "High acute stress: 8% more resistant"
-            } else if stress > 60 {
                 impact = -0.04
-                desc = "Moderate stress: 4% more resistant"
+                desc = "High acute stress: 4% more resistant"
+            } else if stress > 60 {
+                impact = -0.02
+                desc = "Moderate stress: 2% more resistant"
             } else {
                 impact = 0
                 desc = "Low stress"
@@ -164,11 +168,11 @@ struct GarminSensitivityModel {
             let impact: Double
             let desc: String
             if avgStress > 60 {
-                impact = -0.06
-                desc = "Sustained high stress today: 6% more resistant"
-            } else if avgStress > 45 {
                 impact = -0.03
-                desc = "Elevated stress today: 3% more resistant"
+                desc = "Sustained high stress today: 3% more resistant"
+            } else if avgStress > 45 {
+                impact = -0.02
+                desc = "Elevated stress today: 2% more resistant"
             } else {
                 impact = 0
                 desc = "Normal average stress"
@@ -191,14 +195,14 @@ struct GarminSensitivityModel {
             let impact: Double
             let desc: String
             if hrDelta > 12 {
-                impact = -0.12
-                desc = "Significantly elevated RHR: 12% more resistant"
+                impact = -0.06
+                desc = "Significantly elevated RHR: 6% more resistant"
             } else if hrDelta > 8 {
-                impact = -0.07
-                desc = "Mildly elevated RHR: 7% more resistant"
+                impact = -0.04
+                desc = "Mildly elevated RHR: 4% more resistant"
             } else if hrDelta < -5 {
-                impact = 0.03
-                desc = "Low RHR (well-rested): 3% more sensitive"
+                impact = 0.02
+                desc = "Low RHR (well-rested): 2% more sensitive"
             } else {
                 impact = 0
                 desc = "Normal resting HR"
@@ -219,14 +223,14 @@ struct GarminSensitivityModel {
             let impact: Double
             let desc: String
             if hrvDelta < -20 {
-                impact = -0.08
-                desc = "HRV >20% below baseline: 8% more resistant"
-            } else if hrvDelta < -10 {
                 impact = -0.04
-                desc = "HRV >10% below baseline: 4% more resistant"
+                desc = "HRV >20% below baseline: 4% more resistant"
+            } else if hrvDelta < -10 {
+                impact = -0.02
+                desc = "HRV >10% below baseline: 2% more resistant"
             } else if hrvDelta > 15 {
-                impact = 0.03
-                desc = "HRV well above baseline: 3% more sensitive"
+                impact = 0.02
+                desc = "HRV well above baseline: 2% more sensitive"
             } else {
                 impact = 0
                 desc = "Normal HRV"
@@ -250,14 +254,14 @@ struct GarminSensitivityModel {
             let impact: Double
             let desc: String
             if yesterdayCal > 600 {
-                impact = 0.15
-                desc = "Very active yesterday: 15% more sensitive"
+                impact = 0.08
+                desc = "Very active yesterday: 8% more sensitive"
             } else if yesterdayCal > 400 {
-                impact = 0.10
-                desc = "Active yesterday: 10% more sensitive"
-            } else if yesterdayCal > 250 {
                 impact = 0.05
-                desc = "Moderately active yesterday: 5% more sensitive"
+                desc = "Active yesterday: 5% more sensitive"
+            } else if yesterdayCal > 250 {
+                impact = 0.03
+                desc = "Moderately active yesterday: 3% more sensitive"
             } else {
                 impact = 0
                 desc = "Low activity yesterday"
@@ -279,11 +283,11 @@ struct GarminSensitivityModel {
             let impact: Double
             let desc: String
             if todayCal > 400 {
-                impact = 0.08
-                desc = "Active today: 8% more sensitive"
-            } else if todayCal > 200 {
                 impact = 0.04
-                desc = "Moderately active today: 4% more sensitive"
+                desc = "Active today: 4% more sensitive"
+            } else if todayCal > 200 {
+                impact = 0.02
+                desc = "Moderately active today: 2% more sensitive"
             } else {
                 impact = 0
                 desc = "Low activity today"
@@ -305,11 +309,11 @@ struct GarminSensitivityModel {
             let impact: Double
             let desc: String
             if vigorousMinutes > 45 {
-                impact = 0.08
-                desc = "Heavy exercise yesterday: 8% more sensitive"
-            } else if vigorousMinutes > 20 {
                 impact = 0.04
-                desc = "Vigorous exercise yesterday: 4% more sensitive"
+                desc = "Heavy exercise yesterday: 4% more sensitive"
+            } else if vigorousMinutes > 20 {
+                impact = 0.02
+                desc = "Vigorous exercise yesterday: 2% more sensitive"
             } else {
                 impact = 0
                 desc = "Light exercise yesterday"
@@ -325,16 +329,15 @@ struct GarminSensitivityModel {
             }
         }
 
-        // --- Clamp sensitivity factor ---
-        let clampedFactor = max(0.60, min(1.40, factor))
-
-        // --- Convert to insulin demand factor ---
-        // insulinDemandFactor = 1.0 / sensitivityFactor
-        // Higher demand = more insulin needed. Self-documenting.
-        let demandFactor = 1.0 / clampedFactor
+        // --- Convert to insulin demand factor and clamp directly to ±30% ---
+        // V3 Change: Clamp the demand factor symmetrically instead of the sensitivity
+        // factor. This gives a clean ±30% range (0.70 to 1.30) without the asymmetry
+        // that the 1/x inversion previously caused (old range was 0.71 to 1.67).
+        let rawDemandFactor = 1.0 / factor
+        let demandFactor = max(0.70, min(1.30, rawDemandFactor))
 
         return SensitivityResult(
-            sensitivityFactor: clampedFactor,
+            sensitivityFactor: factor,
             insulinDemandFactor: demandFactor,
             contributions: contributions
         )
