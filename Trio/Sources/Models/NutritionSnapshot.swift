@@ -523,10 +523,43 @@ final class NutritionSnapshotStore {
     /// and honey over 5 minutes produces one meal event with the combined macros.
     func inferredMealEvents(for date: Date) -> [InferredMealEvent] {
         let snapshots = snapshotsForDate(date).sorted { $0.timestamp < $1.timestamp }
-        guard snapshots.count >= 2 else { return [] }
+        guard !snapshots.isEmpty else { return [] }
 
-        // First pass: compute raw deltas between consecutive snapshots
+        // Bootstrap: if only one snapshot exists (no background observer fired before the meal),
+        // use a midnight baseline of zeros — same approach as recordAndComputeLatestMeal().
+        // This returns the entire day's cumulative intake as a single meal event.
+        if snapshots.count == 1 {
+            let snap = snapshots[0]
+            let carbDelta = snap.cumulativeCarbs
+            let fatDelta = snap.cumulativeFat
+            let proteinDelta = snap.cumulativeProtein
+            let fiberDelta = snap.cumulativeFiber
+            guard carbDelta > 1 || fatDelta > 1 || proteinDelta > 1 else { return [] }
+            return [InferredMealEvent(
+                detectedAt: snap.timestamp,
+                carbsDelta: max(0, carbDelta),
+                fatDelta: max(0, fatDelta),
+                proteinDelta: max(0, proteinDelta),
+                fiberDelta: max(0, fiberDelta)
+            )]
+        }
+
+        // First pass: compute raw deltas between consecutive snapshots.
+        // Start with a midnight baseline for the first snapshot, so food logged before
+        // the first observer fire isn't lost. This mirrors recordAndComputeLatestMeal().
         var rawEvents: [(detectedAt: Date, carbsDelta: Double, fatDelta: Double, proteinDelta: Double, fiberDelta: Double)] = []
+
+        // Check first snapshot against midnight baseline
+        let first = snapshots[0]
+        if first.cumulativeCarbs > 1 || first.cumulativeFat > 1 || first.cumulativeProtein > 1 {
+            rawEvents.append((
+                detectedAt: first.timestamp,
+                carbsDelta: max(0, first.cumulativeCarbs),
+                fatDelta: max(0, first.cumulativeFat),
+                proteinDelta: max(0, first.cumulativeProtein),
+                fiberDelta: max(0, first.cumulativeFiber)
+            ))
+        }
 
         for i in 1 ..< snapshots.count {
             let prev = snapshots[i - 1]

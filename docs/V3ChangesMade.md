@@ -145,3 +145,26 @@ This was excessive and cluttered the oref input.
 **File:** `V2DosePreviewView.swift`
 
 **Minor change:** Updated the demand override slider range from [0.6, 1.7] to [0.7, 1.3] with 0.05 step size, matching the new ±30% Garmin cap. Default upfront percent initialization changed from 0.20 to 0.50 to match the new composition-aware floor.
+
+---
+
+## 9. V2 Meal Detection — Midnight Baseline Fix
+
+**File:** `NutritionSnapshot.swift`
+
+**Problem:** The V2 Macros tab couldn't detect any meals from Cronometer, even though the old Cronometer page (now removed) detected them fine. This was a pre-existing bug affecting both old and new code.
+
+**Root cause:** `inferredMealEvents(for:)` required at least 2 snapshots to compute deltas (`guard snapshots.count >= 2 else { return [] }`). The V2 tab's detection flow:
+
+1. `loadV2DetectedMeals()` calls `fetchLatestMealDelta()` → saves snapshot #1
+2. Then calls `inferredMealEvents(forLastHours: 8)` → finds only 1 snapshot → returns `[]`
+
+The Cronometer page's `recordAndComputeLatestMeal()` handled this differently — when only 1 snapshot exists, it uses a **midnight baseline of zeros** and computes the delta from that. So the Cronometer page worked, but the V2 tab (which uses `inferredMealEvents`) did not.
+
+This breaks whenever the HealthKit background observer hasn't been firing (airplane mode, app wasn't backgrounded, first day of use, etc.), leaving no pre-meal baseline snapshot.
+
+**Change:**
+1. **Single-snapshot bootstrap:** When only 1 snapshot exists for a day, treat midnight (all zeros) as the baseline and return the cumulative values as a single meal event — matching `recordAndComputeLatestMeal()`'s behavior
+2. **First-snapshot baseline:** When 2+ snapshots exist but the first one already has non-zero cumulative values (observer fired late, after food was already logged), include a delta from midnight to the first snapshot so that food isn't silently lost
+
+**Result:** V2 Macros tab now detects meals reliably regardless of whether background observer snapshots exist. The midnight baseline ensures the first meal of the day is always visible.
