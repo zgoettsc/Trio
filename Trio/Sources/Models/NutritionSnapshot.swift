@@ -448,6 +448,11 @@ final class NutritionSnapshotStore {
         return docs.appendingPathComponent("nutrition_snapshots.json")
     }
 
+    private var doseTimestampsURL: URL {
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appendingPathComponent("v2_dose_timestamps.json")
+    }
+
     private init() {}
 
     func loadSnapshots() -> [NutritionSnapshot] {
@@ -471,6 +476,34 @@ final class NutritionSnapshotStore {
         if let data = try? JSONEncoder().encode(snapshots) {
             try? data.write(to: snapshotsURL, options: .atomic)
         }
+    }
+
+    // MARK: - Dose Timestamps
+    // When a V2 dose is applied, we record the timestamp. This "closes" the current
+    // meal group so any new deltas — even within 15 minutes — become a separate meal.
+    // Example: dinner logged and dosed, then dessert logged 13 minutes later → two meals.
+
+    /// Record that a V2 dose was applied at this moment.
+    func recordDoseTimestamp() {
+        var timestamps = loadDoseTimestamps()
+        timestamps.append(Date())
+        // Prune old (keep last 14 days)
+        let cutoff = Date().addingTimeInterval(-maxSnapshotAge)
+        timestamps = timestamps.filter { $0 > cutoff }
+        if let data = try? JSONEncoder().encode(timestamps) {
+            try? data.write(to: doseTimestampsURL, options: .atomic)
+        }
+    }
+
+    /// Load all dose timestamps.
+    func loadDoseTimestamps() -> [Date] {
+        guard let data = try? Data(contentsOf: doseTimestampsURL),
+              let timestamps = try? JSONDecoder().decode([Date].self, from: data)
+        else {
+            return []
+        }
+        let cutoff = Date().addingTimeInterval(-maxSnapshotAge)
+        return timestamps.filter { $0 > cutoff }
     }
 
     func snapshotsForDate(_ date: Date) -> [NutritionSnapshot] {
@@ -517,7 +550,13 @@ final class NutritionSnapshotStore {
 
         guard !rawEvents.isEmpty else { return [] }
 
-        // Second pass: merge events within 15 minutes of each other into single meals
+        // Load dose timestamps to detect group boundaries.
+        // A dose "closes" the current meal: any subsequent delta — even within 15 minutes —
+        // becomes a new meal. Example: dinner dosed, then dessert logged 13 min later → two meals.
+        let doseTimestamps = loadDoseTimestamps().sorted()
+
+        // Second pass: merge events within 15 minutes of each other into single meals,
+        // UNLESS a dose occurred between consecutive events (which closes the group).
         var meals: [InferredMealEvent] = []
         var currentCarbs = rawEvents[0].carbsDelta
         var currentFat = rawEvents[0].fatDelta
@@ -526,9 +565,14 @@ final class NutritionSnapshotStore {
         var currentTime = rawEvents[0].detectedAt
 
         for i in 1 ..< rawEvents.count {
-            let gap = rawEvents[i].detectedAt.timeIntervalSince(rawEvents[i - 1].detectedAt)
+            let prevTime = rawEvents[i - 1].detectedAt
+            let thisTime = rawEvents[i].detectedAt
+            let gap = thisTime.timeIntervalSince(prevTime)
 
-            if gap <= Self.mealGroupingWindow {
+            // Check if a dose was applied between these two events
+            let doseBetween = doseTimestamps.contains { $0 > prevTime && $0 <= thisTime }
+
+            if gap <= Self.mealGroupingWindow, !doseBetween {
                 // Same meal — accumulate macros
                 currentCarbs += rawEvents[i].carbsDelta
                 currentFat += rawEvents[i].fatDelta
@@ -536,7 +580,7 @@ final class NutritionSnapshotStore {
                 currentFiber += rawEvents[i].fiberDelta
                 currentTime = rawEvents[i].detectedAt
             } else {
-                // New meal — save the accumulated meal and start fresh
+                // New meal — either time gap exceeded OR a dose was applied between events
                 meals.append(InferredMealEvent(
                     detectedAt: currentTime,
                     carbsDelta: currentCarbs,

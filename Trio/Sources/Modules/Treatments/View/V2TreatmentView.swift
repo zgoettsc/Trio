@@ -224,6 +224,9 @@ struct V2TreatmentView: View {
         }
         .scrollContentBackground(.hidden)
         .background(appState.trioBackgroundColor(for: colorScheme))
+        .refreshable {
+            await state.loadV2DetectedMeals()
+        }
         .onAppear {
             Task { await state.loadV2DetectedMeals() }
         }
@@ -243,14 +246,19 @@ struct V2TreatmentView: View {
     }
 
     private func applySelectionToState() {
-        // Use combined macros for the bolus calculator display,
-        // but the V2 engine will process each meal independently via selectedMeals.
-        state.carbs = Decimal(combinedCarbs)
+        let meals = selectedMealsList
+        // Pass selected meals with timestamps to state for the V2 forecast chart
+        state.v2SelectedMealsForChart = meals
+
+        // Run the V3 engine on the selected meals to compute curve parameters
+        // (upfront percent, tau, etc.) BEFORE transitioning to the dose preview.
+        state.computeV2CurveParamsForSelectedMeals(meals)
+
+        // Set combined macros for display purposes
         state.fat = Decimal(combinedFat)
         state.protein = Decimal(combinedProtein)
         state.fiber = Decimal(combinedFiber)
-        // Pass selected meals with timestamps to state for the V2 forecast chart
-        state.v2SelectedMealsForChart = selectedMealsList
+
         Task {
             await state.updateForecasts()
             state.insulinCalculated = await state.calculateInsulin()
