@@ -209,3 +209,33 @@ This breaks whenever the HealthKit background observer hasn't been firing (airpl
 - **Tests** updated for 16-checkpoint structure and Double comparisons
 
 **Result:** Learning system gets 2.3x more data points per meal, with much better resolution for carb peak detection and fat tail tracking. Backward-compatible with existing stored outcomes (old Int values decode as Double, old 7-checkpoint outcomes still work alongside new 16-checkpoint ones).
+
+---
+
+## 11. Full Loop Activity in V2 Meal Export
+
+**File:** `V2CurveOutcomeLearning.swift`
+
+**Problem:** The V2 meal export included BG traces and V2 scheduled entries, but was missing the loop's actual response — SMBs delivered, temp basal rate changes, and oref loop decisions. Without this data, it's impossible to determine whether a poor BG outcome was due to incorrect V2 entries or the loop under/over-delivering insulin.
+
+**Change:** Three new data types added to `V2MealExportRecord`:
+
+1. **`bolusEvents: [V2BolusEvent]`** — Every bolus (manual + SMB) during the 8h absorption window
+   - Fields: `date`, `amount` (units), `isSMB` (automatic vs manual), `isExternal` (pen vs pump)
+   - Fetched from `BolusStored` via `pumpEvent.timestamp` relationship
+
+2. **`tempBasalEvents: [V2TempBasalEvent]`** — Every temp basal rate change during the 8h window
+   - Fields: `date`, `rate` (U/hr), `duration` (minutes)
+   - Fetched from `TempBasalStored` via `pumpEvent.timestamp` relationship
+
+3. **`loopDecisions: [V2LoopDecision]`** — Every oref loop cycle (~5 min) during the 8h window
+   - Fields: `date`, `glucose`, `iob`, `cob`, `eventualBG`, `insulinReq`, `smbToDeliver`, `tempBasalRate`, `scheduledBasal`, `sensitivityRatio`, `reason` (truncated to 200 chars)
+   - Fetched from `OrefDetermination` via `deliverAt` timestamp
+
+**Result:** The export now shows the complete insulin delivery picture for each meal:
+- What the V2 engine planned (scheduled entries + upfront bolus)
+- What the loop actually delivered (SMBs + temp basals)
+- Why the loop made each decision (IOB/COB/eventualBG/reason at each cycle)
+- How BG responded (full CGM trace)
+
+This enables root-cause analysis: "BG went high at 3h because the loop saw high COB and didn't deliver SMBs" vs "the protein entries were too small."

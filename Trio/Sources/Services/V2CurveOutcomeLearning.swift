@@ -896,13 +896,36 @@ final class V2OutcomeLearningStore {
                 absorbedEntries: scheduled.filter { $0.isAbsorbed }.count
             )
 
+            // Fetch insulin delivery during the absorption window: boluses + temp basals
+            let bolusEvents = await fetchBolusEvents(
+                from: outcome.date,
+                to: min(postMealEnd, Date()),
+                context: context
+            )
+
+            let tempBasalEvents = await fetchTempBasalEvents(
+                from: outcome.date,
+                to: min(postMealEnd, Date()),
+                context: context
+            )
+
+            // Fetch oref loop decisions during the absorption window
+            let loopDecisions = await fetchLoopDecisions(
+                from: outcome.date,
+                to: min(postMealEnd, Date()),
+                context: context
+            )
+
             let record = V2MealExportRecord(
                 outcome: outcome,
                 preMealBGTrace: preMealBG,
                 postMealBGTrace: postMealBG,
                 scheduledEntries: scheduled,
                 garminContributions: garminContributions,
-                dosingSummary: dosingSummary
+                dosingSummary: dosingSummary,
+                bolusEvents: bolusEvents,
+                tempBasalEvents: tempBasalEvents,
+                loopDecisions: loopDecisions
             )
             mealExports.append(record)
         }
@@ -973,6 +996,116 @@ final class V2OutcomeLearningStore {
             }
         }
     }
+
+    /// Fetch all bolus events (manual + SMB) in a time range.
+    private func fetchBolusEvents(
+        from start: Date,
+        to end: Date,
+        context: NSManagedObjectContext
+    ) async -> [V2BolusEvent] {
+        await context.perform {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "BolusStored")
+            request.predicate = NSPredicate(
+                format: "pumpEvent.timestamp >= %@ AND pumpEvent.timestamp <= %@",
+                start as NSDate,
+                end as NSDate
+            )
+            request.sortDescriptors = [NSSortDescriptor(key: "pumpEvent.timestamp", ascending: true)]
+
+            guard let results = try? context.fetch(request) else { return [] }
+
+            return results.compactMap { bolus -> V2BolusEvent? in
+                guard let pumpEvent = bolus.value(forKey: "pumpEvent") as? NSManagedObject,
+                      let timestamp = pumpEvent.value(forKey: "timestamp") as? Date
+                else { return nil }
+
+                let amount = (bolus.value(forKey: "amount") as? NSDecimalNumber)?.doubleValue ?? 0
+                guard amount > 0 else { return nil }
+
+                return V2BolusEvent(
+                    date: timestamp,
+                    amount: amount,
+                    isSMB: bolus.value(forKey: "isSMB") as? Bool ?? false,
+                    isExternal: bolus.value(forKey: "isExternal") as? Bool ?? false
+                )
+            }
+        }
+    }
+
+    /// Fetch all temp basal events in a time range.
+    private func fetchTempBasalEvents(
+        from start: Date,
+        to end: Date,
+        context: NSManagedObjectContext
+    ) async -> [V2TempBasalEvent] {
+        await context.perform {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "TempBasalStored")
+            request.predicate = NSPredicate(
+                format: "pumpEvent.timestamp >= %@ AND pumpEvent.timestamp <= %@",
+                start as NSDate,
+                end as NSDate
+            )
+            request.sortDescriptors = [NSSortDescriptor(key: "pumpEvent.timestamp", ascending: true)]
+
+            guard let results = try? context.fetch(request) else { return [] }
+
+            return results.compactMap { tb -> V2TempBasalEvent? in
+                guard let pumpEvent = tb.value(forKey: "pumpEvent") as? NSManagedObject,
+                      let timestamp = pumpEvent.value(forKey: "timestamp") as? Date
+                else { return nil }
+
+                let rate = (tb.value(forKey: "rate") as? NSDecimalNumber)?.doubleValue ?? 0
+                let duration = (tb.value(forKey: "duration") as? Int16) ?? 0
+
+                return V2TempBasalEvent(
+                    date: timestamp,
+                    rate: rate,
+                    duration: Int(duration)
+                )
+            }
+        }
+    }
+
+    /// Fetch oref loop decisions in a time range.
+    /// Each decision represents one loop cycle (~5 min) with the loop's state and actions.
+    private func fetchLoopDecisions(
+        from start: Date,
+        to end: Date,
+        context: NSManagedObjectContext
+    ) async -> [V2LoopDecision] {
+        await context.perform {
+            let request = OrefDetermination.fetchRequest()
+            request.predicate = NSPredicate(
+                format: "deliverAt >= %@ AND deliverAt <= %@",
+                start as NSDate,
+                end as NSDate
+            )
+            request.sortDescriptors = [NSSortDescriptor(key: "deliverAt", ascending: true)]
+
+            guard let results = try? context.fetch(request) else { return [] }
+
+            return results.compactMap { det -> V2LoopDecision? in
+                guard let date = det.deliverAt else { return nil }
+
+                // Truncate reason string to avoid bloating the export
+                let reason = det.reason.map { String($0.prefix(200)) }
+
+                return V2LoopDecision(
+                    date: date,
+                    glucose: Int((det.glucose ?? 0).doubleValue),
+                    iob: (det.iob ?? 0).doubleValue,
+                    cob: Int(det.cob),
+                    eventualBG: Int((det.eventualBG ?? 0).doubleValue),
+                    insulinReq: (det.insulinReq ?? 0).doubleValue,
+                    smbToDeliver: (det.smbToDeliver ?? 0).doubleValue,
+                    tempBasalRate: det.rate?.doubleValue,
+                    scheduledBasal: (det.scheduledBasal ?? 0).doubleValue,
+                    sensitivityRatio: (det.sensitivityRatio ?? 1).doubleValue,
+                    reason: reason
+                )
+            }
+        }
+    }
 }
 
 // MARK: - Export Format
@@ -1022,6 +1155,37 @@ struct V2DosingSummary: Codable {
     let totalScheduledEntries: Int      // count of entries in Core Data
     let pendingEntries: Int             // entries still in the future
     let absorbedEntries: Int            // entries already past
+}
+
+/// A bolus event (manual or SMB) delivered during the meal's absorption window.
+struct V2BolusEvent: Codable {
+    let date: Date
+    let amount: Double          // insulin units
+    let isSMB: Bool             // true = automatic SMB from oref
+    let isExternal: Bool        // true = pen injection (not pump)
+}
+
+/// A temp basal rate change during the meal's absorption window.
+struct V2TempBasalEvent: Codable {
+    let date: Date
+    let rate: Double            // units per hour
+    let duration: Int           // minutes
+}
+
+/// An oref loop decision during the meal's absorption window.
+/// Shows what the loop "saw" and decided at each cycle (~5 min intervals).
+struct V2LoopDecision: Codable {
+    let date: Date
+    let glucose: Int            // current BG (mg/dL)
+    let iob: Double             // insulin on board (units)
+    let cob: Int                // carbs on board (grams)
+    let eventualBG: Int         // oref's predicted eventual BG
+    let insulinReq: Double      // insulin oref calculated as needed
+    let smbToDeliver: Double    // SMB oref decided to deliver
+    let tempBasalRate: Double?  // temp basal rate set (nil if unchanged)
+    let scheduledBasal: Double  // scheduled basal rate for context
+    let sensitivityRatio: Double // autosens ratio
+    let reason: String?         // oref's reasoning string (truncated)
 }
 
 /// User settings snapshot at export time — all settings that affect V2 dosing.
@@ -1075,6 +1239,18 @@ struct V2MealExportRecord: Codable {
 
     // Computed dosing summary — what the engine decided (upfront insulin, effective carbs, etc.)
     let dosingSummary: V2DosingSummary
+
+    // All bolus events during the 8h absorption window — manual boluses + oref SMBs.
+    // Shows when and how much insulin the loop actually delivered.
+    let bolusEvents: [V2BolusEvent]
+
+    // Temp basal rate changes during the 8h absorption window.
+    // Shows how the loop modulated basal delivery in response to the meal.
+    let tempBasalEvents: [V2TempBasalEvent]
+
+    // Oref loop decisions during the 8h absorption window (~5 min intervals).
+    // Shows what the loop "saw" (IOB, COB, eventualBG) and decided at each cycle.
+    let loopDecisions: [V2LoopDecision]
 }
 
 /// Top-level comprehensive export — the whole system picture.
