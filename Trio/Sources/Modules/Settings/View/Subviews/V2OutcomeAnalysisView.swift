@@ -35,7 +35,7 @@ struct V2OutcomeAnalysisView: View {
                             .foregroundStyle(inRange.count > completed.count / 2 ? .green : .orange)
                     }
 
-                    if let avgError = averageError(at: 2, from: completed) {
+                    if let avgError = averageError(at: 2.0, from: completed) {
                         HStack {
                             Text("Avg BG Error at 2h")
                             Spacer()
@@ -44,7 +44,7 @@ struct V2OutcomeAnalysisView: View {
                         }
                     }
 
-                    if let avgError = averageError(at: 4, from: completed) {
+                    if let avgError = averageError(at: 4.0, from: completed) {
                         HStack {
                             Text("Avg BG Error at 4h")
                             Spacer()
@@ -214,28 +214,31 @@ struct V2OutcomeAnalysisView: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
 
-            // Checkpoint results
-            HStack(spacing: 12) {
-                ForEach(outcome.checkpoints, id: \.hoursAfterMeal) { cp in
-                    VStack(spacing: 2) {
-                        Text("\(cp.hoursAfterMeal)h")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                        if let bg = cp.bgValue {
-                            Text("\(bg)")
-                                .font(.caption2)
-                                .fontWeight(.medium)
-                                .foregroundStyle(bgColor(bg))
-                        } else {
-                            Text("--")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        if !cp.isClean {
-                            Image(systemName: "exclamationmark.circle")
+            // Checkpoint results — show key time points (scrollable for full 16-point view)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(outcome.checkpoints, id: \.hoursAfterMeal) { cp in
+                        VStack(spacing: 2) {
+                            Text(checkpointLabel(cp.hoursAfterMeal))
                                 .font(.system(size: 8))
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(.secondary)
+                            if let bg = cp.bgValue {
+                                Text("\(bg)")
+                                    .font(.system(size: 10))
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(bgColor(bg))
+                            } else {
+                                Text("--")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                            if !cp.isClean {
+                                Image(systemName: "exclamationmark.circle")
+                                    .font(.system(size: 7))
+                                    .foregroundStyle(.orange)
+                            }
                         }
+                        .frame(minWidth: 28)
                     }
                 }
             }
@@ -250,12 +253,12 @@ struct V2OutcomeAnalysisView: View {
     }
 
     private func isInRange(_ outcome: V2MealOutcome) -> Bool {
-        guard let cp2h = outcome.checkpoints.first(where: { $0.hoursAfterMeal == 2 }),
+        guard let cp2h = outcome.checkpoints.first(where: { $0.hoursAfterMeal == 2.0 }),
               let bg = cp2h.bgValue else { return false }
         return bg >= 70 && bg <= 180
     }
 
-    private func averageError(at hours: Int, from outcomes: [V2MealOutcome]) -> Double? {
+    private func averageError(at hours: Double, from outcomes: [V2MealOutcome]) -> Double? {
         let values = outcomes.compactMap { outcome -> Double? in
             guard let cp = outcome.checkpoints.first(where: { $0.hoursAfterMeal == hours }),
                   let bg = cp.bgValue, cp.isClean else { return nil }
@@ -264,6 +267,14 @@ struct V2OutcomeAnalysisView: View {
         }
         guard !values.isEmpty else { return nil }
         return values.reduce(0, +) / Double(values.count)
+    }
+
+    private func checkpointLabel(_ hours: Double) -> String {
+        if hours == 0.5 { return "30m" }
+        if hours.truncatingRemainder(dividingBy: 1) == 0 {
+            return "\(Int(hours))h"
+        }
+        return String(format: "%.1fh", hours)
     }
 
     private func errorText(_ error: Double) -> String {

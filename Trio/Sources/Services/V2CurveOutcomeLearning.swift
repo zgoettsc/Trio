@@ -112,7 +112,7 @@ struct V2MealOutcome: Codable, Identifiable {
 
 /// BG checkpoint for V2 outcome tracking with curve attribution.
 struct V2BGCheckpoint: Codable {
-    let hoursAfterMeal: Int
+    let hoursAfterMeal: Double
     var bgValue: Int?
     var isClean: Bool
     var curvePhase: CurvePhase
@@ -128,6 +128,8 @@ struct V2BGCheckpoint: Codable {
 
     /// Compute phase attribution dynamically based on actual meal macros (#3).
     /// Prevents attributing errors to curves that weren't active for this meal.
+    /// Generates 16 checkpoints at 30-minute intervals from 0.5h to 8.0h for
+    /// high-resolution BG tracking across all absorption phases.
     static func computePhases(
         carbs: Double,
         fat: Double,
@@ -137,21 +139,45 @@ struct V2BGCheckpoint: Codable {
         let hasProtein = protein > proteinThreshold
         let hasFat = fat >= 5
 
+        // Phase attribution by time window:
+        // 0.5–2.0h: carb absorption (gamma curve peak ~1–1.5h, tail to ~3h)
+        // 2.5–3.0h: protein onset if present, else late carb tail
+        // 3.5–5.0h: protein peak (4–5h) / fat onset / overlap
+        // 5.5–8.0h: fat insulin resistance (gaussian peak ~5–7h)
         return [
-            V2BGCheckpoint(hoursAfterMeal: 1, bgValue: nil, isClean: true, curvePhase: .carb),
-            V2BGCheckpoint(hoursAfterMeal: 2, bgValue: nil, isClean: true, curvePhase: .carb),
-            V2BGCheckpoint(hoursAfterMeal: 3, bgValue: nil, isClean: true,
+            // Carb phase: early absorption window
+            V2BGCheckpoint(hoursAfterMeal: 0.5, bgValue: nil, isClean: true, curvePhase: .carb),
+            V2BGCheckpoint(hoursAfterMeal: 1.0, bgValue: nil, isClean: true, curvePhase: .carb),
+            V2BGCheckpoint(hoursAfterMeal: 1.5, bgValue: nil, isClean: true, curvePhase: .carb),
+            V2BGCheckpoint(hoursAfterMeal: 2.0, bgValue: nil, isClean: true, curvePhase: .carb),
+            // Transition: protein onset or late carb
+            V2BGCheckpoint(hoursAfterMeal: 2.5, bgValue: nil, isClean: true,
                            curvePhase: hasProtein ? .protein : .carb),
-            V2BGCheckpoint(hoursAfterMeal: 4, bgValue: nil, isClean: true,
-                           curvePhase: hasProtein && hasFat ? .overlap :
-                                       hasProtein ? .protein :
-                                       hasFat ? .fat : .carb),
-            // (#11) 5h checkpoint captures protein peak (4-5h)
-            V2BGCheckpoint(hoursAfterMeal: 5, bgValue: nil, isClean: true,
+            V2BGCheckpoint(hoursAfterMeal: 3.0, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein ? .protein : .carb),
+            // Mid window: protein peak and fat onset
+            V2BGCheckpoint(hoursAfterMeal: 3.5, bgValue: nil, isClean: true,
                            curvePhase: hasProtein ? .protein : hasFat ? .fat : .skip),
-            V2BGCheckpoint(hoursAfterMeal: 6, bgValue: nil, isClean: true,
+            V2BGCheckpoint(hoursAfterMeal: 4.0, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein && hasFat ? .overlap :
+                                       hasProtein ? .protein : hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 4.5, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein && hasFat ? .overlap :
+                                       hasProtein ? .protein : hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 5.0, bgValue: nil, isClean: true,
+                           curvePhase: hasProtein ? .protein : hasFat ? .fat : .skip),
+            // Late window: fat insulin resistance
+            V2BGCheckpoint(hoursAfterMeal: 5.5, bgValue: nil, isClean: true,
                            curvePhase: hasFat ? .fat : .skip),
-            V2BGCheckpoint(hoursAfterMeal: 8, bgValue: nil, isClean: true,
+            V2BGCheckpoint(hoursAfterMeal: 6.0, bgValue: nil, isClean: true,
+                           curvePhase: hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 6.5, bgValue: nil, isClean: true,
+                           curvePhase: hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 7.0, bgValue: nil, isClean: true,
+                           curvePhase: hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 7.5, bgValue: nil, isClean: true,
+                           curvePhase: hasFat ? .fat : .skip),
+            V2BGCheckpoint(hoursAfterMeal: 8.0, bgValue: nil, isClean: true,
                            curvePhase: hasFat ? .fat : .skip),
         ]
     }
@@ -478,7 +504,7 @@ final class V2OutcomeLearningStore {
                 modified = true
                 for j in 0 ..< outcomes[i].checkpoints.count {
                     let cpTime = mealTime.addingTimeInterval(
-                        TimeInterval(outcomes[i].checkpoints[j].hoursAfterMeal * 3600)
+                        outcomes[i].checkpoints[j].hoursAfterMeal * 3600
                     )
                     let isDirty = overlappingMeals.contains { $0.date < cpTime }
                     if isDirty {
@@ -506,11 +532,11 @@ final class V2OutcomeLearningStore {
                 guard outcomes[i].checkpoints[j].bgValue == nil else { continue }
 
                 let hoursAfter = outcomes[i].checkpoints[j].hoursAfterMeal
-                let targetTime = outcomes[i].date.addingTimeInterval(TimeInterval(hoursAfter * 3600))
+                let targetTime = outcomes[i].date.addingTimeInterval(hoursAfter * 3600)
 
                 guard Date() > targetTime.addingTimeInterval(30 * 60) else { continue }
 
-                if let bg = await fetchClosestGlucose(near: targetTime, withinMinutes: 30, context: context) {
+                if let bg = await fetchClosestGlucose(near: targetTime, withinMinutes: 15, context: context) {
                     outcomes[i].checkpoints[j].bgValue = bg
                     updated = true
                 }

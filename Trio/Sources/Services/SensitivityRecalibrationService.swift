@@ -211,7 +211,9 @@ final class SensitivityRecalibrationService {
             let cpStrings = outcome.checkpoints.compactMap { cp -> String? in
                 guard let bg = cp.bgValue else { return nil }
                 let clean = cp.isClean ? "" : " [confounded]"
-                return "\(cp.hoursAfterMeal)h: \(bg)\(clean) [\(cp.curvePhase.rawValue)]"
+                let timeLabel = cp.hoursAfterMeal.truncatingRemainder(dividingBy: 1) == 0
+                    ? "\(Int(cp.hoursAfterMeal))h" : String(format: "%.1fh", cp.hoursAfterMeal)
+                return "\(timeLabel): \(bg)\(clean) [\(cp.curvePhase.rawValue)]"
             }
             if !cpStrings.isEmpty {
                 prompt += "BG: \(cpStrings.joined(separator: ", "))\n"

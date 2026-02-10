@@ -220,13 +220,23 @@ struct V2MacroEngineTests {
 
     // MARK: - Dynamic Phase Attribution (#3)
 
+    @Test("30-minute checkpoints: 16 checkpoints from 0.5h to 8h")
+    func checkpointCount() {
+        let phases = V2BGCheckpoint.computePhases(
+            carbs: 80, fat: 30, protein: 30, proteinThreshold: 15
+        )
+        #expect(phases.count == 16)
+        #expect(phases.first?.hoursAfterMeal == 0.5)
+        #expect(phases.last?.hoursAfterMeal == 8.0)
+    }
+
     @Test("Low-protein meal gets no protein checkpoints")
     func phaseAttributionLowProtein() {
         let phases = V2BGCheckpoint.computePhases(
             carbs: 80, fat: 30, protein: 10, proteinThreshold: 15
         )
         // Protein is below threshold (10 < 15), so 3h should be .carb, not .protein
-        let threeHour = phases.first { $0.hoursAfterMeal == 3 }
+        let threeHour = phases.first { $0.hoursAfterMeal == 3.0 }
         #expect(threeHour?.curvePhase == .carb)
     }
 
@@ -236,8 +246,8 @@ struct V2MacroEngineTests {
             carbs: 60, fat: 3, protein: 30, proteinThreshold: 15
         )
         // Fat is below 5g, so 6h and 8h should be .skip
-        let sixHour = phases.first { $0.hoursAfterMeal == 6 }
-        let eightHour = phases.first { $0.hoursAfterMeal == 8 }
+        let sixHour = phases.first { $0.hoursAfterMeal == 6.0 }
+        let eightHour = phases.first { $0.hoursAfterMeal == 8.0 }
         #expect(sixHour?.curvePhase == .skip)
         #expect(eightHour?.curvePhase == .skip)
     }
@@ -247,13 +257,21 @@ struct V2MacroEngineTests {
         let phases = V2BGCheckpoint.computePhases(
             carbs: 65, fat: 28, protein: 35, proteinThreshold: 15
         )
-        #expect(phases.first { $0.hoursAfterMeal == 1 }?.curvePhase == .carb)
-        #expect(phases.first { $0.hoursAfterMeal == 2 }?.curvePhase == .carb)
-        #expect(phases.first { $0.hoursAfterMeal == 3 }?.curvePhase == .protein)
-        #expect(phases.first { $0.hoursAfterMeal == 4 }?.curvePhase == .overlap)
-        #expect(phases.first { $0.hoursAfterMeal == 5 }?.curvePhase == .protein)
-        #expect(phases.first { $0.hoursAfterMeal == 6 }?.curvePhase == .fat)
-        #expect(phases.first { $0.hoursAfterMeal == 8 }?.curvePhase == .fat)
+        // Carb phase
+        #expect(phases.first { $0.hoursAfterMeal == 0.5 }?.curvePhase == .carb)
+        #expect(phases.first { $0.hoursAfterMeal == 1.0 }?.curvePhase == .carb)
+        #expect(phases.first { $0.hoursAfterMeal == 2.0 }?.curvePhase == .carb)
+        // Protein transition
+        #expect(phases.first { $0.hoursAfterMeal == 2.5 }?.curvePhase == .protein)
+        #expect(phases.first { $0.hoursAfterMeal == 3.0 }?.curvePhase == .protein)
+        // Overlap zone
+        #expect(phases.first { $0.hoursAfterMeal == 4.0 }?.curvePhase == .overlap)
+        #expect(phases.first { $0.hoursAfterMeal == 4.5 }?.curvePhase == .overlap)
+        // Protein peak
+        #expect(phases.first { $0.hoursAfterMeal == 5.0 }?.curvePhase == .protein)
+        // Fat phase
+        #expect(phases.first { $0.hoursAfterMeal == 6.0 }?.curvePhase == .fat)
+        #expect(phases.first { $0.hoursAfterMeal == 8.0 }?.curvePhase == .fat)
     }
 
     @Test("5h checkpoint included for protein peak")
@@ -261,7 +279,7 @@ struct V2MacroEngineTests {
         let phases = V2BGCheckpoint.computePhases(
             carbs: 50, fat: 20, protein: 30, proteinThreshold: 15
         )
-        let fiveHour = phases.first { $0.hoursAfterMeal == 5 }
+        let fiveHour = phases.first { $0.hoursAfterMeal == 5.0 }
         #expect(fiveHour != nil)
         #expect(fiveHour?.curvePhase == .protein)
     }

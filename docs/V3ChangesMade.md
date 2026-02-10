@@ -168,3 +168,44 @@ This breaks whenever the HealthKit background observer hasn't been firing (airpl
 2. **First-snapshot baseline:** When 2+ snapshots exist but the first one already has non-zero cumulative values (observer fired late, after food was already logged), include a delta from midnight to the first snapshot so that food isn't silently lost
 
 **Result:** V2 Macros tab now detects meals reliably regardless of whether background observer snapshots exist. The midnight baseline ensures the first meal of the day is always visible.
+
+---
+
+## 10. High-Resolution BG Checkpoints (30-Minute Intervals)
+
+**Files:** `V2CurveOutcomeLearning.swift`, `V2OutcomeAnalysisView.swift`, `SensitivityRecalibrationService.swift`, `V2MacroEngineTests.swift`
+
+**Problem:** BG checkpoints were collected at only 7 discrete hourly intervals (1h, 2h, 3h, 4h, 5h, 6h, 8h). This missed critical detail:
+- **Carb peak timing**: Only 1h and 2h data points, missing the actual peak (often 45 min or 1.5h)
+- **Protein onset**: Jump from 2h to 3h missed the gradual gluconeogenesis rise
+- **Fat tail shape**: 6h to 8h gap (skipping 7h) lost resolution on the insulin resistance curve
+- **No data before 1h**: Missed the early absorption signal entirely
+
+**Change:** `V2BGCheckpoint.hoursAfterMeal` changed from `Int` to `Double` (backward-compatible — JSON integers decode as Doubles). `computePhases()` now generates **16 checkpoints** at 30-minute intervals from 0.5h to 8.0h:
+
+| Time | Phase (full macro meal) | Phase (carb-only) |
+|------|------------------------|-------------------|
+| 0.5h | carb | carb |
+| 1.0h | carb | carb |
+| 1.5h | carb | carb |
+| 2.0h | carb | carb |
+| 2.5h | protein | carb |
+| 3.0h | protein | carb |
+| 3.5h | protein | skip |
+| 4.0h | overlap | skip |
+| 4.5h | overlap | skip |
+| 5.0h | protein | skip |
+| 5.5h | fat | skip |
+| 6.0h | fat | skip |
+| 6.5h | fat | skip |
+| 7.0h | fat | skip |
+| 7.5h | fat | skip |
+| 8.0h | fat | skip |
+
+**Supporting changes:**
+- **Backfill search window** tightened from ±30 min to ±15 min (prevents overlap between adjacent checkpoints)
+- **Analysis UI** uses a horizontal `ScrollView` with compact checkpoint labels ("30m", "1h", "1.5h", etc.)
+- **Recalibration prompt** formats Double hours as clean labels ("1h", "1.5h", etc.)
+- **Tests** updated for 16-checkpoint structure and Double comparisons
+
+**Result:** Learning system gets 2.3x more data points per meal, with much better resolution for carb peak detection and fat tail tracking. Backward-compatible with existing stored outcomes (old Int values decode as Double, old 7-checkpoint outcomes still work alongside new 16-checkpoint ones).
