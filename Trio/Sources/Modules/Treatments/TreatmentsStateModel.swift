@@ -981,6 +981,13 @@ extension Treatments {
 
                 if isCarbsPresent || isFatPresent || isProteinPresent {
                     await saveMeal()
+
+                    // V2: record dose timestamp to close the meal grouping window.
+                    // Any new deltas arriving after this — even within 15 minutes —
+                    // become a separate meal (e.g., dessert after dinner).
+                    if trioSettings.useV2MacroAbsorption {
+                        NutritionSnapshotStore.shared.recordDoseTimestamp()
+                    }
                 }
 
                 // V2 outcome learning: save outcome now that saveMeal() has set the engine mealID

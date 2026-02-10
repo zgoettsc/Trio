@@ -376,19 +376,20 @@ extension Treatments {
                 }
             })
             .onAppear {
+                let isFirstAppear = state.isInitial
                 configureView {
                     state.isActive = true
-                    // Default mode from V2 settings toggle — read from settingsManager
-                    // eagerly since state.useV2MacroAbsorption isn't populated until
-                    // loadV2DetectedMeals() runs asynchronously.
-                    let v2Enabled = state.settingsManager.settings.useV2MacroAbsorption
-                    state.useV2MacroAbsorption = v2Enabled
-                    if v2Enabled {
-                        treatmentMode = .v2
-                    }
                     Task { @MainActor in
                         state.insulinCalculated = await state.calculateInsulin()
                     }
+                }
+                // Default mode from V2 settings toggle on first appearance only.
+                // Must run AFTER configureView because @Injected properties
+                // (settingsManager) aren't resolved until configureView sets
+                // state.resolver, which triggers injectServices().
+                if isFirstAppear, state.settingsManager?.settings.useV2MacroAbsorption == true {
+                    state.useV2MacroAbsorption = true
+                    treatmentMode = .v2
                 }
             }
             .onDisappear {
