@@ -38,6 +38,10 @@ public extension V2MealOutcomeStored {
     // Confounding meal flag
     @NSManaged var hasConfoundingMeal: Bool
 
+    // Actual delivery and timing
+    @NSManaged var actualBolusDelivered: Double  // 0 = legacy/unknown
+    @NSManaged var mealDetectedAt: Date?         // nil = legacy/unknown
+
     // JSON-encoded nested data
     @NSManaged var checkpointsJSON: Data?
     @NSManaged var adaptiveAdjustmentsJSON: Data?

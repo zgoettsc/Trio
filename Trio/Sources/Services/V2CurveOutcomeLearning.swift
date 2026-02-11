@@ -60,6 +60,15 @@ struct V2MealOutcome: Codable, Identifiable {
     // Whether a confounding meal was detected
     var hasConfoundingMeal: Bool
 
+    // Actual insulin the user chose to deliver (may differ from engine recommendation
+    // if user moved slider or typed a custom amount). nil for legacy outcomes.
+    var actualBolusDelivered: Double?
+
+    // When the meal was detected in HealthKit (eating time proxy).
+    // Differs from `date` (dose time) when user delays dosing after eating.
+    // nil for legacy outcomes or when meal time couldn't be determined.
+    var mealDetectedAt: Date?
+
     struct AdaptiveAdjustmentRecord: Codable {
         let timestamp: Date
         let scalingFactor: Double
@@ -70,7 +79,7 @@ struct V2MealOutcome: Codable, Identifiable {
 
     /// Return a copy with a different mealID (used to link outcome to engine-generated Core Data entries).
     func withMealID(_ newMealID: String) -> V2MealOutcome {
-        V2MealOutcome(
+        var copy = V2MealOutcome(
             id: id, date: date, mealID: newMealID,
             carbs: carbs, fat: fat, protein: protein, fiber: fiber,
             tauCarb: tauCarb, proteinFactor: proteinFactor, fatTotalEquiv: fatTotalEquiv,
@@ -83,6 +92,9 @@ struct V2MealOutcome: Codable, Identifiable {
             adaptiveAdjustments: adaptiveAdjustments, checkpoints: checkpoints,
             hasConfoundingMeal: hasConfoundingMeal
         )
+        copy.actualBolusDelivered = actualBolusDelivered
+        copy.mealDetectedAt = mealDetectedAt
+        return copy
     }
 
     /// Return a copy with a Garmin snapshot (and its contributions) attached.
@@ -94,7 +106,7 @@ struct V2MealOutcome: Codable, Identifiable {
                                      impact: $0.impact, description: $0.description)
             }
         }
-        return V2MealOutcome(
+        var copy = V2MealOutcome(
             id: id, date: date, mealID: mealID,
             carbs: carbs, fat: fat, protein: protein, fiber: fiber,
             tauCarb: tauCarb, proteinFactor: proteinFactor, fatTotalEquiv: fatTotalEquiv,
@@ -107,6 +119,9 @@ struct V2MealOutcome: Codable, Identifiable {
             adaptiveAdjustments: adaptiveAdjustments, checkpoints: checkpoints,
             hasConfoundingMeal: hasConfoundingMeal
         )
+        copy.actualBolusDelivered = actualBolusDelivered
+        copy.mealDetectedAt = mealDetectedAt
+        return copy
     }
 }
 
@@ -286,6 +301,8 @@ final class V2OutcomeLearningStore {
         stored.mealSMBMultiplier = outcome.mealSMBMultiplier
         stored.mealModeWasActive = outcome.mealModeWasActive
         stored.hasConfoundingMeal = outcome.hasConfoundingMeal
+        stored.actualBolusDelivered = outcome.actualBolusDelivered ?? 0
+        stored.mealDetectedAt = outcome.mealDetectedAt
         stored.checkpointsJSON = try? encoder.encode(outcome.checkpoints)
         stored.adaptiveAdjustmentsJSON = try? encoder.encode(outcome.adaptiveAdjustments)
         stored.garminSnapshotJSON = try? encoder.encode(outcome.garminSnapshot)
@@ -305,7 +322,7 @@ final class V2OutcomeLearningStore {
         let garminContribs: [V2GarminContribution]? = stored.garminContributionsJSON
             .flatMap { try? decoder.decode([V2GarminContribution].self, from: $0) }
 
-        return V2MealOutcome(
+        var outcome = V2MealOutcome(
             id: id, date: date, mealID: stored.mealID ?? "",
             carbs: stored.carbs, fat: stored.fat, protein: stored.protein, fiber: stored.fiber,
             tauCarb: stored.tauCarb, proteinFactor: stored.proteinFactor, fatTotalEquiv: stored.fatTotalEquiv,
@@ -318,6 +335,9 @@ final class V2OutcomeLearningStore {
             adaptiveAdjustments: adjustments, checkpoints: checkpoints,
             hasConfoundingMeal: stored.hasConfoundingMeal
         )
+        outcome.actualBolusDelivered = stored.actualBolusDelivered > 0 ? stored.actualBolusDelivered : nil
+        outcome.mealDetectedAt = stored.mealDetectedAt
+        return outcome
     }
 
     private func updateStored(_ stored: V2MealOutcomeStored, from outcome: V2MealOutcome) {

@@ -826,6 +826,8 @@ extension Treatments {
                     ),
                     hasConfoundingMeal: false
                 )
+                v2PendingOutcome?.actualBolusDelivered = NSDecimalNumber(decimal: amount).doubleValue
+                v2PendingOutcome?.mealDetectedAt = cronometerMeal?.detectedAt
             }
 
             // Dismiss the sheet
@@ -993,12 +995,17 @@ extension Treatments {
                         let crAtMeal = await MainActor.run { NSDecimalNumber(decimal: currentCarbRatio).doubleValue }
                         let isfAtMeal = await MainActor.run { NSDecimalNumber(decimal: currentISF).doubleValue }
                         let smbMultiplier = NSDecimalNumber(decimal: trioSettings.mealModeSMBMultiplier).doubleValue
+                        let actualBolus = await MainActor.run { NSDecimalNumber(decimal: amount).doubleValue }
+                        // Capture the earliest selected meal's detection time as the eating time proxy
+                        let mealDetected = await MainActor.run {
+                            v2SelectedMealsForChart?.min(by: { $0.date < $1.date })?.date
+                        }
 
                         let insulinType: V2InsulinType = trioSettings.insulinType == "ultraRapid" ? .ultraRapid : .rapidActing
                         let safeWindow = trioSettings.v2SafeWindowMinutes ?? insulinType.defaultSafeWindowMinutes
                         let outcomeParams = V2OutcomeLearningStore.shared.loadParameters()
 
-                        let outcome = V2MealOutcome(
+                        var outcome = V2MealOutcome(
                             id: UUID(),
                             date: Date(),
                             mealID: "pending",
@@ -1032,6 +1039,8 @@ extension Treatments {
                             ),
                             hasConfoundingMeal: false
                         )
+                        outcome.actualBolusDelivered = actualBolus
+                        outcome.mealDetectedAt = mealDetected
                         await MainActor.run { v2PendingOutcome = outcome }
                     }
                 }

@@ -239,3 +239,22 @@ This breaks whenever the HealthKit background observer hasn't been firing (airpl
 - How BG responded (full CGM trace)
 
 This enables root-cause analysis: "BG went high at 3h because the loop saw high COB and didn't deliver SMBs" vs "the protein entries were too small."
+
+---
+
+## 12. Track Actual Bolus Delivered and Meal Eating Time
+
+**Files:** `V2CurveOutcomeLearning.swift`, `V2MealOutcomeStored+CoreDataProperties.swift`, `TreatmentsStateModel.swift`, Core Data model XML
+
+**Problem:** Two critical data points were missing from V2MealOutcome:
+1. **Actual bolus delivered** — If the user moved the slider or typed a custom amount, the outcome had no record of what was actually given. Only the engine's recommendation (upfrontPercent, curve parameters) was stored, not the user's final decision.
+2. **Meal eating time** — `V2MealOutcome.date` is the dose time (when the user pressed "Deliver"), not when the food was actually eaten. When dosing is delayed (e.g., ate at 5:30 PM, dosed at 6:30 PM), this makes outcome analysis inaccurate.
+
+**Change:**
+- Added `actualBolusDelivered: Double?` — the insulin amount the user chose (from `state.amount`), which may differ from `insulinCalculated` if slider was moved
+- Added `mealDetectedAt: Date?` — the earliest selected meal's detection timestamp from the HealthKit snapshot (eating time proxy)
+- Both are optional for backward compatibility (nil for legacy outcomes)
+- Added to Core Data model, `V2MealOutcomeStored` properties, and toStored/toOutcome conversions
+- Set in both outcome creation paths (Cronometer and V2 Macros tab)
+
+**Known limitation — delayed dosing decay:** The engine uses `mealTime` (from `V2DetectedMeal.date`) to position future entries. When the HealthKit observer fires properly, `mealTime` ≈ eating time and entries are correctly positioned (some in the past at dose time → oref treats as partial COB). But when the observer doesn't fire (airplane mode, app killed), `mealTime` ≈ dose time and the engine generates all entries in the future, ignoring carbs already absorbed. The `mealDetectedAt` field now makes this discrepancy visible in exports. A future enhancement could add a "meal time picker" to the V2 dose preview so users can correct the timestamp before dosing.
