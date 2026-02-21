@@ -111,16 +111,10 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
     private var lastWatchStateData: Data?
 
     /// UserDefaults key for the persistent Garmin watch payload.
-    /// The payload is a flat [String: String] dictionary written on every Live Activity update
+    /// The payload is a flat dictionary written on every Live Activity update
     /// so the poll handler can read it back without re-fetching from CoreData.
     private static let garminPayloadKey = "GarminWatchPayload"
 
-    /// ISO 8601 formatter used to encode `lastLoopTime` for the persistent Garmin payload.
-    private let iso8601Formatter: ISO8601DateFormatter = {
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime]
-        return fmt
-    }()
 
     // MARK: - Initialization
 
@@ -277,18 +271,20 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
 
     // MARK: - Persistent Garmin Payload Store
 
-    /// Writes a flat `[String: String]` dictionary to `UserDefaults` with the latest diabetes data.
+    /// Writes a flat dictionary to `UserDefaults` with the latest diabetes data, using the same
+    /// key names the Garmin watch face already reads: `glucose`, `trendRaw`, `delta`, `iob`,
+    /// `cob`, `lastLoopDateInterval` (numeric epoch), and `sentAt`.
     /// Called on every Live Activity snapshot so the poll handler always has fresh data available.
     /// Keys omitted when the value is unavailable — the watch displays "–" for missing fields.
     private func writeGarminPayloadToStore(_ watchState: GarminWatchState) {
-        var payload: [String: String] = [:]
+        var payload: [String: Any] = [:]
 
         if let glucose = watchState.glucose {
-            payload["bg"] = glucose
+            payload["glucose"] = glucose
         }
 
         if let trend = watchState.trendRaw, trend != "--" {
-            payload["trend"] = trend
+            payload["trendRaw"] = trend
         }
 
         if let delta = watchState.delta {
@@ -304,8 +300,7 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
         }
 
         if let epoch = watchState.lastLoopDateInterval, epoch > 0 {
-            let date = Date(timeIntervalSince1970: TimeInterval(epoch))
-            payload["lastLoopTime"] = iso8601Formatter.string(from: date)
+            payload["lastLoopDateInterval"] = epoch
         }
 
         if let sentAt = watchState.sentAt {
@@ -316,7 +311,7 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
 
         debug(
             .watchManager,
-            "Garmin: Wrote payload to persistent store — bg: \(payload["bg"] ?? "nil"), trend: \(payload["trend"] ?? "nil"), sentAt: \(payload["sentAt"] ?? "nil")"
+            "Garmin: Wrote payload to persistent store — glucose: \(payload["glucose"] ?? "nil"), trendRaw: \(payload["trendRaw"] ?? "nil"), sentAt: \(payload["sentAt"] ?? "nil")"
         )
     }
 
