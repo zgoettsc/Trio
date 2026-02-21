@@ -110,6 +110,18 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
     /// and periodic refresh without re-fetching from CoreData.
     private var lastWatchStateData: Data?
 
+    /// UserDefaults key for the persistent Garmin watch payload.
+    /// The payload is a flat [String: String] dictionary written on every Live Activity update
+    /// so the poll handler can read it back without re-fetching from CoreData.
+    private static let garminPayloadKey = "GarminWatchPayload"
+
+    /// ISO 8601 formatter used to encode `lastLoopTime` for the persistent Garmin payload.
+    private let iso8601Formatter: ISO8601DateFormatter = {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime]
+        return fmt
+    }()
+
     // MARK: - Initialization
 
     /// Creates a new `BaseGarminManager`, injecting required services, restoring any persisted devices,
@@ -156,6 +168,11 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
                 )
 
                 let watchState = self.buildWatchState(from: snapshot)
+
+                // Persist the payload to UserDefaults so the poll handler can
+                // read it back even if the app was suspended between updates.
+                self.writeGarminPayloadToStore(watchState)
+
                 do {
                     let watchStateData = try JSONEncoder().encode(watchState)
                     self.lastWatchStateData = watchStateData
@@ -256,6 +273,60 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
         )
 
         return watchState
+    }
+
+    // MARK: - Persistent Garmin Payload Store
+
+    /// Writes a flat `[String: String]` dictionary to `UserDefaults` with the latest diabetes data.
+    /// Called on every Live Activity snapshot so the poll handler always has fresh data available.
+    /// Keys omitted when the value is unavailable — the watch displays "–" for missing fields.
+    private func writeGarminPayloadToStore(_ watchState: GarminWatchState) {
+        var payload: [String: String] = [:]
+
+        if let glucose = watchState.glucose {
+            payload["bg"] = glucose
+        }
+
+        if let trend = watchState.trendRaw, trend != "--" {
+            payload["trend"] = trend
+        }
+
+        if let delta = watchState.delta {
+            payload["delta"] = delta
+        }
+
+        if let iob = watchState.iob {
+            payload["iob"] = iob
+        }
+
+        if let cob = watchState.cob {
+            payload["cob"] = cob
+        }
+
+        if let epoch = watchState.lastLoopDateInterval, epoch > 0 {
+            let date = Date(timeIntervalSince1970: TimeInterval(epoch))
+            payload["lastLoopTime"] = iso8601Formatter.string(from: date)
+        }
+
+        if let sentAt = watchState.sentAt {
+            payload["sentAt"] = sentAt
+        }
+
+        UserDefaults.standard.set(payload, forKey: Self.garminPayloadKey)
+
+        debug(
+            .watchManager,
+            "Garmin: Wrote payload to persistent store — bg: \(payload["bg"] ?? "nil"), trend: \(payload["trend"] ?? "nil"), sentAt: \(payload["sentAt"] ?? "nil")"
+        )
+    }
+
+    /// Reads the latest Garmin payload from `UserDefaults` and returns it as an `NSDictionary`
+    /// suitable for sending via ConnectIQ. Returns `nil` if no payload has been written yet.
+    private func readGarminPayloadFromStore() -> NSDictionary? {
+        guard let payload = UserDefaults.standard.dictionary(forKey: Self.garminPayloadKey) else {
+            return nil
+        }
+        return NSDictionary(dictionary: payload)
     }
 
     // MARK: - Device & App Registration
@@ -538,7 +609,8 @@ extension BaseGarminManager: IQUIOverrideDelegate, IQDeviceEventDelegate, IQAppM
     // MARK: - IQAppMessageDelegate
 
     /// Called when a message arrives from a Garmin watch app (watchface or data field).
-    /// If the watch requests a "status" update, we immediately respond with the cached watch state.
+    /// If the watch requests a "status" update, we read the latest payload from the
+    /// persistent UserDefaults store and respond immediately, bypassing the push throttle.
     /// - Parameters:
     ///   - message: The message content from the watch app.
     ///   - app: The watch app sending the message.
@@ -553,23 +625,16 @@ extension BaseGarminManager: IQUIOverrideDelegate, IQDeviceEventDelegate, IQAppM
             return
         }
 
-        guard let watchStateData = lastWatchStateData else {
-            debug(.watchManager, "Garmin: Poll response - no cached state yet")
+        guard let payload = readGarminPayloadFromStore() else {
+            debug(.watchManager, "Garmin: Poll response - no data in persistent store")
             return
         }
 
+        debug(.watchManager, "Garmin: Poll response - sending payload from persistent store")
+
         // Bypass the throttle for poll responses — the watch is actively waiting
         // for a reply and its background service may go back to sleep if we delay.
-        guard
-            let jsonObject = try? JSONSerialization.jsonObject(with: watchStateData, options: .mutableContainers),
-            let dict = jsonObject as? NSMutableDictionary
-        else {
-            debug(.watchManager, "Garmin: Invalid JSON for poll response")
-            return
-        }
-        // Override source so the watch can distinguish poll responses from proactive pushes
-        dict["source"] = "poll"
-        broadcastStateToWatchApps(dict)
+        broadcastStateToWatchApps(payload)
     }
 }
 
