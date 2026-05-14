@@ -47,6 +47,8 @@ final class LiveActivityData: ObservableObject {
     @Published var override: OverrideData?
     /// The current temp target data (if any).
     @Published var tempTarget: TempTargetData?
+    /// The current meal-window data (if any) — set by the "I'm eating" Action Button intent.
+    @Published var mealWindow: MealWindowData?
     /// The widget items displayed within the live activity.
     @Published var widgetItems: [LiveActivityAttributes.LiveActivityItem]?
 }
@@ -336,6 +338,10 @@ final class LiveActivityData: ObservableObject {
                                 tempTargetDate: Date.now,
                                 tempTargetDuration: 0,
                                 tempTargetTarget: 0,
+                                isMealWindowActive: false,
+                                mealWindowExpiresAt: Date.now,
+                                mealWindowEstimatedCarbs: 0,
+                                mealWindowCarbsConfirmed: false,
                                 widgetItems: []
                             ),
                             isInitialState: true
@@ -413,6 +419,30 @@ final class LiveActivityData: ObservableObject {
 }
 
 @available(iOS 16.2, *) extension LiveActivityManager {
+    /// Build a `MealWindowData` snapshot from the current `TrioSettings`. The window
+    /// auto-extends to `mealWindowExtendedDurationMinutes` once `mealWindowCarbsConfirmed`
+    /// is set (mirrors the duration logic in `OpenAPS.swift`). Lives here rather than in
+    /// `DataManager` because `settingsManager` on `LiveActivityManager` is `private` and
+    /// not visible to extensions in other files.
+    func currentMealWindowData() -> MealWindowData? {
+        let s = settingsManager.settings
+        guard let activatedAt = s.mealWindowActivationDate else { return nil }
+        let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
+            ? s.mealWindowExtendedDurationMinutes
+            : s.mealWindowDurationMinutes
+        // Match OpenAPS' 6h hard cap.
+        let cappedDuration = min(durationMinutes, 360)
+        let expiresAt = activatedAt.addingTimeInterval(
+            TimeInterval(truncating: cappedDuration as NSDecimalNumber) * 60
+        )
+        return MealWindowData(
+            isActive: expiresAt > Date(),
+            expiresAt: expiresAt,
+            estimatedCarbs: s.mealWindowEstimatedCarbs,
+            carbsConfirmed: s.mealWindowCarbsConfirmed
+        )
+    }
+
     @MainActor func pushCurrentContent() async {
         guard let glucose = data.glucoseFromPersistence, let bg = glucose.first else {
             debug(.default, "[LiveActivityManager] pushCurrentContent: no current glucose data available")
@@ -436,6 +466,11 @@ final class LiveActivityData: ObservableObject {
             return
         }
 
+        // Refresh the meal-window snapshot from TrioSettings on every push. The source of
+        // truth lives in settings, and `settingsDidChange` already triggers `pushCurrentContent`
+        // so the LA reflects intent activations within one CGM cycle at most.
+        data.mealWindow = currentMealWindowData()
+
         let content = LiveActivityAttributes.ContentState(
             new: bg,
             prev: prevGlucose,
@@ -446,6 +481,7 @@ final class LiveActivityData: ObservableObject {
             iob: data.iob,
             override: data.override,
             tempTarget: data.tempTarget,
+            mealWindow: data.mealWindow,
             widgetItems: data.widgetItems
         )
 

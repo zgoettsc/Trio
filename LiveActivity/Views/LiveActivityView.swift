@@ -88,6 +88,16 @@ struct LiveActivityView: View {
                             }
                         }
                     }
+                    .overlay(alignment: .topTrailing) {
+                        if context.state.detailedViewState.isMealWindowActive {
+                            MealWindowPill(
+                                expiresAt: context.state.detailedViewState.mealWindowExpiresAt,
+                                estimatedCarbs: context.state.detailedViewState.mealWindowEstimatedCarbs,
+                                carbsConfirmed: context.state.detailedViewState.mealWindowCarbsConfirmed,
+                                colorScheme: colorScheme
+                            )
+                        }
+                    }
 
                 HStack {
                     if context.state.detailedViewState.widgetItems.contains(where: { $0 != .empty }) {
@@ -235,6 +245,59 @@ struct LiveActivityCompactTrailingView: View {
 
     var body: some View {
         LiveActivityGlucoseDeltaLabelView(context: context, glucoseColor: glucoseColor).padding(.trailing, 4)
+    }
+}
+
+/// Pill shown on the detailed iOS Live Activity when an "I'm eating" window is open.
+/// Renders a countdown to expiry and a tap-to-cancel link. The link routes through
+/// Trio's existing custom URL scheme (`trio://meal-window/cancel`), which mirrors
+/// the AnnounceMealIntentRequest.cancel() path. We use a Link rather than
+/// Button(intent:) because the cancel intent currently lives only in the main-app
+/// target — keeping it that way avoids dragging Swinject/BaseIntentsRequest into
+/// the widget extension. A future iteration can swap in an iOS-17+ interactive
+/// Button if we want lock-screen-only cancellation without opening the app.
+struct MealWindowPill: View {
+    let expiresAt: Date
+    let estimatedCarbs: Decimal
+    let carbsConfirmed: Bool
+    let colorScheme: ColorScheme
+
+    private var pillColor: Color {
+        Color.orange.opacity(colorScheme == .dark ? 0.65 : 0.85)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "fork.knife")
+                .font(.caption2)
+                .foregroundStyle(.white)
+            // Live countdown: Text(timerInterval:) re-renders on its own so the LA
+            // doesn't need to be re-pushed every minute just to keep this fresh.
+            Text(timerInterval: Date()...expiresAt, countsDown: true)
+                .font(.footnote.monospacedDigit())
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+                .frame(minWidth: 38)
+            if carbsConfirmed {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.85))
+            } else if estimatedCarbs > 0 {
+                Text("~\(NSDecimalNumber(decimal: estimatedCarbs).intValue)g")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            Link(destination: URL(string: "trio://meal-window/cancel")!) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: 10).fill(pillColor)
+        }
     }
 }
 

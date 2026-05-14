@@ -502,6 +502,24 @@ extension Notification.Name {
         switch components?.host {
         case "device-select-resp":
             resolver.resolve(NotificationCenter.self)!.post(name: .openFromGarminConnect, object: url)
+        case "meal-window":
+            // Triggered by the cancel link on the Live Activity meal-window pill.
+            // Mirrors AnnounceMealIntentRequest.cancel(): clears the activation
+            // timestamp so the next determineBasal pass sees no active window.
+            if components?.path == "/cancel" {
+                if let settingsManager = resolver.resolve(SettingsManager.self),
+                   settingsManager.settings.mealWindowActivationDate != nil
+                {
+                    var s = settingsManager.settings
+                    s.mealWindowActivationDate = nil
+                    s.mealWindowEstimatedCarbs = 0
+                    s.mealWindowCarbsConfirmed = false
+                    settingsManager.settings = s
+                    Task {
+                        try? await resolver.resolve(APSManager.self)?.determineBasalSync()
+                    }
+                }
+            }
         default: break
         }
     }

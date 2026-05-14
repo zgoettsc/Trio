@@ -70,6 +70,7 @@ extension LiveActivityAttributes.ContentState {
         iob: Decimal?,
         override: OverrideData?,
         tempTarget: TempTargetData?,
+        mealWindow: MealWindowData?,
         widgetItems: [LiveActivityAttributes.LiveActivityItem]?
     ) {
         let glucose = bg.glucose
@@ -118,6 +119,10 @@ extension LiveActivityAttributes.ContentState {
             tempTargetDate: tempTarget?.date ?? Date(),
             tempTargetDuration: tempTarget?.duration ?? 0,
             tempTargetTarget: tempTarget?.target ?? 0,
+            isMealWindowActive: mealWindow?.isActive ?? false,
+            mealWindowExpiresAt: mealWindow?.expiresAt ?? Date(),
+            mealWindowEstimatedCarbs: mealWindow?.estimatedCarbs ?? 0,
+            mealWindowCarbsConfirmed: mealWindow?.carbsConfirmed ?? false,
             widgetItems: widgetItems ?? [] // set empty array here to silence compiler; this can never be nil
         )
 
