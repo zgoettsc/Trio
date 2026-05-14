@@ -577,8 +577,7 @@ final class OpenAPS {
                 toughMealStartingBG: trioSettings.toughMealStartingBG,
                 toughMealIOBAtDose: trioSettings.toughMealIOBAtDose,
                 toughMealFatPlusProtein: trioSettings.toughMealFatPlusProtein,
-                toughMealAutoDetected: trioSettings.toughMealAutoDetected,
-                toughMealGateReason: trioSettings.toughMealGateReason
+                toughMealAutoDetected: trioSettings.toughMealAutoDetected
             )
 
             // Save and return contents of Trio's custom oref variables

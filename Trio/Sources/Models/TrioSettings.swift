@@ -77,7 +77,15 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var toughMealIOBAtDose: Decimal = 0
     var toughMealFatPlusProtein: Decimal = 0
     var toughMealAutoDetected: Bool = false
-    var toughMealGateReason: String = ""
+
+    // Meal-window state, set by AnnounceMealIntent ("I'm eating now" Action Button).
+    // Active from activation until activation + mealWindowDurationMinutes, then auto-expires.
+    var mealWindowActivationDate: Date? = nil
+    var mealWindowDurationMinutes: Decimal = 90
+    var mealWindowExtendedDurationMinutes: Decimal = 240
+    var mealWindowEstimatedCarbs: Decimal = 0
+    var mealWindowCarbsConfirmed: Bool = false
+
     var displayPresets: Bool = true
     var confirmBolus: Bool = false
     var useLiveActivity: Bool = false
@@ -248,8 +256,27 @@ extension TrioSettings: Decodable {
             settings.toughMealAutoDetected = toughMealAutoDetected
         }
 
-        if let toughMealGateReason = try? container.decode(String.self, forKey: .toughMealGateReason) {
-            settings.toughMealGateReason = toughMealGateReason
+        if let mealWindowActivationDate = try? container.decode(Date.self, forKey: .mealWindowActivationDate) {
+            settings.mealWindowActivationDate = mealWindowActivationDate
+        }
+
+        if let mealWindowDurationMinutes = try? container.decode(Decimal.self, forKey: .mealWindowDurationMinutes) {
+            settings.mealWindowDurationMinutes = mealWindowDurationMinutes
+        }
+
+        if let mealWindowExtendedDurationMinutes = try? container.decode(
+            Decimal.self,
+            forKey: .mealWindowExtendedDurationMinutes
+        ) {
+            settings.mealWindowExtendedDurationMinutes = mealWindowExtendedDurationMinutes
+        }
+
+        if let mealWindowEstimatedCarbs = try? container.decode(Decimal.self, forKey: .mealWindowEstimatedCarbs) {
+            settings.mealWindowEstimatedCarbs = mealWindowEstimatedCarbs
+        }
+
+        if let mealWindowCarbsConfirmed = try? container.decode(Bool.self, forKey: .mealWindowCarbsConfirmed) {
+            settings.mealWindowCarbsConfirmed = mealWindowCarbsConfirmed
         }
 
         if let overrideFactor = try? container.decode(Decimal.self, forKey: .overrideFactor) {
