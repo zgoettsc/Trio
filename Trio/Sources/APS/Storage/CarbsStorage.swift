@@ -71,6 +71,20 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
 
         await saveCarbsToCoreData(entries: entriesToStore, areFetchedFromRemote: areFetchedFromRemote)
         await saveCarbEquivalents(entries: entriesToStore, areFetchedFromRemote: areFetchedFromRemote)
+
+        // If a meal-announcement window is open and the user just logged real carbs locally,
+        // extend the window to the post-prandial duration so SMB enhancements stay on while
+        // the meal actually absorbs. We deliberately ignore remote-fetched entries so NS
+        // backfill doesn't re-extend the window after the fact.
+        if !areFetchedFromRemote,
+           settings.settings.mealWindowActivationDate != nil,
+           !settings.settings.mealWindowCarbsConfirmed,
+           entriesToStore.contains(where: { $0.carbs > 0 })
+        {
+            var s = settings.settings
+            s.mealWindowCarbsConfirmed = true
+            settings.settings = s
+        }
     }
 
     private func filterRemoteEntries(entries: [CarbsEntry]) async throws -> [CarbsEntry] {

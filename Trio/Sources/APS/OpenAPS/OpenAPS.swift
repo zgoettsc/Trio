@@ -550,6 +550,33 @@ final class OpenAPS {
                 }
             }
 
+            // Compute meal-window state from persisted settings.
+            // The window auto-extends to extendedDuration once a real carb entry is recorded
+            // (mealWindowCarbsConfirmed) so post-prandial absorption still gets aggressive coverage.
+            var mealWindowActive = false
+            var mealWindowMinutesRemaining: Decimal = 0
+            if let activationDate = trioSettings.mealWindowActivationDate {
+                let elapsedMinutes = Decimal(Date().timeIntervalSince(activationDate) / 60.0)
+                let durationMinutes: Decimal = trioSettings.mealWindowCarbsConfirmed
+                    ? trioSettings.mealWindowExtendedDurationMinutes
+                    : trioSettings.mealWindowDurationMinutes
+                // Hard safety cap mirrors toughMeal: 6h ceiling regardless of configured duration.
+                let maxWindowMinutes: Decimal = 360
+                let cappedDuration = min(durationMinutes, maxWindowMinutes)
+                let remaining = cappedDuration - elapsedMinutes
+                if remaining > 0 {
+                    mealWindowActive = true
+                    mealWindowMinutesRemaining = remaining
+                }
+            }
+
+            // Meal-window auto-enables toughMealActive so we pick up the existing SMB cap
+            // multiplier (1.5×/2.0×/2.5× by BG) without the user needing to toggle anything.
+            if mealWindowActive, !toughMealActive {
+                toughMealActive = true
+                toughMealMinutesRemaining = mealWindowMinutesRemaining
+            }
+
             // Prepare Trio's custom oref variables
             let trioCustomOrefVariablesData = TrioCustomOrefVariables(
                 average_total_data: currentTDD > 0 ? averageTDDLastTenDays : 0,
@@ -577,7 +604,11 @@ final class OpenAPS {
                 toughMealStartingBG: trioSettings.toughMealStartingBG,
                 toughMealIOBAtDose: trioSettings.toughMealIOBAtDose,
                 toughMealFatPlusProtein: trioSettings.toughMealFatPlusProtein,
-                toughMealAutoDetected: trioSettings.toughMealAutoDetected
+                toughMealAutoDetected: trioSettings.toughMealAutoDetected,
+                mealWindowActive: mealWindowActive,
+                mealWindowMinutesRemaining: mealWindowMinutesRemaining,
+                mealWindowEstimatedCarbs: trioSettings.mealWindowEstimatedCarbs,
+                mealWindowCarbsConfirmed: trioSettings.mealWindowCarbsConfirmed
             )
 
             // Save and return contents of Trio's custom oref variables
