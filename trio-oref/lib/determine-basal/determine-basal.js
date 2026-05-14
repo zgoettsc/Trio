@@ -133,6 +133,14 @@ function enable_smb(profile, microBolusAllowed, meal_data, bg, target_bg, high_b
         return true;
     }
 
+    // Meal-window: user pressed "I'm eating now" but may not have entered carbs yet.
+    // Treat it like enableSMB_with_COB so coverage can fire while we wait for absorption
+    // to drive eventualBG up. Same high/low temp-target safety as above already applies.
+    if (trio_custom_variables.mealWindowActive === true && (trio_custom_variables.mealWindowMinutesRemaining || 0) > 0) {
+        console.error("SMB enabled by meal-window (announcement active, " + trio_custom_variables.mealWindowMinutesRemaining + " min remaining)");
+        return true;
+    }
+
     console.error("SMB disabled (no enableSMB preferences active or no condition satisfied)");
     return false;
 }
@@ -154,6 +162,14 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
     const uamMinutes = trio_custom_variables.uamMinutes;
     const toughMealActive = trio_custom_variables.toughMealActive || false;
     const toughMealMinutesRemaining = trio_custom_variables.toughMealMinutesRemaining || 0;
+    // Meal-window: user-confirmed "I'm eating now" via the iPhone Action Button / Shortcut.
+    // Active until configured expiry, or extended after a real carb entry. We auto-treat this
+    // as tough-meal-active so the existing SMB cap multiplier (1.5×/2.0×/2.5× by BG, with the
+    // 75%-of-insulinReq safety in line 1600) applies without the user toggling anything.
+    const mealWindowActive = trio_custom_variables.mealWindowActive || false;
+    const mealWindowMinutesRemaining = trio_custom_variables.mealWindowMinutesRemaining || 0;
+    const mealWindowEstimatedCarbs = trio_custom_variables.mealWindowEstimatedCarbs || 0;
+    const mealWindowCarbsConfirmed = trio_custom_variables.mealWindowCarbsConfirmed || false;
     // tdd past 24 hour
     let tdd = trio_custom_variables.currentTDD;
     var logOutPut = "";
@@ -1496,6 +1512,43 @@ var maxDelta_bg_threshold;
         //console.error(minPredBG,eventualBG);
         insulinReq = round( (Math.min(minPredBG,eventualBG) - target_bg) / sens, 2);
         insulinForManualBolus = round((eventualBG - target_bg) / sens, 2);
+
+        // Meal-window insulinReq floor.
+        //
+        // Why: in the analysis of 20 bad meals, the dominant failure mode was that oref's
+        // eventualBG prediction credits a rising BG to "carbs absorbing now" (mealCOB drains
+        // faster than the real carb absorption), which makes minPredBG drop below target_bg
+        // and zeroes insulinReq. Result: SMBs stop firing while BG keeps climbing.
+        //
+        // When the user has explicitly signaled "I'm eating now" via the Action Button
+        // shortcut, we floor insulinReq so coverage doesn't collapse during the predicted
+        // (but illusory) BG drop. Safety mirrors toughMealSMBActive (line ~205): require
+        // BG above 120 floor, BG rising (5m or 15m delta > 0), and IOB headroom.
+        var mealWindowFloorActive = false;
+        if (mealWindowActive && mealWindowMinutesRemaining > 0) {
+            var floorBgFloor = bg >= 120;
+            var floorRising = (glucose_status.delta || 0) > 0 || (glucose_status.short_avgdelta || 0) > 0;
+            var floorIobHeadroom = iob_data.iob < max_iob * 0.75;
+            var floorAboveTarget = bg > (target_bg + 20);
+            if (floorBgFloor && floorRising && floorIobHeadroom && floorAboveTarget) {
+                // Scale factor grows with the size of the BG-above-target gap, capped at 0.4.
+                // This bypasses the eventualBG-drop trap without unilaterally chasing peak.
+                var risingDelta = Math.max(glucose_status.delta || 0, glucose_status.short_avgdelta || 0);
+                var velocityFactor = risingDelta >= 8 ? 0.4 : (risingDelta >= 4 ? 0.3 : 0.2);
+                var insulinReqFloor = round(((bg - target_bg) / sens) * velocityFactor, 3);
+                // Hard cap: never floor above half the IOB headroom — leaves margin for safety.
+                insulinReqFloor = Math.min(insulinReqFloor, (max_iob - iob_data.iob) * 0.5);
+                if (insulinReqFloor > insulinReq) {
+                    console.error("Meal-window insulinReq floor: " + insulinReq + "U raised to " + insulinReqFloor + "U (bg=" + bg + ", target=" + target_bg + ", delta=" + risingDelta + ", factor=" + velocityFactor + ")");
+                    rT.reason += "Meal-window floor: insulinReq " + insulinReq + "U → " + insulinReqFloor + "U; ";
+                    insulinReq = insulinReqFloor;
+                    mealWindowFloorActive = true;
+                }
+            } else {
+                console.log("Meal-window active but floor suppressed: bgFloor=" + floorBgFloor + " rising=" + floorRising + " iobHeadroom=" + floorIobHeadroom + " aboveTarget=" + floorAboveTarget);
+            }
+        }
+
         // if that would put us over max_iob, then reduce accordingly
         if (insulinReq > max_iob-iob_data.iob) {
             console.error("SMB limited by maxIOB: " + max_iob-iob_data.iob + " (. insulinReq: " + insulinReq + " U)");
@@ -1595,6 +1648,19 @@ var maxDelta_bg_threshold;
             if (smb_ratio != 0.5) {
                 console.error("SMB Delivery Ratio changed from default 0.5 to " + round(smb_ratio,2))
             }
+
+            // Meal-window: when the insulinReq floor had to rescue insulinReq from collapse,
+            // also bump smb_delivery_ratio to 0.8 so the floored insulinReq actually translates
+            // into a meaningful SMB after bolusIncrement rounding. The toughMeal 75%-of-insulinReq
+            // cap below still applies and provides the upper safety bound.
+            if (mealWindowActive && typeof mealWindowFloorActive !== 'undefined' && mealWindowFloorActive) {
+                var rescuedRatio = Math.max(smb_ratio, 0.8);
+                if (rescuedRatio > smb_ratio) {
+                    console.error("Meal-window: SMB delivery ratio raised from " + round(smb_ratio,2) + " to " + round(rescuedRatio,2) + " (floor active)");
+                    smb_ratio = rescuedRatio;
+                }
+            }
+
             var microBolus = Math.min(insulinReq*smb_ratio, maxBolus);
             // Tough Meal safety: never exceed 75% of calculated insulin requirement
             if (toughMealSMBActive && microBolus > insulinReq * 0.75) {
