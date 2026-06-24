@@ -16,12 +16,9 @@ extension ISFEditor {
     @Observable final class StateModel: BaseStateModel<Provider> {
         @ObservationIgnored @Injected() var determinationStorage: DeterminationStorage!
         @ObservationIgnored @Injected() private var nightscout: NightscoutManager!
-<<<<<<< HEAD
         @ObservationIgnored @Injected() private var profileManager: ProfileManager!
-=======
         @ObservationIgnored @Injected() private var tidepoolManager: TidepoolManager!
         @ObservationIgnored @Injected() private var broadcaster: Broadcaster!
->>>>>>> upstream/main
 
         var items: [Item] = []
         var initialItems: [Item] = []

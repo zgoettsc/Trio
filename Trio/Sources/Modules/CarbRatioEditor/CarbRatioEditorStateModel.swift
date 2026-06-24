@@ -3,12 +3,9 @@ import SwiftUI
 extension CarbRatioEditor {
     final class StateModel: BaseStateModel<Provider> {
         @Injected() private var nightscout: NightscoutManager!
-<<<<<<< HEAD
         @Injected() private var profileManager: ProfileManager!
-=======
         @Injected() private var tidepoolManager: TidepoolManager!
         @Injected() private var broadcaster: Broadcaster!
->>>>>>> upstream/main
         @Published var items: [Item] = []
         @Published var initialItems: [Item] = []
         @Published var therapyItems: [TherapySettingItem] = []
