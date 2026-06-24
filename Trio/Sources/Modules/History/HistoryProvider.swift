@@ -1,5 +1,6 @@
 import CoreData
 import Foundation
+import HealthKit
 
 extension History {
     final class Provider: BaseProvider, HistoryProvider {
@@ -54,6 +55,13 @@ extension History {
 
         func deleteCarbsFromTidepool(withSyncId id: UUID, carbs: Decimal, at: Date, enteredBy: String) {
             tidepoolManager.deleteCarbs(withSyncId: id, carbs: carbs, at: at, enteredBy: enteredBy)
+        }
+
+        func deleteMealDataFromHealth(byID id: String, sampleType: HKSampleType) {
+            Task.detached { [weak self] in
+                guard let self = self else { return }
+                await self.healthkitManager.deleteMealData(byID: id, sampleType: sampleType)
+            }
         }
     }
 }
