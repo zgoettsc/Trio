@@ -521,6 +521,7 @@
 		CA370FC152BC98B3D1832968 /* BasalProfileEditorRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF8BCB0C37DEB5EC377B9612 /* BasalProfileEditorRootView.swift */; };
 		CAFF35768FCCA21E57A5317F /* PhysioTestingRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6FF1C99DF8A3F10D746AF08 /* PhysioTestingRootView.swift */; };
 		CBB0801568491BC78B8E8970 /* PhysioTestOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A531C08BA849E31A1D54B107 /* PhysioTestOverlayView.swift */; };
+		CC6C406E2ACDD69E009B8058 /* RawFetchedProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC6C406D2ACDD69E009B8058 /* RawFetchedProfile.swift */; };
 		CC76E9512BD4812E008BEB61 /* Forecast+helper.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC76E9502BD4812E008BEB61 /* Forecast+helper.swift */; };
 		CD78BB94E43B249D60CC1A1B /* GlucoseNotificationSettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22963BD06A9C83959D4914E4 /* GlucoseNotificationSettingsRootView.swift */; };
 		CE1856F52ADC4858007E39C7 /* AddCarbPresetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1856F42ADC4858007E39C7 /* AddCarbPresetIntent.swift */; };
@@ -1445,6 +1446,7 @@
 		C6FF1C99DF8A3F10D746AF08 /* PhysioTestingRootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhysioTestingRootView.swift; sourceTree = "<group>"; };
 		C8D1A7CA8C10C4403D4BBFA7 /* TreatmentsDataFlow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TreatmentsDataFlow.swift; sourceTree = "<group>"; };
 		CBAFC5ACB612C2306C790B61 /* PhysioTestBannerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhysioTestBannerView.swift; sourceTree = "<group>"; };
+		CC6C406D2ACDD69E009B8058 /* RawFetchedProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawFetchedProfile.swift; sourceTree = "<group>"; };
 		CC76E9502BD4812E008BEB61 /* Forecast+helper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Forecast+helper.swift"; sourceTree = "<group>"; };
 		CE1856F42ADC4858007E39C7 /* AddCarbPresetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCarbPresetIntent.swift; sourceTree = "<group>"; };
 		CE1856F62ADC4869007E39C7 /* CarbPresetIntentRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarbPresetIntentRequest.swift; sourceTree = "<group>"; };
@@ -2687,6 +2689,7 @@
 				38A13D3125E28B4B00EAA382 /* PumpHistoryEvent.swift */,
 				3883583325EEB38000E024B2 /* PumpSettings.swift */,
 				38E989DC25F5021400C0CED0 /* PumpStatus.swift */,
+				CC6C406D2ACDD69E009B8058 /* RawFetchedProfile.swift */,
 				38BF021C25E7E3AF00579895 /* Reservoir.swift */,
 				19B0EF2028F6D66200069496 /* Statistics.swift */,
 				38A0364125ED069400FCBB52 /* TempBasal.swift */,
@@ -4347,6 +4350,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				DDCEBF412CC1B42500DF4C36 /* Views */,
 			);
 			name = LiveActivityExtension;
 			productName = LiveActivityExtension;
@@ -4385,6 +4389,7 @@
 				BD8207CD2D2B42E70023339D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				BDFF7A9E2D25FA970016C40C /* Preview Content */,
 			);
 			name = "Trio Watch App";
 			productName = "TrioWatch Watch App";
@@ -5036,6 +5041,7 @@
 				38FEF3FA2737E42000574A46 /* BaseStateModel.swift in Sources */,
 				DDCAE8332D78D4A800B1BB51 /* TherapySettingsUtil.swift in Sources */,
 				BDA25EFD2D261C0000035F34 /* WatchState.swift in Sources */,
+				CC6C406E2ACDD69E009B8058 /* RawFetchedProfile.swift in Sources */,
 				385CEA8225F23DFD002D6D5B /* NightscoutStatus.swift in Sources */,
 				DD17453C2C55BFAD00211FAC /* AlgorithmAdvancedSettingsProvider.swift in Sources */,
 				F90692AA274B7AAE0037068D /* HealthKitManager.swift in Sources */,
