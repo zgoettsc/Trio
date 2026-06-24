@@ -18,6 +18,7 @@ protocol APSManager {
     var lastLoopDateSubject: PassthroughSubject<Date, Never> { get }
     var bolusProgress: CurrentValueSubject<Decimal?, Never> { get }
     var pumpExpiresAtDate: CurrentValueSubject<Date?, Never> { get }
+    var pumpActivatedAtDate: CurrentValueSubject<Date?, Never> { get }
     var isManualTempBasal: Bool { get }
     var isScheduledBasal: Bool? { get }
     var isSuspended: Bool { get }
@@ -129,6 +130,10 @@ final class BaseAPSManager: APSManager, Injectable {
 
     var pumpExpiresAtDate: CurrentValueSubject<Date?, Never> {
         deviceDataManager.pumpExpiresAtDate
+    }
+
+    var pumpActivatedAtDate: CurrentValueSubject<Date?, Never> {
+        deviceDataManager.pumpActivatedAtDate
     }
 
     var settings: TrioSettings {
@@ -412,7 +417,7 @@ final class BaseAPSManager: APSManager, Injectable {
         guard let autosense = await storage.retrieveAsync(OpenAPS.Settings.autosense, as: Autosens.self),
               (autosense.timestamp ?? .distantPast).addingTimeInterval(30.minutes.timeInterval) > Date()
         else {
-            let result = try await openAPS.autosense()
+            let result = try await openAPS.autosense(shouldSmoothGlucose: settingsManager.settings.smoothGlucose)
             return result != nil
         }
 
@@ -483,7 +488,11 @@ final class BaseAPSManager: APSManager, Injectable {
 
             _ = try await autosenseResult
             try await openAPS.createProfiles()
-            let determination = try await openAPS.determineBasal(currentTemp: await currentTemp, clock: now)
+            let determination = try await openAPS.determineBasal(
+                currentTemp: await currentTemp,
+                shouldSmoothGlucose: settingsManager.settings.smoothGlucose,
+                clock: now
+            )
             iobFileDidUpdate.send(())
 
             // Run signal pipeline (Phase 1: compute and log, no dosing changes)
@@ -543,6 +552,7 @@ final class BaseAPSManager: APSManager, Injectable {
             let temp = try await fetchCurrentTempBasal(date: Date.now)
             return try await openAPS.determineBasal(
                 currentTemp: temp,
+                shouldSmoothGlucose: settingsManager.settings.smoothGlucose,
                 clock: Date(),
                 simulatedCarbsAmount: simulatedCarbsAmount,
                 simulatedBolusAmount: simulatedBolusAmount,
@@ -596,11 +606,18 @@ final class BaseAPSManager: APSManager, Injectable {
         do {
             try await pump.enactBolus(units: roundedAmount, automatic: isSMB)
             debug(.apsManager, "Bolus succeeded")
-            if !isSMB {
-                try await determineBasalSync()
-            }
             bolusProgress.send(0)
             callback?(true, String(localized: "Bolus enacted successfully.", comment: "Success message for enacting a bolus"))
+            if !isSMB {
+                do {
+                    try await determineBasalSync()
+                } catch {
+                    warning(
+                        .apsManager,
+                        "determineBasalSync after manual bolus failed: \(error.localizedDescription)"
+                    )
+                }
+            }
         } catch {
             warning(.apsManager, "Bolus failed with error: \(error)")
             processError(APSError.pumpError(error))

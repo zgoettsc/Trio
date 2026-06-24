@@ -8,13 +8,16 @@
       location = "group:MinimedKit/MinimedKit.xcodeproj">
    </FileRef>
    <FileRef
+      location = "group:OmnipodKit/OmnipodKit.xcodeproj">
+   </FileRef>
+   <FileRef
       location = "group:LibreTransmitter/LibreTransmitter.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:OmniBLE/OmniBLE.xcodeproj">
+      location = "group:DanaKit/DanaKit.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:DanaKit/DanaKit.xcodeproj">
+      location = "group:MedtrumKit/MedtrumKit.xcodeproj">
    </FileRef>
    <FileRef
       location = "group:RileyLinkKit/RileyLinkKit.xcodeproj">
@@ -27,9 +30,6 @@
    </FileRef>
    <FileRef
       location = "group:LoopKit/LoopKit.xcodeproj">
-   </FileRef>
-   <FileRef
-      location = "group:OmniKit/OmniKit.xcodeproj">
    </FileRef>
    <FileRef
       location = "group:G7SensorKit/G7SensorKit.xcodeproj">

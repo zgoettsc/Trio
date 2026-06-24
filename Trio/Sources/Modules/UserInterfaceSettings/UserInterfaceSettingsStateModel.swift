@@ -7,12 +7,14 @@ extension UserInterfaceSettings {
         @Published var xGridLines = false
         @Published var yGridLines: Bool = false
         @Published var rulerMarks: Bool = true
+        @Published var bolusDisplayThreshold: BolusDisplayThreshold = .allUnits
         @Published var forecastDisplayType: ForecastDisplayType = .cone
         @Published var showCarbsRequiredBadge: Bool = true
         @Published var carbsRequiredThreshold: Decimal = 0
         @Published var glucoseColorScheme: GlucoseColorScheme = .staticColor
         @Published var eA1cDisplayUnit: EstimatedA1cDisplayUnit = .percent
         @Published var timeInRangeType: TimeInRangeType = .timeInTightRange
+        @Published var requireAdjustmentsConfirmation: Bool = false
 
         var units: GlucoseUnits = .mgdL
 
@@ -23,6 +25,7 @@ extension UserInterfaceSettings {
             subscribeSetting(\.xGridLines, on: $xGridLines) { xGridLines = $0 }
             subscribeSetting(\.yGridLines, on: $yGridLines) { yGridLines = $0 }
             subscribeSetting(\.rulerMarks, on: $rulerMarks) { rulerMarks = $0 }
+            subscribeSetting(\.bolusDisplayThreshold, on: $bolusDisplayThreshold) { bolusDisplayThreshold = $0 }
 
             subscribeSetting(\.forecastDisplayType, on: $forecastDisplayType) { forecastDisplayType = $0 }
 
@@ -42,6 +45,9 @@ extension UserInterfaceSettings {
             subscribeSetting(\.eA1cDisplayUnit, on: $eA1cDisplayUnit) { eA1cDisplayUnit = $0 }
 
             subscribeSetting(\.timeInRangeType, on: $timeInRangeType) { timeInRangeType = $0 }
+
+            subscribeSetting(\.requireAdjustmentsConfirmation, on: $requireAdjustmentsConfirmation) {
+                requireAdjustmentsConfirmation = $0 }
         }
     }
 }

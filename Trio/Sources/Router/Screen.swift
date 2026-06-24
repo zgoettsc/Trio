@@ -17,7 +17,7 @@ enum Screen: Identifiable, Hashable {
     case targetsEditor
     case treatmentView
     case manualTempBasal
-    case dataTable
+    case history
     case cgm
     case healthkit
     case glucoseNotificationSettings
@@ -49,12 +49,16 @@ enum Screen: Identifiable, Hashable {
     case algorithmAdvancedSettings
     case unitsAndLimits
     case appDiagnostics
+<<<<<<< HEAD
     case aiInsightsConfig
     case therapyProfileList
     case therapyProfileEditor(profile: TherapyProfile, isNew: Bool)
     case smartSenseSettings
     case garminFirestoreStatus
     case physioTesting
+=======
+    case settingsExport
+>>>>>>> upstream/main
 
     var id: Int { String(reflecting: self).hashValue }
 }
@@ -100,8 +104,8 @@ extension Screen {
             Treatments.RootView(resolver: resolver)
         case .manualTempBasal:
             ManualTempBasal.RootView(resolver: resolver)
-        case .dataTable:
-            DataTable.RootView(resolver: resolver)
+        case .history:
+            History.RootView(resolver: resolver)
         case .cgm:
             CGMSettings.RootView(
                 resolver: resolver,
@@ -168,6 +172,7 @@ extension Screen {
             UnitsLimitsSettings.RootView(resolver: resolver)
         case .appDiagnostics:
             AppDiagnostics.RootView(resolver: resolver)
+<<<<<<< HEAD
         case .aiInsightsConfig:
             AIInsightsConfig.RootView(resolver: resolver)
         case .therapyProfileList:
@@ -180,6 +185,10 @@ extension Screen {
             GarminFirestoreStatusView()
         case .physioTesting:
             PhysioTesting.RootView(resolver: resolver)
+=======
+        case .settingsExport:
+            SettingsExport.RootView(resolver: resolver)
+>>>>>>> upstream/main
         }
     }
 

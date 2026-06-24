@@ -435,9 +435,6 @@ enum DeliveryLimitSubstep: Int, CaseIterable, Identifiable {
                 Text(
                     "This is the maximum basal rate allowed to be set or scheduled. This applies to both automatic and manual basal rates."
                 )
-                Text(
-                    "Note to Medtronic Pump Users: You must also manually set the max basal rate on the pump to this value or higher."
-                )
             }
         case .maxCOB:
             return VStack(alignment: .leading, spacing: 8) {
@@ -483,27 +480,71 @@ enum DeliveryLimitSubstep: Int, CaseIterable, Identifiable {
     }
 }
 
+/// Three-state diagnostics-sharing consent.
+///
+/// Maps to a pair of independent `Bool?` flags in `PropertyPersistentFlags`:
+/// `diagnosticsSharingEnabled` (Crashlytics) and `telemetryEnabled` (the
+/// anonymous-usage POST). See `TelemetryClient`.
 enum DiagnosticsSharingOption: String, Equatable, CaseIterable, Identifiable {
-    case enabled
+    case full
+    case crashOnly
     case disabled
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .enabled:
-            return String(localized: "Enable Sharing")
+        case .full:
+            return String(localized: "Enable Full Sharing")
+        case .crashOnly:
+            return String(localized: "Crash Reports Only")
         case .disabled:
             return String(localized: "Disable Sharing")
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .full:
+            return String(localized: "Share anonymous crash reports + usage data.")
+        case .crashOnly:
+            return String(localized: "Share only crash reports — no usage data.")
+        case .disabled:
+            return String(localized: "Do not share any diagnostic data.")
+        }
+    }
+
+    var crashlyticsEnabled: Bool {
+        switch self {
+        case .crashOnly,
+             .full: return true
+        case .disabled: return false
+        }
+    }
+
+    var telemetryEnabled: Bool {
+        switch self {
+        case .full: return true
+        case .crashOnly,
+             .disabled: return false
+        }
+    }
+
+    init(crashlyticsEnabled: Bool, telemetryEnabled: Bool) {
+        switch (crashlyticsEnabled, telemetryEnabled) {
+        case (true, true): self = .full
+        case (true, false): self = .crashOnly
+        case (false, true): self = .full // unreachable in normal flow
+        case (false, false): self = .disabled
         }
     }
 }
 
 enum PumpOptionForOnboardingUnits: String, Equatable, CaseIterable, Identifiable {
     case minimed
-    case omnipodEros
-    case omnipodDash
+    case omni
     case dana
+    case medtrum
 
     var id: String { rawValue }
 
@@ -511,12 +552,12 @@ enum PumpOptionForOnboardingUnits: String, Equatable, CaseIterable, Identifiable
         switch self {
         case .minimed:
             return "Medtronic"
-        case .omnipodEros:
-            return "Omnipod Eros"
-        case .omnipodDash:
-            return "Omnipod DASH"
+        case .omni:
+            return "All Omnipod Types"
         case .dana:
             return "Dana (RS/-i)"
+        case .medtrum:
+            return "Medtrum Nano"
         }
     }
 }

@@ -74,17 +74,21 @@
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Bluetooth is used to communicate with insulin pump and continuous glucose monitor devices</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>To create events with BG reading values, so that they can be viewed on Apple Watch and CarPlay</string>
+	<string>To create events with glucose values, so they can be viewed on Apple Watch and CarPlay</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>Calendar is used to create a new glucose events.</string>
+	<string>Calendar is used to create new glucose events.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Contact is used to create a Apple Watch complication</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera is used to take photos of meals for AI-powered carb estimation</string>
 	<key>NSFaceIDUsageDescription</key>
+<<<<<<< HEAD
 	<string>For authorized acces to bolus</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Photo library access is used to select meal photos for AI-powered carb estimation</string>
+=======
+	<string>For authorized access to bolus</string>
+>>>>>>> upstream/main
 	<key>NSHealthShareUsageDescription</key>
 	<string>Health App is used to store blood glucose, carbs and insulin</string>
 	<key>NSHealthUpdateUsageDescription</key>
@@ -111,8 +115,8 @@
 		<string>remote-notification</string>
 		<string>audio</string>
 	</array>
-    <key>UIDesignRequiresCompatibility</key>
-    <true/>
+	<key>UIDesignRequiresCompatibility</key>
+	<true/>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>

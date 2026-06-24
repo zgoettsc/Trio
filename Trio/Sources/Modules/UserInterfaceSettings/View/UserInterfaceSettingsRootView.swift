@@ -96,7 +96,7 @@ extension UserInterfaceSettings {
                             }.padding(.top)
                         }.padding(.bottom)
                     }
-                ).listRowBackground(Color.chart)
+                ).settingsSearchTarget(label: String(localized: "Appearance"))
 
                 Section {
                     VStack {
@@ -154,7 +154,7 @@ extension UserInterfaceSettings {
                             ).buttonStyle(BorderlessButtonStyle())
                         }.padding(.top)
                     }.padding(.bottom)
-                }.listRowBackground(Color.chart)
+                }.settingsSearchTarget(label: String(localized: "Glucose Color Scheme"))
 
                 Section(
                     header: Text("Home View Settings"),
@@ -189,7 +189,7 @@ extension UserInterfaceSettings {
                             }.padding(.top)
                         }.padding(.vertical)
                     }
-                ).listRowBackground(Color.chart)
+                ).settingsSearchTarget(label: String(localized: "Show X-Axis Grid Lines"))
 
                 SettingInputSection(
                     decimalValue: $decimalPlaceholder,
@@ -319,7 +319,7 @@ extension UserInterfaceSettings {
                                 ).buttonStyle(BorderlessButtonStyle())
                             }.padding(.top)
                         }.padding(.bottom)
-                    }.listRowBackground(Color.chart)
+                    }.settingsSearchTarget(label: String(localized: "Low Threshold"))
                 }
 
                 Section {
@@ -374,7 +374,49 @@ extension UserInterfaceSettings {
                             ).buttonStyle(BorderlessButtonStyle())
                         }.padding(.top)
                     }.padding(.bottom)
-                }.listRowBackground(Color.chart)
+                }.settingsSearchTarget(label: String(localized: "Forecast Display Type"))
+
+                Section {
+                    VStack {
+                        Picker(
+                            selection: $state.bolusDisplayThreshold,
+                            label: Text("Bolus Display Threshold")
+                        ) {
+                            ForEach(BolusDisplayThreshold.allCases) { selection in
+                                Text(selection.displayName).tag(selection)
+                            }
+                        }.padding(.top)
+
+                        HStack(alignment: .center) {
+                            Text(
+                                "Choose to hide small bolus amounts. See hint for more details."
+                            )
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .lineLimit(nil)
+                            Spacer()
+                            Button(
+                                action: {
+                                    hintLabel = String(localized: "Bolus Display Threshold")
+                                    selectedVerboseHint =
+                                        AnyView(
+                                            VStack(alignment: .leading) {
+                                                Text(
+                                                    "This setting controls which bolus amount labels are shown on Trio’s main chart. Boluses appear as blue upside-down triangles, with a number showing the amount. Depending on the option you choose, only boluses at or above that amount will show a label. For example, if you choose ‘0.5 U and over’, only boluses of 0.5 U or more will show a label."
+                                                )
+                                            }
+                                        )
+                                    shouldDisplayHint.toggle()
+                                },
+                                label: {
+                                    HStack {
+                                        Image(systemName: "questionmark.circle")
+                                    }
+                                }
+                            ).buttonStyle(BorderlessButtonStyle())
+                        }.padding(.top)
+                    }.padding(.bottom)
+                }.settingsSearchTarget(label: String(localized: "Bolus Display Threshold"))
 
                 Section(
                     header: Text("Trio Statistics"),
@@ -417,7 +459,7 @@ extension UserInterfaceSettings {
                             }.padding(.top)
                         }.padding(.bottom)
                     }
-                ).listRowBackground(Color.chart)
+                ).settingsSearchTarget(label: String(localized: "eA1c/GMI Display Unit"))
 
                 Section {
                     VStack(alignment: .leading) {
@@ -496,7 +538,7 @@ extension UserInterfaceSettings {
                             ).buttonStyle(BorderlessButtonStyle())
                         }.padding(.top)
                     }.padding(.bottom)
-                }.listRowBackground(Color.chart)
+                }.settingsSearchTarget(label: String(localized: "Time in Range Type"))
 
                 SettingInputSection(
                     decimalValue: $state.carbsRequiredThreshold,
@@ -519,6 +561,29 @@ extension UserInterfaceSettings {
                     ),
                     headerText: String(localized: "Carbs Required Badge")
                 )
+
+                SettingInputSection(
+                    decimalValue: $decimalPlaceholder,
+                    booleanValue: $state.requireAdjustmentsConfirmation,
+                    shouldDisplayHint: $shouldDisplayHint,
+                    selectedVerboseHint: Binding(
+                        get: { selectedVerboseHint },
+                        set: {
+                            selectedVerboseHint = $0.map { AnyView($0) }
+                            hintLabel = String(localized: "Require Adjustments Confirmation")
+                        }
+                    ),
+                    units: state.units,
+                    type: .boolean,
+                    label: String(localized: "Require Adjustments Confirmation"),
+                    miniHint: String(
+                        localized: "If enabled, a confirmation dialog will be shown when activating adjustment presets."
+                    ),
+                    verboseHint: Text(
+                        "Turning this on will show a confirmation dialog when you activate an Override or Temporary Target preset. This is for users who would like avoid accidentally activating a preset by mistake."
+                    ),
+                    headerText: String(localized: "Adjustments")
+                )
             }
             .listSectionSpacing(sectionSpacing)
             .sheet(isPresented: $shouldDisplayHint) {
@@ -535,6 +600,7 @@ extension UserInterfaceSettings {
             .onAppear(perform: configureView)
             .navigationBarTitle("User Interface")
             .navigationBarTitleDisplayMode(.automatic)
+            .settingsHighlightScroll()
         }
     }
 }

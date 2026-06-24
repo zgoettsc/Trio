@@ -58,6 +58,7 @@ public extension PumpEventStored {
         case rewind = "Rewind"
         case prime = "Prime"
         case journalCarbs = "JournalEntryMealMarker"
+        case siteChange = "SiteChange"
 
         case nsNote = "Note"
         case nsTempBasal = "Temp Basal"
@@ -81,6 +82,11 @@ public extension PumpEventStored {
 extension NSPredicate {
     static var pumpHistoryLast1440Minutes: NSPredicate {
         let date = Date.oneDayAgoInMinutes
+        return NSPredicate(format: "timestamp >= %@", date as NSDate)
+    }
+
+    static var pumpHistoryLast48h: NSPredicate {
+        let date = Date() - TimeInterval(hours: 48)
         return NSPredicate(format: "timestamp >= %@", date as NSDate)
     }
 

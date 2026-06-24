@@ -13,6 +13,9 @@ extension Adjustments {
         @ObservationIgnored @Injected() var overrideStorage: OverrideStorage!
         @ObservationIgnored @Injected() var nightscoutManager: NightscoutManager!
 
+        var requireAdjustmentsConfirmation: Bool = false
+        var shouldDisplayPresetStartConfirmDialog: Bool = false
+
         // MARK: - Override and Temp Target Properties
 
         var overridePercentage: Double = 100
@@ -49,7 +52,6 @@ extension Adjustments {
         var units: GlucoseUnits = .mgdL
 
         // Temp Target Properties
-        let normalTarget: Decimal = 100
         var tempTargetDuration: Decimal = 0
         var tempTargetName: String = ""
         var tempTargetTarget: Decimal = 100
@@ -158,7 +160,12 @@ extension Adjustments {
             highTTraisesSens = settingsManager.preferences.highTemptargetRaisesSensitivity
             isExerciseModeActive = settingsManager.preferences.exerciseMode
             lowTTlowersSens = settingsManager.preferences.lowTemptargetLowersSensitivity
-            percentage = computeAdjustedPercentage()
+            percentage = TempTargetCalculations.computeAdjustedPercentage(
+                halfBasalTarget: halfBasalTarget,
+                target: tempTargetTarget,
+                autosensMax: autosensMax
+            )
+            requireAdjustmentsConfirmation = settingsManager.settings.requireAdjustmentsConfirmation
             Task {
                 await getCurrentGlucoseTarget()
             }
@@ -253,6 +260,7 @@ extension Adjustments.StateModel: SettingsObserver, PreferencesObserver {
     /// Updates settings when they change.
     func settingsDidChange(_: TrioSettings) {
         units = settingsManager.settings.units
+        requireAdjustmentsConfirmation = settingsManager.settings.requireAdjustmentsConfirmation
         Task {
             await getCurrentGlucoseTarget()
         }
@@ -268,7 +276,11 @@ extension Adjustments.StateModel: SettingsObserver, PreferencesObserver {
         highTTraisesSens = settingsManager.preferences.highTemptargetRaisesSensitivity
         isExerciseModeActive = settingsManager.preferences.exerciseMode
         lowTTlowersSens = settingsManager.preferences.lowTemptargetLowersSensitivity
-        percentage = computeAdjustedPercentage()
+        percentage = TempTargetCalculations.computeAdjustedPercentage(
+            halfBasalTarget: halfBasalTarget,
+            target: tempTargetTarget,
+            autosensMax: autosensMax
+        )
         Task {
             await getCurrentGlucoseTarget()
         }

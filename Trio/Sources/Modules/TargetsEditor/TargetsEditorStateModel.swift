@@ -3,6 +3,7 @@ import SwiftUI
 extension TargetsEditor {
     final class StateModel: BaseStateModel<Provider> {
         @Injected() private var nightscout: NightscoutManager!
+        @Injected() private var tidepoolManager: TidepoolManager!
         @Injected() private var broadcaster: Broadcaster!
         @Injected() private var profileManager: ProfileManager!
 
@@ -114,6 +115,10 @@ extension TargetsEditor {
                         "\(DebuggingIdentifiers.failed) failed to upload targets to Nightscout: \(error)"
                     )
                 }
+            }
+
+            Task.detached(priority: .low) {
+                await self.tidepoolManager.uploadSettings()
             }
         }
 

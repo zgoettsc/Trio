@@ -154,7 +154,8 @@ extension MainChartView {
                 InsulinView(
                     glucoseData: state.glucoseFromPersistence,
                     insulinData: state.insulinFromPersistence,
-                    units: state.units
+                    units: state.units,
+                    bolusDisplayThreshold: state.bolusDisplayThreshold
                 )
 
                 CarbView(
@@ -186,7 +187,8 @@ extension MainChartView {
                         highGlucose: highGlucose,
                         lowGlucose: lowGlucose,
                         currentGlucoseTarget: currentGlucoseTarget,
-                        glucoseColorScheme: glucoseColorScheme
+                        glucoseColorScheme: glucoseColorScheme,
+                        isSmoothingEnabled: state.settingsManager.settings.smoothGlucose
                     )
                 }
             }

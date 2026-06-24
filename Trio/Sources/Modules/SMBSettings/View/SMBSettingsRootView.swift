@@ -331,16 +331,16 @@ extension SMBSettings {
                         set: {
                             selectedVerboseHint = $0.map { AnyView($0) }
                             hintLabel = String(
-                                localized: "Max. Allowed Glucose Rise for SMB",
-                                comment: "Max. Allowed Glucose Rise for SMB, formerly Max Delta-BG Threshold"
+                                localized: "Max Allowed Glucose Rise for SMB",
+                                comment: "Max Allowed Glucose Rise for SMB, formerly Max Delta-BG Threshold"
                             )
                         }
                     ),
                     units: state.units,
                     type: .decimal("maxDeltaBGthreshold"),
                     label: String(
-                        localized: "Max. Allowed Glucose Rise for SMB",
-                        comment: "Max. Allowed Glucose Rise for SMB, formerly Max Delta-BG Threshold"
+                        localized: "Max Allowed Glucose Rise for SMB",
+                        comment: "Max Allowed Glucose Rise for SMB, formerly Max Delta-BG Threshold"
                     ),
                     miniHint: String(localized: "Disables SMBs if last two glucose values differ by more than this percent."),
                     verboseHint:
@@ -370,6 +370,7 @@ extension SMBSettings {
             .onAppear(perform: configureView)
             .navigationTitle("SMB Settings")
             .navigationBarTitleDisplayMode(.automatic)
+            .settingsHighlightScroll()
         }
     }
 }

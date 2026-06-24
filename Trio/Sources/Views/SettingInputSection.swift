@@ -83,7 +83,8 @@ struct SettingInputSection<VerboseHint: View>: View {
             },
             header: { headerText.map(Text.init) },
             footer: { footerText.map(Text.init) }
-        ).listRowBackground(Color.chart)
+        )
+        .settingsSearchTarget(label: label)
     }
 
     // Helper function to retrieve PickerSetting based on key
@@ -99,8 +100,6 @@ struct SettingInputSection<VerboseHint: View>: View {
             return pickerSettingsProvider.settings.individualAdjustmentFactor
         case "delay":
             return pickerSettingsProvider.settings.delay
-        case "timeCap":
-            return pickerSettingsProvider.settings.timeCap
         case "minuteInterval":
             return pickerSettingsProvider.settings.minuteInterval
         case "high":

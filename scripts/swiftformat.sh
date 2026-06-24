@@ -104,11 +104,11 @@ trailingClosures \
   LoopKit,  \
   LibreTransmitter, \
   G7SensorKit, \
-  OmniKit,  \
   dexcom-share-client-swift, \
   CGMBLEKit, \
   RileyLinkKit, \
-  OmniBLE, \
   MinimedKit, \
-  TidepoolService \
-  DanaKit 
+  TidepoolService, \
+  DanaKit, \
+  MedtrumKit, \
+  OmnipodKit

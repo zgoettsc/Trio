@@ -144,17 +144,9 @@ extension PluginSource: CGMManagerDelegate {
     }
 
     func startDateToFilterNewData(for _: CGMManager) -> Date? {
-        var date: Date?
+        dispatchPrecondition(condition: .onQueue(processQueue))
 
-        processQueue.async { [weak self] in
-            guard let self = self else { return }
-
-            dispatchPrecondition(condition: .onQueue(self.processQueue))
-
-            date = glucoseStorage.lastGlucoseDate()
-        }
-
-        return date
+        return glucoseStorage.lastGlucoseDate()
     }
 
     func cgmManagerDidUpdateState(_ cgmManager: CGMManager) {
@@ -244,7 +236,7 @@ extension PluginSource: CGMManagerDelegate {
 
                 let value = Int(quantity.doubleValue(for: .milligramsPerDeciliter))
                 return BloodGlucose(
-                    _id: UUID().uuidString,
+                    id: UUID().uuidString,
                     sgv: value,
                     direction: .init(trendType: newGlucoseSample.trend),
                     date: Decimal(Int(newGlucoseSample.date.timeIntervalSince1970 * 1000)),
