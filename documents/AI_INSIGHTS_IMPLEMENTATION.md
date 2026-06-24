@@ -517,7 +517,7 @@ Keychain (URL + Secret)
 
 **Endpoint:** `https://api.anthropic.com/v1/messages`
 
-**Model:** `claude-sonnet-4-20250514`
+**Model:** `claude-opus-4-8`
 
 **Headers:**
 ```
@@ -529,7 +529,7 @@ Content-Type: application/json
 **Request Format:**
 ```json
 {
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-opus-4-8",
     "max_tokens": 4096,
     "system": "[safety system prompt]",
     "messages": [

@@ -115,7 +115,7 @@ final class ClaudeAPIService {
     }
 
     private let baseURL = "https://api.anthropic.com/v1/messages"
-    private let model = "claude-sonnet-4-20250514"
+    private let model = "claude-opus-4-8"
     private let apiVersion = "2023-06-01"
 
     /// System prompt for safety-focused diabetes analysis
