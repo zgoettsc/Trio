@@ -13,22 +13,6 @@ import SwiftUI
 /// Uses the SwissAlpine xDrip+ compatible data format.
 /// Sent as an array where the first entry contains all extended data fields.
 struct GarminWatchState: Hashable, Equatable, Sendable, Encodable {
-<<<<<<< HEAD
-    var glucose: String?
-    var trendRaw: String?
-    var delta: String?
-    var iob: String?
-    var cob: String?
-    var lastLoopDateInterval: UInt64?
-    var eventualBGRaw: String?
-    var isf: String?
-    /// Diagnostic: timestamp (HH:mm:ss) of the latest glucose reading used to build this state.
-    var glucoseDate: String?
-    /// Diagnostic: timestamp (HH:mm:ss) when the phone built this payload.
-    var sentAt: String?
-    /// Diagnostic: delivery path — "push" for proactive throttled sends, "poll" for watch-requested responses.
-    var source: String?
-=======
     /// Timestamp of the enacted loop determination in milliseconds since Unix epoch
     /// Shows when the loop actually executed, used to indicate loop staleness
     var date: UInt64?
@@ -79,7 +63,6 @@ struct GarminWatchState: Hashable, Equatable, Sendable, Encodable {
     /// Specifies which secondary attribute to display
     /// Options: "tbr" or "eventualBG"
     var displaySecondaryAttributeChoice: String?
->>>>>>> upstream/main
 
     static func == (lhs: GarminWatchState, rhs: GarminWatchState) -> Bool {
         lhs.date == rhs.date &&
