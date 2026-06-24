@@ -164,11 +164,7 @@ jobs:
   # Builds Trio
   build:
     name: Build
-<<<<<<< HEAD
-    needs: [check_certs, check_alive_and_permissions, check_latest_from_upstream, day_in_month]
-=======
     needs: [check_certs, check_status]
->>>>>>> upstream/main
     runs-on: macos-26
     permissions:
       contents: write

@@ -82,13 +82,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Camera is used to take photos of meals for AI-powered carb estimation</string>
 	<key>NSFaceIDUsageDescription</key>
-<<<<<<< HEAD
-	<string>For authorized acces to bolus</string>
+	<string>For authorized access to bolus</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Photo library access is used to select meal photos for AI-powered carb estimation</string>
-=======
-	<string>For authorized access to bolus</string>
->>>>>>> upstream/main
 	<key>NSHealthShareUsageDescription</key>
 	<string>Health App is used to store blood glucose, carbs and insulin</string>
 	<key>NSHealthUpdateUsageDescription</key>
