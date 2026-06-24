@@ -192,12 +192,9 @@ extension Treatments {
             hasCleanedUp = true
 
             unsubscribe()
-<<<<<<< HEAD
             bolusProgressCancellable?.cancel()
             cronometerMealDetector?.stopObserving()
-=======
             lifetime = Lifetime()
->>>>>>> upstream/main
 
             broadcaster?.unregister(DeterminationObserver.self, observer: self)
             broadcaster?.unregister(BolusFailureObserver.self, observer: self)
@@ -223,11 +220,8 @@ extension Treatments {
                             self.registerObservers()
                         }
                         group.addTask {
-<<<<<<< HEAD
                             await self.setupSmartSense()
-=======
                             self.setupLastBolus()
->>>>>>> upstream/main
                         }
 
                         // Wait for all tasks to complete

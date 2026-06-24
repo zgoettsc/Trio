@@ -24,14 +24,11 @@ extension Treatments {
         @State private var calculatorDetent = PresentationDetent.large
         @State private var pushed: Bool = false
         @State private var debounce: DispatchWorkItem?
-<<<<<<< HEAD
         // Photo Carb Estimation
         @State private var showPhotoCarbSheet = false
         @State private var showAPIKeyRequiredAlert = false
         @StateObject private var aiInsightsState = AIInsightsConfig.StateModel()
-=======
         @State private var showFatProteinOrderBanner = false
->>>>>>> upstream/main
 
         private enum Config {
             static let dividerHeight: CGFloat = 2
@@ -110,29 +107,6 @@ extension Treatments {
         @ViewBuilder private func proteinAndFat() -> some View {
             HStack {
                 HStack {
-<<<<<<< HEAD
-                    Text("Protein")
-                    TextFieldWithToolBar(
-                        text: $state.protein,
-                        placeholder: "0",
-                        keyboardType: .numberPad,
-                        numberFormatter: mealFormatter,
-                        showArrows: true,
-                        previousTextField: { focusedField = previousField(from: .protein) },
-                        nextTextField: { focusedField = nextField(from: .protein) },
-                        unitsText: String(localized: "g", comment: "Units for carbs")
-                    )
-                    .focused($focusedField, equals: .protein)
-                    .onChange(of: state.protein) {
-                        state.evaluateToughMealAutoSuggestion()
-                    }
-                }
-
-                Divider().foregroundStyle(.primary).fontWeight(.bold).frame(width: 10)
-
-                HStack {
-=======
->>>>>>> upstream/main
                     Text("Fat")
                     TextFieldWithToolBar(
                         text: $state.fat,
