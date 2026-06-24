@@ -192,7 +192,6 @@ extension Treatments {
             hasCleanedUp = true
 
             unsubscribe()
-            bolusProgressCancellable?.cancel()
             cronometerMealDetector?.stopObserving()
             lifetime = Lifetime()
 
