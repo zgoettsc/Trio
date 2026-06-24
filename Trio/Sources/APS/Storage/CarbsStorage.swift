@@ -16,6 +16,7 @@ protocol CarbsStorage {
     func getCarbsNotYetUploadedToNightscout() async throws -> [NightscoutTreatment]
     func getFPUsNotYetUploadedToNightscout() async throws -> [NightscoutTreatment]
     func getCarbsNotYetUploadedToTidepool() async throws -> [CarbsEntry]
+    func getCarbsNotYetUploadedToHealth() async throws -> [CarbsEntry]
 }
 
 final class BaseCarbsStorage: CarbsStorage, Injectable {
@@ -505,6 +506,37 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                     enteredBy: CarbsEntry.local,
                     isFPU: nil,
                     fpuID: nil
+                )
+            }
+        }
+    }
+
+    func getCarbsNotYetUploadedToHealth() async throws -> [CarbsEntry] {
+        let results = try await CoreDataStack.shared.fetchEntitiesAsync(
+            ofType: CarbEntryStored.self,
+            onContext: context,
+            predicate: NSPredicate.carbsNotYetUploadedToHealth,
+            key: "date",
+            ascending: false
+        )
+
+        return try await context.perform {
+            guard let carbEntries = results as? [CarbEntryStored] else {
+                throw CoreDataError.fetchError(function: #function, file: #file)
+            }
+
+            return carbEntries.map { result in
+                CarbsEntry(
+                    id: result.id?.uuidString,
+                    createdAt: result.date ?? Date(),
+                    actualDate: result.date,
+                    carbs: Decimal(result.carbs),
+                    fat: Decimal(result.fat),
+                    protein: Decimal(result.protein),
+                    note: result.note,
+                    enteredBy: CarbsEntry.local,
+                    isFPU: result.isFPU,
+                    fpuID: result.fpuID?.uuidString
                 )
             }
         }
