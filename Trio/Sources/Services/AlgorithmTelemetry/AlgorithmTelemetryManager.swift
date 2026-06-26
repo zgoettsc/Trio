@@ -22,6 +22,12 @@ protocol AlgorithmTelemetryManager: AnyObject {
 
     /// Wipe local data and clear last-push state. Called from the settings "Reset" button.
     func resetLocalData()
+
+    /// Detect a naturally-expired meal window and emit a `mealWindowExpired` event,
+    /// then clear `mealWindowActivationDate` from settings so the window's gone for good.
+    /// Safe to call any time. Returns the windowId if an expiry was just logged.
+    @discardableResult
+    func auditExpiredMealWindow() -> String?
 }
 
 /// Keychain key for the GitHub Personal Access Token. We store ONLY the PAT here;
@@ -53,6 +59,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             .publisher(for: UIApplication.didBecomeActiveNotification)
             .sink { [weak self] _ in
                 guard let self else { return }
+                self.auditExpiredMealWindow()
                 Task { await self.pushNow() }
             }
             .store(in: &subscriptions)
@@ -151,6 +158,42 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         s.telemetryLastSuccessfulPushDate = nil
         s.telemetryLastError = nil
         settingsManager.settings = s
+    }
+
+    @discardableResult
+    func auditExpiredMealWindow() -> String? {
+        let s = settingsManager.settings
+        guard let activatedAt = s.mealWindowActivationDate else { return nil }
+        let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
+            ? s.mealWindowExtendedDurationMinutes
+            : s.mealWindowDurationMinutes
+        let cappedDuration = min(durationMinutes, 360)
+        let expiresAt = activatedAt.addingTimeInterval(
+            TimeInterval(truncating: cappedDuration as NSDecimalNumber) * 60
+        )
+        guard expiresAt <= Date() else { return nil }
+
+        let windowId = s.mealWindowId
+        logEvent(AlgorithmTelemetryEvent(
+            kind: .mealWindowExpired,
+            timestamp: expiresAt,
+            windowId: windowId,
+            payload: [
+                "source": .string("naturalExpiry"),
+                "elapsedMinutes": .double(Date().timeIntervalSince(activatedAt) / 60),
+                "wasCarbsConfirmed": .bool(s.mealWindowCarbsConfirmed)
+            ]
+        ))
+
+        DispatchQueue.main.async {
+            var ns = self.settingsManager.settings
+            ns.mealWindowActivationDate = nil
+            ns.mealWindowEstimatedCarbs = 0
+            ns.mealWindowCarbsConfirmed = false
+            ns.mealWindowId = nil
+            self.settingsManager.settings = ns
+        }
+        return windowId
     }
 
     // MARK: - Token + status persistence

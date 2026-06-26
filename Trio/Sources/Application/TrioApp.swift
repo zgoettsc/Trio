@@ -509,13 +509,28 @@ extension Notification.Name {
             // timestamp so the next determineBasal pass sees no active window.
             if components?.path == "/cancel" {
                 if let settingsManager = resolver.resolve(SettingsManager.self),
-                   settingsManager.settings.mealWindowActivationDate != nil
+                   let activatedAt = settingsManager.settings.mealWindowActivationDate
                 {
+                    let windowId = settingsManager.settings.mealWindowId
                     var s = settingsManager.settings
                     s.mealWindowActivationDate = nil
                     s.mealWindowEstimatedCarbs = 0
                     s.mealWindowCarbsConfirmed = false
+                    s.mealWindowId = nil
                     settingsManager.settings = s
+
+                    if let telemetry = resolver.resolve(AlgorithmTelemetryManager.self) {
+                        telemetry.logEvent(AlgorithmTelemetryEvent(
+                            kind: .mealWindowCancelled,
+                            timestamp: Date(),
+                            windowId: windowId,
+                            payload: [
+                                "source": .string("liveActivityLink"),
+                                "minutesSinceActivation": .double(Date().timeIntervalSince(activatedAt) / 60)
+                            ]
+                        ))
+                    }
+
                     Task {
                         try? await resolver.resolve(APSManager.self)?.determineBasalSync()
                     }

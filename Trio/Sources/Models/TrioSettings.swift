@@ -85,6 +85,9 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var mealWindowExtendedDurationMinutes: Decimal = 240
     var mealWindowEstimatedCarbs: Decimal = 0
     var mealWindowCarbsConfirmed: Bool = false
+    /// Stable identifier for the currently-active meal window. Set on activation, read
+    /// by every site that logs telemetry events so all events for one window can be joined.
+    var mealWindowId: String? = nil
 
     // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
     // on the trio repo for tuning analysis. PAT is in Keychain, not here.
@@ -285,6 +288,9 @@ extension TrioSettings: Decodable {
 
         if let mealWindowCarbsConfirmed = try? container.decode(Bool.self, forKey: .mealWindowCarbsConfirmed) {
             settings.mealWindowCarbsConfirmed = mealWindowCarbsConfirmed
+        }
+        if let mealWindowId = try? container.decode(String.self, forKey: .mealWindowId) {
+            settings.mealWindowId = mealWindowId
         }
 
         if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {

@@ -84,6 +84,7 @@ final class BaseAPSManager: APSManager, Injectable {
     @Injected() private var broadcaster: Broadcaster!
     @Injected() private var profileManager: ProfileManager!
     @Injected() private var signalPipeline: OrefSignalPipeline!
+    @Injected() private var algorithmTelemetryManager: AlgorithmTelemetryManager!
     @Persisted(key: "lastLoopStartDate") private var lastLoopStartDate: Date = .distantPast
     @Persisted(key: "lastLoopDate") var lastLoopDate: Date = .distantPast {
         didSet {
@@ -524,6 +525,11 @@ final class BaseAPSManager: APSManager, Injectable {
                     }
                 }
             }
+
+            // Telemetry: log a loop sample iff a meal window is active. Outside windows
+            // we don't write per-loop rows (would balloon to thousands of entries/day).
+            // The manager itself gates on telemetryEnabled so this is cheap when off.
+            logTelemetryLoopSample(determination: determination)
         } catch {
             iobFileDidUpdate.send(())
 
@@ -541,6 +547,111 @@ final class BaseAPSManager: APSManager, Injectable {
 
     func determineBasalSync() async throws {
         _ = try await determineBasal()
+    }
+
+    /// Phase 2 telemetry: emit one row per loop pass into loop.jsonl while a meal-window
+    /// is active. Gated locally on `mealWindowActivationDate` so we don't pay the cost
+    /// outside meal windows; the manager additionally gates on the user's enable toggle.
+    /// Floor activation is inferred from the oref reason string (which contains
+    /// "Meal-window floor: insulinReq X → Y" when the JS branch fired).
+    private func logTelemetryLoopSample(determination: Determination?) {
+        let s = settingsManager.settings
+        guard s.mealWindowActivationDate != nil else { return }
+        guard s.telemetryEnabled else { return }
+
+        let now = Date()
+        let activatedAt = s.mealWindowActivationDate
+        let minutesSinceOpen = activatedAt.map { now.timeIntervalSince($0) / 60 }
+
+        let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
+            ? s.mealWindowExtendedDurationMinutes
+            : s.mealWindowDurationMinutes
+        let cappedDuration = min(durationMinutes, 360)
+        let remainingMinutes = activatedAt.map { max(
+            0,
+            Double(truncating: cappedDuration as NSDecimalNumber) - now.timeIntervalSince($0) / 60
+        ) }
+
+        // Parse the oref reason string for the floor-activation marker emitted by the JS.
+        let reason = determination?.reason ?? ""
+        let floorActivated = reason.contains("Meal-window floor:")
+        let floorMagnitude: Double? = nil // numeric parse would require a regex; defer to Phase 3
+        let floorVelocityFactor: Double? = nil
+
+        let sig = signalPipeline.latestOutput
+        let sample = AlgorithmTelemetryLoopSample(
+            timestamp: now,
+            windowId: s.mealWindowId,
+            minutesSinceWindowOpen: minutesSinceOpen,
+            bg: determination?.bg.map { Double(truncating: $0 as NSNumber) },
+            smoothedBG: sig?.smoothedBG,
+            velocity: sig?.velocity,
+            acceleration: sig?.acceleration,
+            jerk: sig?.jerk,
+            delta5m: determination?.minDelta.map { Double(truncating: $0 as NSNumber) },
+            shortAvgDelta: nil,
+            longAvgDelta: nil,
+            mealDetection: sig?.mealDetectionConfidence.rawValue,
+            iob: determination?.iob.map { Double(truncating: $0 as NSNumber) },
+            cob: determination?.cob.map { Double(truncating: $0 as NSNumber) },
+            bayesianCOB: nil,
+            eventualBG: determination?.eventualBG.map { Double($0) },
+            minPredBG: determination?.minPredBG.map { Double(truncating: $0 as NSNumber) },
+            insulinReq: determination?.insulinReq.map { Double(truncating: $0 as NSNumber) },
+            smbDelivered: determination?.units.map { Double(truncating: $0 as NSNumber) },
+            tempBasalRate: determination?.rate.map { Double(truncating: $0 as NSNumber) },
+            sensitivityRatio: determination?.sensitivityRatio.map { Double(truncating: $0 as NSNumber) },
+            mealWindowActive: (remainingMinutes ?? 0) > 0,
+            mealWindowMinutesRemaining: remainingMinutes,
+            mealWindowCarbsConfirmed: s.mealWindowCarbsConfirmed,
+            mealWindowEstimatedCarbs: Double(truncating: s.mealWindowEstimatedCarbs as NSDecimalNumber),
+            floorActivated: floorActivated,
+            floorMagnitude: floorMagnitude,
+            floorVelocityFactor: floorVelocityFactor,
+            target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
+            // ↑ Trio's Determination uses `current_target` (snake_case from oref JS)
+            isf: determination?.isf.map { Double(truncating: $0 as NSNumber) },
+            carbRatio: determination?.carbRatio.map { Double(truncating: $0 as NSNumber) },
+            maxIOB: Double(truncating: settingsManager.preferences.maxIOB as NSDecimalNumber),
+            reason: reason
+        )
+        algorithmTelemetryManager?.logLoopSample(sample)
+
+        // Floor activation gets its own event so we can find them quickly without
+        // scanning every loop row.
+        if floorActivated {
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .insulinReqFloorActivated,
+                timestamp: now,
+                windowId: s.mealWindowId,
+                payload: [
+                    "bg": .from(sample.bg),
+                    "delta5m": .from(sample.delta5m),
+                    "velocity": .from(sample.velocity),
+                    "iob": .from(sample.iob),
+                    "insulinReq": .from(sample.insulinReq),
+                    "smbDelivered": .from(sample.smbDelivered),
+                    "minutesSinceWindowOpen": .from(minutesSinceOpen)
+                ]
+            ))
+        }
+
+        // Surface any SMB the loop just enacted as a discrete event.
+        if let smb = sample.smbDelivered, smb > 0 {
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .smbDelivered,
+                timestamp: now,
+                windowId: s.mealWindowId,
+                payload: [
+                    "units": .double(smb),
+                    "bg": .from(sample.bg),
+                    "iob": .from(sample.iob),
+                    "insulinReq": .from(sample.insulinReq),
+                    "minutesSinceWindowOpen": .from(minutesSinceOpen),
+                    "floorActivated": .bool(floorActivated)
+                ]
+            ))
+        }
     }
 
     func simulateDetermineBasal(

@@ -24,6 +24,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
     @Injected() private var storage: FileStorage!
     @Injected() private var broadcaster: Broadcaster!
     @Injected() private var settings: SettingsManager!
+    @Injected() private var algorithmTelemetryManager: AlgorithmTelemetryManager!
 
     private let updateSubject = PassthroughSubject<Void, Never>()
 
@@ -81,9 +82,27 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
            !settings.settings.mealWindowCarbsConfirmed,
            entriesToStore.contains(where: { $0.carbs > 0 })
         {
+            let windowId = settings.settings.mealWindowId
+            let totalCarbs = entriesToStore.reduce(Decimal(0)) { $0 + $1.carbs }
+            let totalFat = entriesToStore.reduce(Decimal(0)) { $0 + ($1.fat ?? 0) }
+            let totalProtein = entriesToStore.reduce(Decimal(0)) { $0 + ($1.protein ?? 0) }
             var s = settings.settings
             s.mealWindowCarbsConfirmed = true
             settings.settings = s
+
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .mealWindowCarbsConfirmed,
+                timestamp: Date(),
+                windowId: windowId,
+                payload: [
+                    "carbs": .from(totalCarbs),
+                    "fat": .from(totalFat),
+                    "protein": .from(totalProtein),
+                    "minutesSinceActivation": .from(
+                        s.mealWindowActivationDate.map { Date().timeIntervalSince($0) / 60 }
+                    )
+                ]
+            ))
         }
     }
 

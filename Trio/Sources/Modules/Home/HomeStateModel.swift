@@ -805,13 +805,28 @@ extension Home.StateModel {
     /// User-initiated cancel from the Home banner. Mirrors AnnounceMealIntentRequest.cancel()
     /// and the trio://meal-window/cancel URL handler in TrioApp.
     @MainActor func cancelMealWindow() async {
-        guard settingsManager.settings.mealWindowActivationDate != nil else { return }
+        guard let activatedAt = settingsManager.settings.mealWindowActivationDate else { return }
+        let windowId = settingsManager.settings.mealWindowId
         var s = settingsManager.settings
         s.mealWindowActivationDate = nil
         s.mealWindowEstimatedCarbs = 0
         s.mealWindowCarbsConfirmed = false
+        s.mealWindowId = nil
         settingsManager.settings = s
         refreshMealWindowState()
+
+        if let telemetry = resolver.resolve(AlgorithmTelemetryManager.self) {
+            telemetry.logEvent(AlgorithmTelemetryEvent(
+                kind: .mealWindowCancelled,
+                timestamp: Date(),
+                windowId: windowId,
+                payload: [
+                    "source": .string("homeBanner"),
+                    "minutesSinceActivation": .double(Date().timeIntervalSince(activatedAt) / 60)
+                ]
+            ))
+        }
+
         try? await apsManager.determineBasalSync()
     }
 }
