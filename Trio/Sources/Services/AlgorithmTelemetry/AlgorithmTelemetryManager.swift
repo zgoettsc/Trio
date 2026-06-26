@@ -52,6 +52,27 @@ protocol AlgorithmTelemetryManager: AnyObject {
     /// Process any closed windows whose +6h post-prandial tail has elapsed. Writes
     /// outcome-enriched summary rows. Called automatically on app foreground.
     func processReadyOutcomes()
+
+    /// Snapshot of the active override + temp target at the current moment. Read by
+    /// the loop logger (per-pass) and the daily settings writer (once/day).
+    func currentAdjustments() -> AlgorithmTelemetryAdjustmentSnapshot
+}
+
+/// CoreData-derived snapshot of the active override + temp target.
+struct AlgorithmTelemetryAdjustmentSnapshot {
+    let overrideId: String?
+    let overrideActive: Bool
+    let overrideName: String?
+    let overridePercentage: Double?
+    let overrideTargetMgdL: Double?
+    let overrideDuration: Double?
+    let overrideMinutesRemaining: Double?
+    let tempTargetId: String?
+    let tempTargetActive: Bool
+    let tempTargetName: String?
+    let tempTargetTargetMgdL: Double?
+    let tempTargetDuration: Double?
+    let tempTargetMinutesRemaining: Double?
 }
 
 /// Keychain key for the GitHub Personal Access Token. We store ONLY the PAT here;
@@ -219,6 +240,115 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         settingsManager.settings = s
     }
 
+    func currentAdjustments() -> AlgorithmTelemetryAdjustmentSnapshot {
+        let ctx = CoreDataStack.shared.newTaskContext()
+        var ov: OverrideStored?
+        var tt: TempTargetStored?
+        ctx.performAndWait {
+            let oReq = OverrideStored.fetchRequest()
+            oReq.predicate = NSPredicate(format: "enabled == YES")
+            oReq.fetchLimit = 1
+            ov = try? ctx.fetch(oReq).first
+            let tReq = TempTargetStored.fetchRequest()
+            tReq.predicate = NSPredicate(format: "enabled == YES")
+            tReq.fetchLimit = 1
+            tt = try? ctx.fetch(tReq).first
+        }
+        let now = Date()
+        let ovMinutesRemaining: Double? = ov.flatMap { o -> Double? in
+            guard let date = o.date, let durDec = o.duration else { return nil }
+            let dur = Double(truncating: durDec)
+            return max(0, dur - now.timeIntervalSince(date) / 60)
+        }
+        let ttMinutesRemaining: Double? = tt.flatMap { t -> Double? in
+            guard let date = t.date, let durDec = t.duration else { return nil }
+            let dur = Double(truncating: durDec)
+            return max(0, dur - now.timeIntervalSince(date) / 60)
+        }
+        let snapshot = AlgorithmTelemetryAdjustmentSnapshot(
+            overrideId: ov?.id,
+            overrideActive: ov != nil,
+            overrideName: ov?.name,
+            overridePercentage: ov.map { $0.percentage },
+            overrideTargetMgdL: ov?.target.map { Double(truncating: $0) },
+            overrideDuration: ov?.duration.map { Double(truncating: $0) },
+            overrideMinutesRemaining: ovMinutesRemaining,
+            tempTargetId: tt?.id?.uuidString,
+            tempTargetActive: tt != nil,
+            tempTargetName: tt?.name,
+            tempTargetTargetMgdL: tt?.target.map { Double(truncating: $0) },
+            tempTargetDuration: tt?.duration.map { Double(truncating: $0) },
+            tempTargetMinutesRemaining: ttMinutesRemaining
+        )
+
+        // Emit transition events if the active adjustment changed since the last call.
+        // Catches start (no prior → active), cancel (prior → no active), and swap
+        // (one preset replaced with another) regardless of where the change originated.
+        detectAndEmitAdjustmentTransitions(newSnapshot: snapshot)
+
+        return snapshot
+    }
+
+    private var lastSeenOverrideId: String? = nil
+    private var lastSeenTempTargetId: String? = nil
+    private let adjustmentAuditQueue = DispatchQueue(label: "AlgorithmTelemetry.adjustmentAudit")
+
+    private func detectAndEmitAdjustmentTransitions(newSnapshot s: AlgorithmTelemetryAdjustmentSnapshot) {
+        adjustmentAuditQueue.sync {
+            // Override transition
+            if s.overrideId != self.lastSeenOverrideId {
+                if self.lastSeenOverrideId != nil {
+                    logEvent(AlgorithmTelemetryEvent(
+                        kind: .overrideCancelled,
+                        timestamp: Date(),
+                        windowId: settingsManager.settings.mealWindowId,
+                        payload: ["overrideId": .string(self.lastSeenOverrideId!)]
+                    ))
+                }
+                if let newId = s.overrideId {
+                    var payload: [String: AlgorithmTelemetryJSONValue] = [:]
+                    payload["overrideId"] = .string(newId)
+                    payload["name"] = s.overrideName.map { .string($0) } ?? .null
+                    payload["percentage"] = .from(s.overridePercentage)
+                    payload["targetMgdL"] = .from(s.overrideTargetMgdL)
+                    payload["durationMinutes"] = .from(s.overrideDuration)
+                    logEvent(AlgorithmTelemetryEvent(
+                        kind: .overrideStarted,
+                        timestamp: Date(),
+                        windowId: settingsManager.settings.mealWindowId,
+                        payload: payload
+                    ))
+                }
+                self.lastSeenOverrideId = s.overrideId
+            }
+            // Temp target transition
+            if s.tempTargetId != self.lastSeenTempTargetId {
+                if self.lastSeenTempTargetId != nil {
+                    logEvent(AlgorithmTelemetryEvent(
+                        kind: .tempTargetCancelled,
+                        timestamp: Date(),
+                        windowId: settingsManager.settings.mealWindowId,
+                        payload: ["tempTargetId": .string(self.lastSeenTempTargetId!)]
+                    ))
+                }
+                if let newId = s.tempTargetId {
+                    var payload: [String: AlgorithmTelemetryJSONValue] = [:]
+                    payload["tempTargetId"] = .string(newId)
+                    payload["name"] = s.tempTargetName.map { .string($0) } ?? .null
+                    payload["targetMgdL"] = .from(s.tempTargetTargetMgdL)
+                    payload["durationMinutes"] = .from(s.tempTargetDuration)
+                    logEvent(AlgorithmTelemetryEvent(
+                        kind: .tempTargetStarted,
+                        timestamp: Date(),
+                        windowId: settingsManager.settings.mealWindowId,
+                        payload: payload
+                    ))
+                }
+                self.lastSeenTempTargetId = s.tempTargetId
+            }
+        }
+    }
+
     @discardableResult
     func auditExpiredMealWindow() -> String? {
         let s = settingsManager.settings
@@ -380,6 +510,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         guard settingsManager.settings.telemetryEnabled else { return }
         let s = settingsManager.settings
         let p = settingsManager.preferences
+        let adj = currentAdjustments()
 
         // Hourly schedules from FileStorage. Best-effort — missing schedules are nil,
         // not an error (e.g., fresh install).
@@ -447,9 +578,13 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             isfSchedule: isf,
             carbRatioSchedule: cr,
             bgTargetSchedule: targets,
-            activeOverrideName: nil,
-            activeOverrideTarget: nil,
-            activeTempTargetTarget: nil
+            activeOverrideName: adj.overrideName,
+            activeOverridePercentage: adj.overridePercentage,
+            activeOverrideTarget: adj.overrideTargetMgdL,
+            activeOverrideDuration: adj.overrideDuration,
+            activeTempTargetName: adj.tempTargetName,
+            activeTempTargetTarget: adj.tempTargetTargetMgdL,
+            activeTempTargetDuration: adj.tempTargetDuration
         )
         logger.writeSettingsSnapshot(snapshot)
     }

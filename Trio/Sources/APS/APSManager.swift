@@ -593,6 +593,14 @@ final class BaseAPSManager: APSManager, Injectable {
         let floorVelocityFactor: Double? = floor.map { Double(truncating: $0.factor as NSNumber) }
 
         let sig = signalPipeline.latestOutput
+        let adj = algorithmTelemetryManager?.currentAdjustments()
+            ?? AlgorithmTelemetryAdjustmentSnapshot(
+                overrideId: nil, overrideActive: false, overrideName: nil,
+                overridePercentage: nil, overrideTargetMgdL: nil, overrideDuration: nil,
+                overrideMinutesRemaining: nil,
+                tempTargetId: nil, tempTargetActive: false, tempTargetName: nil,
+                tempTargetTargetMgdL: nil, tempTargetDuration: nil, tempTargetMinutesRemaining: nil
+            )
         let sample = AlgorithmTelemetryLoopSample(
             timestamp: now,
             windowId: s.mealWindowId,
@@ -628,6 +636,15 @@ final class BaseAPSManager: APSManager, Injectable {
             isf: determination?.isf.map { Double(truncating: $0 as NSNumber) },
             carbRatio: determination?.carbRatio.map { Double(truncating: $0 as NSNumber) },
             maxIOB: Double(truncating: settingsManager.preferences.maxIOB as NSDecimalNumber),
+            overrideActive: adj.overrideActive,
+            overrideName: adj.overrideName,
+            overridePercentage: adj.overridePercentage,
+            overrideTargetMgdL: adj.overrideTargetMgdL,
+            overrideMinutesRemaining: adj.overrideMinutesRemaining,
+            tempTargetActive: adj.tempTargetActive,
+            tempTargetName: adj.tempTargetName,
+            tempTargetTargetMgdL: adj.tempTargetTargetMgdL,
+            tempTargetMinutesRemaining: adj.tempTargetMinutesRemaining,
             reason: reason
         )
         algorithmTelemetryManager?.logLoopSample(sample)

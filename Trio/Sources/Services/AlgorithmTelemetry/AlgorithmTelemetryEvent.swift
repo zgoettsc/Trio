@@ -19,6 +19,10 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case userBolus        // manual bolus initiated through the Trio bolus screen
     case externalBolus    // user-recorded "external" insulin administered outside Trio
     case carbEntry        // every local carb/fat/protein entry, regardless of meal window
+    case overrideStarted  // user enabled an override profile (percentage / target shift)
+    case overrideCancelled
+    case tempTargetStarted
+    case tempTargetCancelled
 }
 
 struct AlgorithmTelemetryEvent: Codable {
@@ -70,11 +74,24 @@ struct AlgorithmTelemetryLoopSample: Codable {
     let floorMagnitude: Double?
     let floorVelocityFactor: Double?
 
-    // Context
+    // Context — effective values (already include override math). Pair with
+    // the override/temp-target fields below to distinguish "loop math used X
+    // because profile is configured this way" from "X because override is active".
     let target: Double?
     let isf: Double?
     let carbRatio: Double?
     let maxIOB: Double?
+
+    // Active override / temp target at this loop pass. Null when none active.
+    let overrideActive: Bool
+    let overrideName: String?
+    let overridePercentage: Double?
+    let overrideTargetMgdL: Double?
+    let overrideMinutesRemaining: Double?
+    let tempTargetActive: Bool
+    let tempTargetName: String?
+    let tempTargetTargetMgdL: Double?
+    let tempTargetMinutesRemaining: Double?
 
     // Full oref reason string — invaluable for debugging
     let reason: String?
@@ -164,8 +181,12 @@ struct AlgorithmTelemetrySettingsSnapshot: Codable {
     // Currently active override / temp target (if any) — these multiplicatively modify
     // basal / ISF and shift target.
     let activeOverrideName: String?
+    let activeOverridePercentage: Double?
     let activeOverrideTarget: Double?
+    let activeOverrideDuration: Double?
+    let activeTempTargetName: String?
     let activeTempTargetTarget: Double?
+    let activeTempTargetDuration: Double?
 }
 
 struct ScheduledRate: Codable {
