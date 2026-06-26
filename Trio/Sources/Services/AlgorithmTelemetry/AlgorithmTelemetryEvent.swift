@@ -130,14 +130,15 @@ struct AlgorithmTelemetryWindowSummary: Codable {
 }
 
 /// Daily snapshot of the algorithm's full configuration. One file per day, replaced
-/// on each push so we always see today's current state.
+/// on each push so we always see today's current state. The hourly schedules
+/// (basal/ISF/CR) make Claude-o-Tune-style analysis possible — without them we can't
+/// tell which hour's profile entry was active at a given moment.
 struct AlgorithmTelemetrySettingsSnapshot: Codable {
     let timestamp: Date
     let mealWindowDurationMinutes: Double
     let mealWindowExtendedDurationMinutes: Double
-    let target: Double?
-    let isf: Double?
-    let carbRatio: Double?
+
+    // Flat preference knobs
     let maxIOB: Double?
     let smbDeliveryRatio: Double?
     let maxSMBBasalMinutes: Double?
@@ -151,8 +152,32 @@ struct AlgorithmTelemetrySettingsSnapshot: Codable {
     let enableSMBHighBG: Bool?
     let enableSMBHighBGTarget: Double?
     let toughMealEnabled: Bool?
+
+    // Hourly schedules — what the algorithm uses at each hour of day. Required for
+    // tuning-suggestion analysis: a basal "too high" claim only makes sense in the
+    // context of which basal entry was active during the BG drift period.
+    let basalSchedule: [ScheduledRate]?
+    let isfSchedule: [ScheduledRate]?
+    let carbRatioSchedule: [ScheduledRate]?
+    let bgTargetSchedule: [ScheduledTargetRange]?
+
+    // Currently active override / temp target (if any) — these multiplicatively modify
+    // basal / ISF and shift target.
     let activeOverrideName: String?
+    let activeOverrideTarget: Double?
     let activeTempTargetTarget: Double?
+}
+
+struct ScheduledRate: Codable {
+    /// Minutes-from-midnight when this entry begins.
+    let startMinutes: Int
+    let value: Double
+}
+
+struct ScheduledTargetRange: Codable {
+    let startMinutes: Int
+    let low: Double
+    let high: Double
 }
 
 /// Type-erased JSON value so payload dictionaries can carry mixed types without

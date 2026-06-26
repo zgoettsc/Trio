@@ -1541,6 +1541,17 @@ var maxDelta_bg_threshold;
                 if (insulinReqFloor > insulinReq) {
                     console.error("Meal-window insulinReq floor: " + insulinReq + "U raised to " + insulinReqFloor + "U (bg=" + bg + ", target=" + target_bg + ", delta=" + risingDelta + ", factor=" + velocityFactor + ")");
                     rT.reason += "Meal-window floor: insulinReq " + insulinReq + "U → " + insulinReqFloor + "U; ";
+                    // Structured field for telemetry: lets the Swift side capture
+                    // before/after/factor without parsing the reason string.
+                    rT.mealWindowFloor = {
+                        activated: true,
+                        prior: insulinReq,
+                        floored: insulinReqFloor,
+                        factor: velocityFactor,
+                        risingDelta: risingDelta,
+                        bg: bg,
+                        target: target_bg
+                    };
                     insulinReq = insulinReqFloor;
                     mealWindowFloorActive = true;
                 }

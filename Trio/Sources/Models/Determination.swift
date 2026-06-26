@@ -34,6 +34,21 @@ struct Determination: JSON, Equatable {
     var threshold: Decimal?
     let carbRatio: Decimal?
     let received: Bool?
+
+    /// Optional structured data attached by determine-basal.js when the meal-window
+    /// insulinReq floor fires. Read by AlgorithmTelemetry to avoid having to parse
+    /// the human-readable `reason` string. Nil when the floor did not activate.
+    var mealWindowFloor: MealWindowFloorData?
+}
+
+struct MealWindowFloorData: JSON, Equatable {
+    let activated: Bool
+    let prior: Decimal
+    let floored: Decimal
+    let factor: Decimal
+    let risingDelta: Decimal
+    let bg: Decimal
+    let target: Decimal
 }
 
 struct Predictions: JSON, Equatable {
@@ -74,6 +89,7 @@ extension Determination {
         case threshold
         case carbRatio = "CR"
         case received
+        case mealWindowFloor
     }
 }
 

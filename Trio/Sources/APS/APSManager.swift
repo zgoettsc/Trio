@@ -581,12 +581,14 @@ final class BaseAPSManager: APSManager, Injectable {
         }()
         let mealWindowActive = (remainingMinutes ?? 0) > 0
 
-        // Parse the oref reason string for the floor-activation marker emitted by the JS.
+        // Structured floor data from determine-basal.js (preferred). Falls back to
+        // parsing the reason string if the structured field is missing (older oref).
         let reason = determination?.reason ?? ""
-        let floorActivated = reason.contains("Meal-window floor:")
-        let floorMagnitude: Double? = nil // populated by structured field in Commit B
-        let floorPriorInsulinReq: Double? = nil
-        let floorVelocityFactor: Double? = nil
+        let floor = determination?.mealWindowFloor
+        let floorActivated = floor?.activated ?? reason.contains("Meal-window floor:")
+        let floorPriorInsulinReq = floor?.prior.map { Double(truncating: $0 as NSNumber) } ?? nil
+        let floorMagnitude = floor?.floored.map { Double(truncating: $0 as NSNumber) } ?? nil
+        let floorVelocityFactor = floor?.factor.map { Double(truncating: $0 as NSNumber) } ?? nil
 
         let sig = signalPipeline.latestOutput
         let sample = AlgorithmTelemetryLoopSample(
@@ -640,6 +642,9 @@ final class BaseAPSManager: APSManager, Injectable {
                     "delta5m": .from(sample.delta5m),
                     "velocity": .from(sample.velocity),
                     "iob": .from(sample.iob),
+                    "floorPriorInsulinReq": .from(floorPriorInsulinReq),
+                    "floorMagnitude": .from(floorMagnitude),
+                    "floorVelocityFactor": .from(floorVelocityFactor),
                     "insulinReq": .from(sample.insulinReq),
                     "smbDelivered": .from(sample.smbDelivered),
                     "minutesSinceWindowOpen": .from(minutesSinceOpen)

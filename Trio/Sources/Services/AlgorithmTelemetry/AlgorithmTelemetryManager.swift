@@ -59,6 +59,7 @@ enum AlgorithmTelemetryKeychainKey {
 final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable {
     @Injected() private var settingsManager: SettingsManager!
     @Injected() private var keychain: Keychain!
+    @Injected() private var fileStorage: FileStorage!
 
     private let logger = AlgorithmTelemetryLogger()
     private let client = AlgorithmTelemetryGitHubClient()
@@ -273,19 +274,62 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
 
     /// Write today's settings.json snapshot if one isn't already on disk. Cheap to call
     /// repeatedly because TelemetryLogger.writeSettingsSnapshot does an atomic overwrite.
+    /// Pulls hourly basal / ISF / CR / target schedules out of FileStorage so analysis
+    /// knows which profile entry was active at any given hour.
     func maintainDailySnapshot() {
         guard settingsManager.settings.telemetryEnabled else { return }
         let s = settingsManager.settings
         let p = settingsManager.preferences
+
+        // Hourly schedules from FileStorage. Best-effort — missing schedules are nil,
+        // not an error (e.g., fresh install).
+        let basal: [ScheduledRate]? = {
+            guard let entries = fileStorage.retrieve(
+                OpenAPS.Settings.basalProfile,
+                as: [BasalProfileEntry].self
+            ) else { return nil }
+            return entries.map {
+                ScheduledRate(startMinutes: $0.minutes, value: Double(truncating: $0.rate as NSNumber))
+            }
+        }()
+        let isf: [ScheduledRate]? = {
+            guard let payload = fileStorage.retrieve(
+                OpenAPS.Settings.insulinSensitivities,
+                as: InsulinSensitivities.self
+            ) else { return nil }
+            return payload.sensitivities.map {
+                ScheduledRate(startMinutes: $0.offset, value: Double(truncating: $0.sensitivity as NSNumber))
+            }
+        }()
+        let cr: [ScheduledRate]? = {
+            guard let payload = fileStorage.retrieve(
+                OpenAPS.Settings.carbRatios,
+                as: CarbRatios.self
+            ) else { return nil }
+            return payload.schedule.map {
+                ScheduledRate(startMinutes: $0.offset, value: Double(truncating: $0.ratio as NSNumber))
+            }
+        }()
+        let targets: [ScheduledTargetRange]? = {
+            guard let payload = fileStorage.retrieve(
+                OpenAPS.Settings.bgTargets,
+                as: BGTargets.self
+            ) else { return nil }
+            return payload.targets.map {
+                ScheduledTargetRange(
+                    startMinutes: $0.offset,
+                    low: Double(truncating: $0.low as NSNumber),
+                    high: Double(truncating: $0.high as NSNumber)
+                )
+            }
+        }()
+
         let snapshot = AlgorithmTelemetrySettingsSnapshot(
             timestamp: Date(),
             mealWindowDurationMinutes: Double(truncating: s.mealWindowDurationMinutes as NSDecimalNumber),
             mealWindowExtendedDurationMinutes: Double(
                 truncating: s.mealWindowExtendedDurationMinutes as NSDecimalNumber
             ),
-            target: nil, // profile-time computed; not flat in settings/preferences
-            isf: nil,
-            carbRatio: nil,
             maxIOB: Double(truncating: p.maxIOB as NSDecimalNumber),
             smbDeliveryRatio: Double(truncating: p.smbDeliveryRatio as NSDecimalNumber),
             maxSMBBasalMinutes: Double(truncating: p.maxSMBBasalMinutes as NSDecimalNumber),
@@ -299,7 +343,12 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             enableSMBHighBG: p.enableSMB_high_bg,
             enableSMBHighBGTarget: Double(truncating: p.enableSMB_high_bg_target as NSDecimalNumber),
             toughMealEnabled: s.toughMeals,
-            activeOverrideName: nil, // populated by a future hook if needed
+            basalSchedule: basal,
+            isfSchedule: isf,
+            carbRatioSchedule: cr,
+            bgTargetSchedule: targets,
+            activeOverrideName: nil,
+            activeOverrideTarget: nil,
             activeTempTargetTarget: nil
         )
         logger.writeSettingsSnapshot(snapshot)
