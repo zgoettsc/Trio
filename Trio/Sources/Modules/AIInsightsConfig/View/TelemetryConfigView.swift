@@ -208,7 +208,9 @@ private final class ViewModel: ObservableObject {
 
     func saveToken() {
         guard !tokenInput.isEmpty else { return }
-        _ = keychain?.setValue(tokenInput, forKey: AlgorithmTelemetryKeychainKey.githubPAT)
+        // KeyValueStorage's `setValue<T: Codable>(_:forKey:)` returns Void, overriding
+        // the Keychain protocol's `Result`-returning version via overload resolution.
+        keychain?.setValue(tokenInput, forKey: AlgorithmTelemetryKeychainKey.githubPAT)
         tokenInput = ""
         isTokenConfigured = hasStoredToken()
     }
@@ -261,9 +263,7 @@ private final class ViewModel: ObservableObject {
 
     private func hasStoredToken() -> Bool {
         guard let keychain else { return false }
-        switch keychain.getValue(String.self, forKey: AlgorithmTelemetryKeychainKey.githubPAT) {
-        case .success(let v): return v?.isEmpty == false
-        case .failure: return false
-        }
+        let token: String? = keychain.getValue(String.self, forKey: AlgorithmTelemetryKeychainKey.githubPAT)
+        return token?.isEmpty == false
     }
 }

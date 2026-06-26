@@ -86,7 +86,10 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     init(resolver: Resolver) {
         injectServices(resolver)
 
-        NotificationCenter.default
+        // Foundation-qualified — Trio also defines a `protocol NotificationCenter` for
+        // Swinject DI, so an unqualified `NotificationCenter.default` resolves to the
+        // protocol type which doesn't have `.default`.
+        Foundation.NotificationCenter.default
             .publisher(for: UIApplication.didBecomeActiveNotification)
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -268,10 +271,10 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     // MARK: - Token + status persistence
 
     private func currentToken() -> String? {
-        switch keychain.getValue(String.self, forKey: AlgorithmTelemetryKeychainKey.githubPAT) {
-        case .success(let token): return token
-        case .failure: return nil
-        }
+        // KeyValueStorage's `getValue<T: Codable>(_:forKey:) -> T?` is selected by
+        // overload resolution over Keychain's `Result`-returning version, so this
+        // returns `String?` directly.
+        keychain.getValue(String.self, forKey: AlgorithmTelemetryKeychainKey.githubPAT)
     }
 
     private func recordSuccess() {
