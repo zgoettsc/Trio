@@ -859,6 +859,59 @@ extension Home {
             }
         }
 
+        /// Eating-mode banner — mirrors the Live Activity pill but on the Home screen.
+        /// Hidden when no window is active. Wrapped in TimelineView so the visibility
+        /// flips the moment the window's expiry passes, without waiting for the next
+        /// settingsDidChange to refresh state.
+        @ViewBuilder func mealWindowBanner() -> some View {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let expiresAt = state.mealWindowExpiresAt
+                let isActive = state.isMealWindowActive && expiresAt > context.date
+                if isActive {
+                    HStack(spacing: 8) {
+                        Image(systemName: "fork.knife")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Eating Mode")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                            Text(timerInterval: context.date ... expiresAt, countsDown: true)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        if state.mealWindowCarbsConfirmed {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.white.opacity(0.85))
+                        } else if state.mealWindowEstimatedCarbs > 0 {
+                            Text("~\(NSDecimalNumber(decimal: state.mealWindowEstimatedCarbs).intValue) g")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        Spacer(minLength: 0)
+                        Button {
+                            Task { await state.cancelMealWindow() }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("End eating mode"))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background {
+                        RoundedRectangle(cornerRadius: 15)
+                            .fill(Color.orange.opacity(colorScheme == .dark ? 0.7 : 0.85))
+                    }
+                    .padding(.horizontal, 10)
+                }
+            }
+        }
+
         @ViewBuilder func adjustmentView(geo: GeometryProxy) -> some View {
 //            let background = colorScheme == .dark ? Material.ultraThinMaterial.opacity(0.5) : Color.black.opacity(0.2)
 
@@ -1138,7 +1191,11 @@ extension Home {
                     bolusView(geo: geo, progress)
                         .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
                 } else {
-                    adjustmentView(geo: geo).padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
+                    VStack(spacing: 6) {
+                        mealWindowBanner()
+                        adjustmentView(geo: geo)
+                    }
+                    .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
                 }
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
