@@ -41,3 +41,5 @@
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":1.3},"timestamp":"2026-06-26T22:36:18.868Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowToughMealCapPercent","newValue":"85","oldValue":"75"},"timestamp":"2026-06-26T22:36:19.768Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
 {"kind":"smbDelivered","payload":{"bg":219,"floorActivated":false,"insulinReq":0.63,"iob":3.964,"minutesSinceWindowOpen":4.909526282548905,"units":0.3},"timestamp":"2026-06-26T22:41:06.607Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
+{"kind":"smbDelivered","payload":{"bg":209,"floorActivated":false,"insulinReq":0.12,"iob":4.057,"minutesSinceWindowOpen":9.920850865046184,"units":0.05},"timestamp":"2026-06-26T22:46:07.286Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
+{"kind":"smbDelivered","payload":{"bg":209,"floorActivated":false,"insulinReq":0.2,"iob":3.9450000000000003,"minutesSinceWindowOpen":14.90137428243955,"units":0.1},"timestamp":"2026-06-26T22:51:06.118Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
