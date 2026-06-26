@@ -86,7 +86,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                 payload["carbs"] = .from(entry.carbs)
                 payload["fat"] = .from(entry.fat ?? 0)
                 payload["protein"] = .from(entry.protein ?? 0)
-                payload["isFPU"] = .bool(entry.isFPU)
+                payload["isFPU"] = .bool(entry.isFPU ?? false)
                 payload["fpuID"] = entry.fpuID.map { .string($0) } ?? .null
                 payload["enteredBy"] = .string(entry.enteredBy ?? "unknown")
                 payload["note"] = entry.note.map { .string($0) } ?? .null
