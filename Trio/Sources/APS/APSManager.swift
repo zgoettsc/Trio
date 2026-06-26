@@ -549,33 +549,43 @@ final class BaseAPSManager: APSManager, Injectable {
         _ = try await determineBasal()
     }
 
-    /// Phase 2 telemetry: emit one row per loop pass into loop.jsonl while a meal-window
-    /// is active. Gated locally on `mealWindowActivationDate` so we don't pay the cost
-    /// outside meal windows; the manager additionally gates on the user's enable toggle.
-    /// Floor activation is inferred from the oref reason string (which contains
-    /// "Meal-window floor: insulinReq X → Y" when the JS branch fired).
+    /// Telemetry: emit one row per loop pass into loop.jsonl. We log CONTINUOUSLY (not
+    /// only during meal windows) so we have the data we need for:
+    /// - missed-meal detection (find unexplained rises with no carb entry)
+    /// - basal / ISF / carb-ratio tuning (Claude-o-Tune style analysis)
+    /// - quick-action validation (A/B compare meal vs non-meal periods)
+    ///
+    /// Volume: ~288 rows/day × ~600 bytes ≈ 170 KB/day → 5 MB/month. The manager
+    /// short-circuits when telemetry is disabled so this is free when off.
+    ///
+    /// Floor activation is inferred from the oref reason string (Phase A heuristic).
+    /// Phase B replaces this with a structured `rT.mealWindowFloor` field from the JS.
     private func logTelemetryLoopSample(determination: Determination?) {
         let s = settingsManager.settings
-        guard s.mealWindowActivationDate != nil else { return }
         guard s.telemetryEnabled else { return }
 
         let now = Date()
         let activatedAt = s.mealWindowActivationDate
         let minutesSinceOpen = activatedAt.map { now.timeIntervalSince($0) / 60 }
 
-        let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
-            ? s.mealWindowExtendedDurationMinutes
-            : s.mealWindowDurationMinutes
-        let cappedDuration = min(durationMinutes, 360)
-        let remainingMinutes = activatedAt.map { max(
-            0,
-            Double(truncating: cappedDuration as NSDecimalNumber) - now.timeIntervalSince($0) / 60
-        ) }
+        let remainingMinutes: Double? = {
+            guard let activatedAt else { return nil }
+            let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
+                ? s.mealWindowExtendedDurationMinutes
+                : s.mealWindowDurationMinutes
+            let cappedDuration = min(durationMinutes, 360)
+            return max(
+                0,
+                Double(truncating: cappedDuration as NSDecimalNumber) - now.timeIntervalSince(activatedAt) / 60
+            )
+        }()
+        let mealWindowActive = (remainingMinutes ?? 0) > 0
 
         // Parse the oref reason string for the floor-activation marker emitted by the JS.
         let reason = determination?.reason ?? ""
         let floorActivated = reason.contains("Meal-window floor:")
-        let floorMagnitude: Double? = nil // numeric parse would require a regex; defer to Phase 3
+        let floorMagnitude: Double? = nil // populated by structured field in Commit B
+        let floorPriorInsulinReq: Double? = nil
         let floorVelocityFactor: Double? = nil
 
         let sig = signalPipeline.latestOutput
@@ -601,11 +611,12 @@ final class BaseAPSManager: APSManager, Injectable {
             smbDelivered: determination?.units.map { Double(truncating: $0 as NSNumber) },
             tempBasalRate: determination?.rate.map { Double(truncating: $0 as NSNumber) },
             sensitivityRatio: determination?.sensitivityRatio.map { Double(truncating: $0 as NSNumber) },
-            mealWindowActive: (remainingMinutes ?? 0) > 0,
+            mealWindowActive: mealWindowActive,
             mealWindowMinutesRemaining: remainingMinutes,
             mealWindowCarbsConfirmed: s.mealWindowCarbsConfirmed,
             mealWindowEstimatedCarbs: Double(truncating: s.mealWindowEstimatedCarbs as NSDecimalNumber),
             floorActivated: floorActivated,
+            floorPriorInsulinReq: floorPriorInsulinReq,
             floorMagnitude: floorMagnitude,
             floorVelocityFactor: floorVelocityFactor,
             target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
@@ -719,6 +730,26 @@ final class BaseAPSManager: APSManager, Injectable {
             debug(.apsManager, "Bolus succeeded")
             bolusProgress.send(0)
             callback?(true, String(localized: "Bolus enacted successfully.", comment: "Success message for enacting a bolus"))
+
+            // Telemetry: capture every bolus the pump enacts via Trio. Manual user
+            // boluses are the gold-standard signal for ISF/CR tuning; SMBs are already
+            // surfaced separately by the loop hook but doubling here keeps the bolus
+            // event stream comprehensive.
+            let s = settingsManager.settings
+            if s.telemetryEnabled {
+                let kind: AlgorithmTelemetryEventKind = isSMB ? .smbDelivered : .userBolus
+                algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                    kind: kind,
+                    timestamp: Date(),
+                    windowId: s.mealWindowId,
+                    payload: [
+                        "units": .double(roundedAmount),
+                        "isSMB": .bool(isSMB),
+                        "duringMealWindow": .bool(s.mealWindowActivationDate != nil)
+                    ]
+                ))
+            }
+
             if !isSMB {
                 do {
                     try await determineBasalSync()

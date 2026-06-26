@@ -73,6 +73,30 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
         await saveCarbsToCoreData(entries: entriesToStore, areFetchedFromRemote: areFetchedFromRemote)
         await saveCarbEquivalents(entries: entriesToStore, areFetchedFromRemote: areFetchedFromRemote)
 
+        // Telemetry: log every local carb entry (regardless of whether a meal window is
+        // active). This is what missed-meal analysis joins against — a "missed meal"
+        // is a BG rise with no nearby carbEntry row to explain it.
+        if !areFetchedFromRemote {
+            for entry in entriesToStore {
+                guard entry.carbs > 0 || (entry.fat ?? 0) > 0 || (entry.protein ?? 0) > 0 else { continue }
+                algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                    kind: .carbEntry,
+                    timestamp: entry.actualDate ?? entry.createdAt,
+                    windowId: settings.settings.mealWindowId,
+                    payload: [
+                        "carbs": .from(entry.carbs),
+                        "fat": .from(entry.fat ?? 0),
+                        "protein": .from(entry.protein ?? 0),
+                        "isFPU": .bool(entry.isFPU),
+                        "fpuID": entry.fpuID.map { .string($0) } ?? .null,
+                        "enteredBy": .string(entry.enteredBy ?? "unknown"),
+                        "note": entry.note.map { .string($0) } ?? .null,
+                        "duringMealWindow": .bool(settings.settings.mealWindowActivationDate != nil)
+                    ]
+                ))
+            }
+        }
+
         // If a meal-announcement window is open and the user just logged real carbs locally,
         // extend the window to the post-prandial duration so SMB enhancements stay on while
         // the meal actually absorbs. We deliberately ignore remote-fetched entries so NS

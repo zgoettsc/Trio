@@ -15,8 +15,10 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case mealWindowExpired
     case mealWindowCarbsConfirmed
     case insulinReqFloorActivated
-    case smbDelivered  // any SMB the loop enacts; useful even outside meal windows
-    case userBolus
+    case smbDelivered     // any SMB the loop enacts; useful even outside meal windows
+    case userBolus        // manual bolus initiated through the Trio bolus screen
+    case externalBolus    // user-recorded "external" insulin administered outside Trio
+    case carbEntry        // every local carb/fat/protein entry, regardless of meal window
 }
 
 struct AlgorithmTelemetryEvent: Codable {
@@ -64,6 +66,7 @@ struct AlgorithmTelemetryLoopSample: Codable {
     let mealWindowCarbsConfirmed: Bool
     let mealWindowEstimatedCarbs: Double?
     let floorActivated: Bool
+    let floorPriorInsulinReq: Double?
     let floorMagnitude: Double?
     let floorVelocityFactor: Double?
 
