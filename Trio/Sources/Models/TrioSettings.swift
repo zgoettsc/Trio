@@ -96,6 +96,7 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var telemetryBranch: String = "telemetry"
     var telemetryLastSuccessfulPushDate: Date? = nil
     var telemetryLastError: String? = nil
+    var telemetryLastRemoteCleanupDate: Date? = nil
 
     var displayPresets: Bool = true
     var confirmBolus: Bool = false
@@ -310,6 +311,12 @@ extension TrioSettings: Decodable {
         }
         if let telemetryLastError = try? container.decode(String.self, forKey: .telemetryLastError) {
             settings.telemetryLastError = telemetryLastError
+        }
+        if let telemetryLastRemoteCleanupDate = try? container.decode(
+            Date.self,
+            forKey: .telemetryLastRemoteCleanupDate
+        ) {
+            settings.telemetryLastRemoteCleanupDate = telemetryLastRemoteCleanupDate
         }
 
         if let overrideFactor = try? container.decode(Decimal.self, forKey: .overrideFactor) {

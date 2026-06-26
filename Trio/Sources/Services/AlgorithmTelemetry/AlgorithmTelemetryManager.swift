@@ -191,6 +191,9 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 token: token
             )
             recordSuccess()
+
+            // Daily remote cleanup runs at most once every 24h after a successful push.
+            await maybeRunRemoteCleanup(repo: repo, branch: branch, token: token)
         } catch {
             recordError("\(error.localizedDescription)")
         }
@@ -287,6 +290,75 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             self.settingsManager.settings = s
         }
         debug(.service, "[Telemetry] push failed: \(message)")
+    }
+
+    /// Identify `telemetry/YYYY-MM/DD/...` paths in the remote branch whose date is
+    /// older than `daysToKeep`, and delete them in a single commit via the Git
+    /// Database API. Idempotent; throttled to at most once per 24 hours.
+    private func maybeRunRemoteCleanup(repo: String, branch: String, token: String) async {
+        let daysToKeep = 30
+        let now = Date()
+        if let last = settingsManager.settings.telemetryLastRemoteCleanupDate {
+            if now.timeIntervalSince(last) < 24 * 3600 { return }
+        }
+
+        do {
+            let allPaths = try await client.listAllPaths(repo: repo, branch: branch, token: token)
+            // Match telemetry/YYYY-MM/DD/anything paths.
+            let regex = try NSRegularExpression(
+                pattern: #"^telemetry/(\d{4})-(\d{2})/(\d{2})/"#,
+                options: []
+            )
+            let cutoff = now.addingTimeInterval(-Double(daysToKeep) * 86_400)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+
+            var pathsToDelete: [String] = []
+            for path in allPaths {
+                let range = NSRange(path.startIndex..., in: path)
+                guard let match = regex.firstMatch(in: path, options: [], range: range),
+                      match.numberOfRanges == 4,
+                      let yearRange = Range(match.range(at: 1), in: path),
+                      let monthRange = Range(match.range(at: 2), in: path),
+                      let dayRange = Range(match.range(at: 3), in: path),
+                      let year = Int(path[yearRange]),
+                      let month = Int(path[monthRange]),
+                      let day = Int(path[dayRange]) else { continue }
+                var dc = DateComponents()
+                dc.year = year; dc.month = month; dc.day = day
+                dc.timeZone = TimeZone(identifier: "UTC")
+                guard let fileDate = calendar.date(from: dc), fileDate < cutoff else { continue }
+                // Preserve summary.jsonl rows forever (small + tuning-relevant).
+                if path.hasSuffix("/summary.jsonl") { continue }
+                pathsToDelete.append(path)
+            }
+
+            guard !pathsToDelete.isEmpty else {
+                stampCleanupDate(now)
+                return
+            }
+
+            let message = "telemetry cleanup: drop \(pathsToDelete.count) files older than \(daysToKeep)d"
+            try await client.deleteFiles(
+                repo: repo,
+                branch: branch,
+                paths: pathsToDelete,
+                message: message,
+                token: token
+            )
+            stampCleanupDate(now)
+        } catch {
+            // Cleanup failures are non-fatal — we'll try again on the next push tomorrow.
+            debug(.service, "[Telemetry] remote cleanup failed: \(error)")
+        }
+    }
+
+    private func stampCleanupDate(_ date: Date) {
+        DispatchQueue.main.async {
+            var s = self.settingsManager.settings
+            s.telemetryLastRemoteCleanupDate = date
+            self.settingsManager.settings = s
+        }
     }
 
     private func formatPushDate() -> String {
