@@ -479,6 +479,11 @@
 		BB5227A51D9D4377A1A70BA6 /* TempTargetData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8F3B0E159844FD8746DFC0 /* TempTargetData.swift */; };
 		BDBAACFA2C2D439700370AAE /* OverrideData.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDBAACF92C2D439700370AAE /* OverrideData.swift */; };
 		F1A0B2C30006000000000001 /* MealWindowData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B2C30005000000000001 /* MealWindowData.swift */; };
+		F2B0C3D40002000000000001 /* AlgorithmTelemetryEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40001000000000001 /* AlgorithmTelemetryEvent.swift */; };
+		F2B0C3D40004000000000001 /* AlgorithmTelemetryLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40003000000000001 /* AlgorithmTelemetryLogger.swift */; };
+		F2B0C3D40006000000000001 /* AlgorithmTelemetryGitHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40005000000000001 /* AlgorithmTelemetryGitHubClient.swift */; };
+		F2B0C3D40008000000000001 /* AlgorithmTelemetryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40007000000000001 /* AlgorithmTelemetryManager.swift */; };
+		F2B0C3D4000A000000000001 /* TelemetryConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40009000000000001 /* TelemetryConfigView.swift */; };
 		BDC2EA452C3043B000E5BBD0 /* OverrideStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC2EA442C3043B000E5BBD0 /* OverrideStorage.swift */; };
 		BDC2EA472C3045AD00E5BBD0 /* Override.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC2EA462C3045AD00E5BBD0 /* Override.swift */; };
 		BDC530FF2D0F6BE300088832 /* ContactImageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC530FE2D0F6BE300088832 /* ContactImageManager.swift */; };
@@ -1403,6 +1408,11 @@
 		4B8F3B0E159844FD8746DFC0 /* TempTargetData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TempTargetData.swift; sourceTree = "<group>"; };
 		BDBAACF92C2D439700370AAE /* OverrideData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverrideData.swift; sourceTree = "<group>"; };
 		F1A0B2C30005000000000001 /* MealWindowData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealWindowData.swift; sourceTree = "<group>"; };
+		F2B0C3D40001000000000001 /* AlgorithmTelemetryEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlgorithmTelemetryEvent.swift; sourceTree = "<group>"; };
+		F2B0C3D40003000000000001 /* AlgorithmTelemetryLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlgorithmTelemetryLogger.swift; sourceTree = "<group>"; };
+		F2B0C3D40005000000000001 /* AlgorithmTelemetryGitHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlgorithmTelemetryGitHubClient.swift; sourceTree = "<group>"; };
+		F2B0C3D40007000000000001 /* AlgorithmTelemetryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlgorithmTelemetryManager.swift; sourceTree = "<group>"; };
+		F2B0C3D40009000000000001 /* TelemetryConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryConfigView.swift; sourceTree = "<group>"; };
 		BDC2EA442C3043B000E5BBD0 /* OverrideStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverrideStorage.swift; sourceTree = "<group>"; };
 		BDC2EA462C3045AD00E5BBD0 /* Override.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Override.swift; sourceTree = "<group>"; };
 		BDC530FE2D0F6BE300088832 /* ContactImageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactImageManager.swift; sourceTree = "<group>"; };
@@ -2308,8 +2318,20 @@
 				38E8754D275556E100975559 /* WatchManager */,
 				CC10000001A0B0C000D0E001 /* Garmin */,
 				CC10000002A0B0C000D0E002 /* SmartSense */,
+				F2B0C3D4000B000000000001 /* AlgorithmTelemetry */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		F2B0C3D4000B000000000001 /* AlgorithmTelemetry */ = {
+			isa = PBXGroup;
+			children = (
+				F2B0C3D40001000000000001 /* AlgorithmTelemetryEvent.swift */,
+				F2B0C3D40003000000000001 /* AlgorithmTelemetryLogger.swift */,
+				F2B0C3D40005000000000001 /* AlgorithmTelemetryGitHubClient.swift */,
+				F2B0C3D40007000000000001 /* AlgorithmTelemetryManager.swift */,
+			);
+			path = AlgorithmTelemetry;
 			sourceTree = "<group>";
 		};
 		DD7E1E30000000000000000A /* Telemetry */ = {
@@ -3223,6 +3245,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B1C1D1E1F101010101A1A4 /* AIInsightsConfigRootView.swift */,
+				F2B0C3D40009000000000001 /* TelemetryConfigView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -4660,6 +4683,11 @@
 				A1B1C1D1E1F101010101A1B2 /* AIInsightsConfigStateModel.swift in Sources */,
 				A1B1C1D1E1F101010101A1B3 /* AIInsightsConfigProvider.swift in Sources */,
 				A1B1C1D1E1F101010101A1B4 /* AIInsightsConfigRootView.swift in Sources */,
+				F2B0C3D40002000000000001 /* AlgorithmTelemetryEvent.swift in Sources */,
+				F2B0C3D40004000000000001 /* AlgorithmTelemetryLogger.swift in Sources */,
+				F2B0C3D40006000000000001 /* AlgorithmTelemetryGitHubClient.swift in Sources */,
+				F2B0C3D40008000000000001 /* AlgorithmTelemetryManager.swift in Sources */,
+				F2B0C3D4000A000000000001 /* TelemetryConfigView.swift in Sources */,
 				A1B1C1D1E1F101010101A1B5 /* ClaudeAPIService.swift in Sources */,
 				A1B1C1D1E1F101010101A1B6 /* HealthDataExporter.swift in Sources */,
 				A1B1C1D1E1F101010101A1B8 /* MarkdownParser.swift in Sources */,

@@ -90,6 +90,7 @@ extension Notification.Name {
             _ = resolver.resolve(LiveActivityManager.self)!
         }
         _ = resolver.resolve(IOBService.self)!
+        _ = resolver.resolve(AlgorithmTelemetryManager.self)!
 
         // Start nutrition observer at app launch so meal deltas are captured
         // continuously, not just while the Treatments tab is visible.

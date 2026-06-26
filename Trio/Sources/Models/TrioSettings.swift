@@ -86,6 +86,14 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var mealWindowEstimatedCarbs: Decimal = 0
     var mealWindowCarbsConfirmed: Bool = false
 
+    // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
+    // on the trio repo for tuning analysis. PAT is in Keychain, not here.
+    var telemetryEnabled: Bool = false
+    var telemetryRepo: String = "zgoettsc/trio"
+    var telemetryBranch: String = "telemetry"
+    var telemetryLastSuccessfulPushDate: Date? = nil
+    var telemetryLastError: String? = nil
+
     var displayPresets: Bool = true
     var confirmBolus: Bool = false
     var useLiveActivity: Bool = false
@@ -277,6 +285,25 @@ extension TrioSettings: Decodable {
 
         if let mealWindowCarbsConfirmed = try? container.decode(Bool.self, forKey: .mealWindowCarbsConfirmed) {
             settings.mealWindowCarbsConfirmed = mealWindowCarbsConfirmed
+        }
+
+        if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {
+            settings.telemetryEnabled = telemetryEnabled
+        }
+        if let telemetryRepo = try? container.decode(String.self, forKey: .telemetryRepo) {
+            settings.telemetryRepo = telemetryRepo
+        }
+        if let telemetryBranch = try? container.decode(String.self, forKey: .telemetryBranch) {
+            settings.telemetryBranch = telemetryBranch
+        }
+        if let telemetryLastSuccessfulPushDate = try? container.decode(
+            Date.self,
+            forKey: .telemetryLastSuccessfulPushDate
+        ) {
+            settings.telemetryLastSuccessfulPushDate = telemetryLastSuccessfulPushDate
+        }
+        if let telemetryLastError = try? container.decode(String.self, forKey: .telemetryLastError) {
+            settings.telemetryLastError = telemetryLastError
         }
 
         if let overrideFactor = try? container.decode(Decimal.self, forKey: .overrideFactor) {

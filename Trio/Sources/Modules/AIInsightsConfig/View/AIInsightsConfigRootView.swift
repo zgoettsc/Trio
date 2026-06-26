@@ -170,6 +170,14 @@ extension AIInsightsConfig {
                             Text("Photo Carb Settings")
                         }
                     }
+
+                    NavigationLink(destination: TelemetryConfigView()) {
+                        HStack {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .foregroundColor(.cyan)
+                            Text("Telemetry")
+                        }
+                    }
                 }
                 .listRowBackground(Color.chart)
             }
