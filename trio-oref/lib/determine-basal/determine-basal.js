@@ -170,6 +170,39 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
     const mealWindowMinutesRemaining = trio_custom_variables.mealWindowMinutesRemaining || 0;
     const mealWindowEstimatedCarbs = trio_custom_variables.mealWindowEstimatedCarbs || 0;
     const mealWindowCarbsConfirmed = trio_custom_variables.mealWindowCarbsConfirmed || false;
+    // Eating-mode tuning knobs (PLAN.md items 1-6). Take effect only when mealWindowActive.
+    const mwBoostSMBRatio = trio_custom_variables.mealWindowBoostSMBRatio !== false; // default true
+    const mwSMBRatioValue = trio_custom_variables.mealWindowSMBRatioValue || 0.8;
+    const mwRelaxRisingGuard = trio_custom_variables.mealWindowRelaxRisingGuard !== false; // default true
+    const mwAdditiveFloor = trio_custom_variables.mealWindowAdditiveFloor === true; // default false
+    const mwForceUAM = trio_custom_variables.mealWindowForceUAM !== false; // default true
+    const mwPhantomCOB = trio_custom_variables.mealWindowPhantomCOB === true; // default false
+    const mwPhantomCOBGrams = trio_custom_variables.mealWindowPhantomCOBGrams || 20;
+    const mwSMBMinutesMultiplier = trio_custom_variables.mealWindowSMBMinutesMultiplier || 1;
+    const mwToughMealCapPercent = trio_custom_variables.mealWindowToughMealCapPercent || 75;
+
+    // Item 5 — Phantom COB (PLAN.md). When the user has activated the meal window
+    // but oref's mealCOB hasn't caught up (the ~30min lag observed in round-2 data,
+    // FINDINGS F-7), inject a virtual COB so eventualBG doesn't mis-predict a drop.
+    // Lying to oref is high-risk — gated off by default, only fires when:
+    //   - meal window active AND user opted in via setting
+    //   - mealCOB < 15 (existing carbs haven't been processed)
+    //   - BG actively rising (delta > 0 + short_avg > 0)
+    // Doesn't write to CoreData; just a per-loop override of the input value.
+    var mwPhantomApplied = 0;
+    if (
+        mealWindowActive && mealWindowMinutesRemaining > 0 && mwPhantomCOB
+        && (meal_data.mealCOB || 0) < 15
+        && (glucose_status.delta || 0) > 0
+        && (glucose_status.short_avgdelta || 0) > 0
+    ) {
+        mwPhantomApplied = mwPhantomCOBGrams;
+        meal_data.mealCOB = Math.max(meal_data.mealCOB || 0, mwPhantomCOBGrams);
+        // Also mark carbs as "present" so enableSMB_with_COB path can trigger.
+        meal_data.carbs = Math.max(meal_data.carbs || 0, mwPhantomCOBGrams);
+        console.error("Meal-window phantom COB: injected " + mwPhantomCOBGrams + "g (BG=" + glucose_status.glucose + ", delta=" + glucose_status.delta + ")");
+    }
+
     // tdd past 24 hour
     let tdd = trio_custom_variables.currentTDD;
     var logOutPut = "";
@@ -828,7 +861,13 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
         );
     }
 
+    // Item 4 (PLAN.md) — force UAM during meal window. The user's button-press IS
+    // the announced-meal signal; UAM is the right regime regardless of profile setting.
     var enableUAM = (profile.enableUAM);
+    if (mealWindowActive && mealWindowMinutesRemaining > 0 && mwForceUAM && !enableUAM) {
+        enableUAM = true;
+        console.error("Meal-window: forcing enableUAM=true (profile had it off)");
+    }
 
     //console.error(meal_data);
     // carb impact and duration are 0 unless changed below
@@ -1527,24 +1566,48 @@ var maxDelta_bg_threshold;
         var mealWindowFloorActive = false;
         if (mealWindowActive && mealWindowMinutesRemaining > 0) {
             var floorBgFloor = bg >= 120;
-            var floorRising = (glucose_status.delta || 0) > 0 || (glucose_status.short_avgdelta || 0) > 0;
+            // Item 2 (PLAN.md) — when relaxRisingGuard is on, accept delta > -2 instead
+            // of strictly > 0. Allows brief flat/slight-drop moments during meal absorption
+            // when insulin and carbs are racing. Button-press = trust the meal signal.
+            var risingThreshold = mwRelaxRisingGuard ? -2 : 0;
+            var floorRising = (glucose_status.delta || 0) > risingThreshold || (glucose_status.short_avgdelta || 0) > risingThreshold;
             var floorIobHeadroom = iob_data.iob < max_iob * 0.75;
             var floorAboveTarget = bg > (target_bg + 20);
             if (floorBgFloor && floorRising && floorIobHeadroom && floorAboveTarget) {
-                // Scale factor grows with the size of the BG-above-target gap, capped at 0.4.
-                // This bypasses the eventualBG-drop trap without unilaterally chasing peak.
                 var risingDelta = Math.max(glucose_status.delta || 0, glucose_status.short_avgdelta || 0);
                 var velocityFactor = risingDelta >= 8 ? 0.4 : (risingDelta >= 4 ? 0.3 : 0.2);
                 var insulinReqFloor = round(((bg - target_bg) / sens) * velocityFactor, 3);
                 // Hard cap: never floor above half the IOB headroom — leaves margin for safety.
                 insulinReqFloor = Math.min(insulinReqFloor, (max_iob - iob_data.iob) * 0.5);
-                if (insulinReqFloor > insulinReq) {
-                    console.error("Meal-window insulinReq floor: " + insulinReq + "U raised to " + insulinReqFloor + "U (bg=" + bg + ", target=" + target_bg + ", delta=" + risingDelta + ", factor=" + velocityFactor + ")");
-                    rT.reason += "Meal-window floor: insulinReq " + insulinReq + "U → " + insulinReqFloor + "U; ";
-                    // Structured field for telemetry: lets the Swift side capture
-                    // before/after/factor without parsing the reason string.
+
+                // Item 3 (PLAN.md) — additive mode (off by default). If on, ADD the
+                // floor to insulinReq instead of taking the max. Significantly more
+                // aggressive; still bounded by the IOB-headroom cap above and the
+                // configurable tough-meal cap below.
+                if (mwAdditiveFloor && insulinReqFloor > 0) {
+                    var prior = insulinReq;
+                    insulinReq = round(insulinReq + insulinReqFloor, 3);
+                    console.error("Meal-window ADDITIVE floor: " + prior + "U + " + insulinReqFloor + "U = " + insulinReq + "U");
+                    rT.reason += "Meal-window additive floor: " + prior + "U + " + insulinReqFloor + "U = " + insulinReq + "U; ";
                     rT.mealWindowFloor = {
                         activated: true,
+                        mode: "additive",
+                        prior: prior,
+                        adder: insulinReqFloor,
+                        floored: insulinReq,
+                        factor: velocityFactor,
+                        risingDelta: risingDelta,
+                        bg: bg,
+                        target: target_bg
+                    };
+                    mealWindowFloorActive = true;
+                } else if (insulinReqFloor > insulinReq) {
+                    // Original replacement behavior (max of existing and floor).
+                    console.error("Meal-window insulinReq floor: " + insulinReq + "U raised to " + insulinReqFloor + "U (bg=" + bg + ", target=" + target_bg + ", delta=" + risingDelta + ", factor=" + velocityFactor + ")");
+                    rT.reason += "Meal-window floor: insulinReq " + insulinReq + "U → " + insulinReqFloor + "U; ";
+                    rT.mealWindowFloor = {
+                        activated: true,
+                        mode: "replacement",
                         prior: insulinReq,
                         floored: insulinReqFloor,
                         factor: velocityFactor,
@@ -1606,6 +1669,18 @@ var maxDelta_bg_threshold;
                 uamMinutesSetting = uamMinutes;
             }
 
+            // Item 6 (PLAN.md) — multiply max SMB minutes inside the meal window.
+            // Lets each SMB be roughly N× larger when conditions allow. Bounded by
+            // existing toughMeal cap multiplier (1.5×/2×/2.5×) and the configurable
+            // tough-meal percent cap below.
+            if (mealWindowActive && mealWindowMinutesRemaining > 0 && mwSMBMinutesMultiplier > 1) {
+                var smbMinutesPrior = smbMinutesSetting;
+                var uamMinutesPrior = uamMinutesSetting;
+                smbMinutesSetting = Math.round(smbMinutesSetting * mwSMBMinutesMultiplier);
+                uamMinutesSetting = Math.round(uamMinutesSetting * mwSMBMinutesMultiplier);
+                console.error("Meal-window: maxSMB minutes " + smbMinutesPrior + "→" + smbMinutesSetting + ", maxUAM " + uamMinutesPrior + "→" + uamMinutesSetting + " (×" + mwSMBMinutesMultiplier + ")");
+            }
+
             var mealInsulinReq = round( meal_data.mealCOB / carbRatio ,3);
             var maxBolus = 0;
             if (typeof smbMinutesSetting === 'undefined' ) {
@@ -1660,26 +1735,48 @@ var maxDelta_bg_threshold;
                 console.error("SMB Delivery Ratio changed from default 0.5 to " + round(smb_ratio,2))
             }
 
-            // Meal-window: when the insulinReq floor had to rescue insulinReq from collapse,
-            // also bump smb_delivery_ratio to 0.8 so the floored insulinReq actually translates
-            // into a meaningful SMB after bolusIncrement rounding. The toughMeal 75%-of-insulinReq
-            // cap below still applies and provides the upper safety bound.
-            if (mealWindowActive && typeof mealWindowFloorActive !== 'undefined' && mealWindowFloorActive) {
-                var rescuedRatio = Math.max(smb_ratio, 0.8);
-                if (rescuedRatio > smb_ratio) {
-                    console.error("Meal-window: SMB delivery ratio raised from " + round(smb_ratio,2) + " to " + round(rescuedRatio,2) + " (floor active)");
-                    smb_ratio = rescuedRatio;
+            // Item 1 (PLAN.md) — bump smb_delivery_ratio whenever the meal window is
+            // active (not just when floor rescued). Round-2 data showed the loop's
+            // insReq was healthy but the 0.5 default ratio halved every SMB, leaving
+            // the loop unable to keep up with a +10 mg/dL/5min rise. The configurable
+            // tough-meal cap below still bounds the result.
+            if (mealWindowActive && mealWindowMinutesRemaining > 0 && mwBoostSMBRatio) {
+                var boostedRatio = Math.max(smb_ratio, Math.min(mwSMBRatioValue, 1));
+                if (boostedRatio > smb_ratio) {
+                    console.error("Meal-window: SMB delivery ratio raised from " + round(smb_ratio,2) + " to " + round(boostedRatio,2) + " (boost)");
+                    smb_ratio = boostedRatio;
                 }
             }
 
             var microBolus = Math.min(insulinReq*smb_ratio, maxBolus);
-            // Tough Meal safety: never exceed 75% of calculated insulin requirement
-            if (toughMealSMBActive && microBolus > insulinReq * 0.75) {
-                microBolus = round(insulinReq * 0.75, 2);
-                console.error("Tough Meal: microBolus capped at 75% of insulinReq (" + round(insulinReq,2) + "U) = " + round(microBolus,2) + "U");
+            // Configurable tough-meal cap (was hard-coded 75%; now user-tunable via
+            // mealWindowToughMealCapPercent — default 75 unchanged). When meal window
+            // active, use the configured value; otherwise use 75% as before.
+            var capPercent = (mealWindowActive && mealWindowMinutesRemaining > 0) ? mwToughMealCapPercent : 75;
+            var capFraction = capPercent / 100;
+            if (toughMealSMBActive && microBolus > insulinReq * capFraction) {
+                microBolus = round(insulinReq * capFraction, 2);
+                console.error("Tough Meal: microBolus capped at " + capPercent + "% of insulinReq (" + round(insulinReq,2) + "U) = " + round(microBolus,2) + "U");
             }
 
             microBolus = Math.floor(microBolus*roundSMBTo)/roundSMBTo;
+
+            // Telemetry: structured record of what was actually applied this pass so
+            // the Swift loop logger doesn't have to recompute or parse strings.
+            if (mealWindowActive && mealWindowMinutesRemaining > 0) {
+                rT.mealWindowApplied = {
+                    smbDeliveryRatio: smb_ratio,
+                    maxSMBBasalMinutes: smbMinutesSetting,
+                    maxUAMSMBBasalMinutes: uamMinutesSetting,
+                    toughMealCapPercent: capPercent,
+                    floorBehavior: typeof mealWindowFloorActive !== 'undefined' && mealWindowFloorActive
+                        ? (mwAdditiveFloor ? "additive" : "replacement")
+                        : "off",
+                    forcedUAM: mwForceUAM && !profile.enableUAM,
+                    phantomCOBGrams: mwPhantomApplied,
+                    relaxedRisingGuard: mwRelaxRisingGuard
+                };
+            }
             // calculate a long enough zero temp to eventually correct back up to target
             var smbTarget = target_bg;
             worstCaseInsulinReq = (smbTarget - (naive_eventualBG + minIOBPredBG)/2 ) / sens;

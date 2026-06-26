@@ -89,6 +89,18 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// by every site that logs telemetry events so all events for one window can be joined.
     var mealWindowId: String? = nil
 
+    // Eating-mode tuning knobs — control how aggressively the loop treats a rise
+    // while a meal window is active. See PLAN.md on the telemetry branch.
+    var mealWindowBoostSMBRatio: Bool = true               // item 1: bump SMB ratio
+    var mealWindowSMBRatioValue: Decimal = 0.8             // item 1: ratio used (0.5-1.0)
+    var mealWindowRelaxRisingGuard: Bool = true            // item 2: floor allows delta > -2
+    var mealWindowAdditiveFloor: Bool = false              // item 3: insReq = insReq + floor
+    var mealWindowForceUAM: Bool = true                    // item 4: force enableUAM in window
+    var mealWindowPhantomCOB: Bool = false                 // item 5: synthesize phantom COB
+    var mealWindowPhantomCOBGrams: Decimal = 20            // item 5: amount to synthesize
+    var mealWindowSMBMinutesMultiplier: Decimal = 2.0      // item 6: multiply maxSMBBasalMinutes
+    var mealWindowToughMealCapPercent: Decimal = 75        // configurable tough-meal cap (50-100)
+
     // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
     // on the trio repo for tuning analysis. PAT is in Keychain, not here.
     var telemetryEnabled: Bool = false
@@ -292,6 +304,35 @@ extension TrioSettings: Decodable {
         }
         if let mealWindowId = try? container.decode(String.self, forKey: .mealWindowId) {
             settings.mealWindowId = mealWindowId
+        }
+
+        // Eating-mode tuning
+        if let v = try? container.decode(Bool.self, forKey: .mealWindowBoostSMBRatio) {
+            settings.mealWindowBoostSMBRatio = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowSMBRatioValue) {
+            settings.mealWindowSMBRatioValue = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .mealWindowRelaxRisingGuard) {
+            settings.mealWindowRelaxRisingGuard = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .mealWindowAdditiveFloor) {
+            settings.mealWindowAdditiveFloor = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .mealWindowForceUAM) {
+            settings.mealWindowForceUAM = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .mealWindowPhantomCOB) {
+            settings.mealWindowPhantomCOB = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowPhantomCOBGrams) {
+            settings.mealWindowPhantomCOBGrams = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowSMBMinutesMultiplier) {
+            settings.mealWindowSMBMinutesMultiplier = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowToughMealCapPercent) {
+            settings.mealWindowToughMealCapPercent = v
         }
 
         if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {

@@ -23,6 +23,7 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case overrideCancelled
     case tempTargetStarted
     case tempTargetCancelled
+    case mealWindowTuningChanged // any of the 9 PLAN.md tuning settings flipped
 }
 
 struct AlgorithmTelemetryEvent: Codable {
@@ -73,6 +74,17 @@ struct AlgorithmTelemetryLoopSample: Codable {
     let floorPriorInsulinReq: Double?
     let floorMagnitude: Double?
     let floorVelocityFactor: Double?
+
+    // Eating-mode tuning — what was actually applied this pass (mirrors the
+    // JS-side rT.mealWindowApplied). All nil when window inactive. See PLAN.md.
+    let effectiveSmbDeliveryRatio: Double?
+    let effectiveMaxSMBBasalMinutes: Double?
+    let effectiveMaxUAMSMBBasalMinutes: Double?
+    let effectiveToughMealCapPercent: Double?
+    let floorBehavior: String?
+    let forcedUAM: Bool?
+    let phantomCOBGrams: Double?
+    let relaxedRisingGuard: Bool?
 
     // Context — effective values (already include override math). Pair with
     // the override/temp-target fields below to distinguish "loop math used X
@@ -187,6 +199,18 @@ struct AlgorithmTelemetrySettingsSnapshot: Codable {
     let activeTempTargetName: String?
     let activeTempTargetTarget: Double?
     let activeTempTargetDuration: Double?
+
+    // Eating-mode tuning configuration (the user's current toggle/slider values).
+    // Per-loop "effective" values are in AlgorithmTelemetryLoopSample.
+    let mealWindowBoostSMBRatio: Bool
+    let mealWindowSMBRatioValue: Double
+    let mealWindowRelaxRisingGuard: Bool
+    let mealWindowAdditiveFloor: Bool
+    let mealWindowForceUAM: Bool
+    let mealWindowPhantomCOB: Bool
+    let mealWindowPhantomCOBGrams: Double
+    let mealWindowSMBMinutesMultiplier: Double
+    let mealWindowToughMealCapPercent: Double
 }
 
 struct ScheduledRate: Codable {

@@ -31,6 +31,16 @@ struct TrioCustomOrefVariables: JSON, Equatable {
     var mealWindowMinutesRemaining: Decimal
     var mealWindowEstimatedCarbs: Decimal
     var mealWindowCarbsConfirmed: Bool
+    // Eating-mode tuning (see PLAN.md). Take effect only when mealWindowActive=true.
+    var mealWindowBoostSMBRatio: Bool
+    var mealWindowSMBRatioValue: Decimal
+    var mealWindowRelaxRisingGuard: Bool
+    var mealWindowAdditiveFloor: Bool
+    var mealWindowForceUAM: Bool
+    var mealWindowPhantomCOB: Bool
+    var mealWindowPhantomCOBGrams: Decimal
+    var mealWindowSMBMinutesMultiplier: Decimal
+    var mealWindowToughMealCapPercent: Decimal
 
     init(
         average_total_data: Decimal,
@@ -62,7 +72,16 @@ struct TrioCustomOrefVariables: JSON, Equatable {
         mealWindowActive: Bool = false,
         mealWindowMinutesRemaining: Decimal = 0,
         mealWindowEstimatedCarbs: Decimal = 0,
-        mealWindowCarbsConfirmed: Bool = false
+        mealWindowCarbsConfirmed: Bool = false,
+        mealWindowBoostSMBRatio: Bool = true,
+        mealWindowSMBRatioValue: Decimal = 0.8,
+        mealWindowRelaxRisingGuard: Bool = true,
+        mealWindowAdditiveFloor: Bool = false,
+        mealWindowForceUAM: Bool = true,
+        mealWindowPhantomCOB: Bool = false,
+        mealWindowPhantomCOBGrams: Decimal = 20,
+        mealWindowSMBMinutesMultiplier: Decimal = 2.0,
+        mealWindowToughMealCapPercent: Decimal = 75
     ) {
         self.average_total_data = average_total_data
         self.weightedAverage = weightedAverage
@@ -94,6 +113,15 @@ struct TrioCustomOrefVariables: JSON, Equatable {
         self.mealWindowMinutesRemaining = mealWindowMinutesRemaining
         self.mealWindowEstimatedCarbs = mealWindowEstimatedCarbs
         self.mealWindowCarbsConfirmed = mealWindowCarbsConfirmed
+        self.mealWindowBoostSMBRatio = mealWindowBoostSMBRatio
+        self.mealWindowSMBRatioValue = mealWindowSMBRatioValue
+        self.mealWindowRelaxRisingGuard = mealWindowRelaxRisingGuard
+        self.mealWindowAdditiveFloor = mealWindowAdditiveFloor
+        self.mealWindowForceUAM = mealWindowForceUAM
+        self.mealWindowPhantomCOB = mealWindowPhantomCOB
+        self.mealWindowPhantomCOBGrams = mealWindowPhantomCOBGrams
+        self.mealWindowSMBMinutesMultiplier = mealWindowSMBMinutesMultiplier
+        self.mealWindowToughMealCapPercent = mealWindowToughMealCapPercent
     }
 }
 
@@ -129,5 +157,14 @@ extension TrioCustomOrefVariables {
         case mealWindowMinutesRemaining
         case mealWindowEstimatedCarbs
         case mealWindowCarbsConfirmed
+        case mealWindowBoostSMBRatio
+        case mealWindowSMBRatioValue
+        case mealWindowRelaxRisingGuard
+        case mealWindowAdditiveFloor
+        case mealWindowForceUAM
+        case mealWindowPhantomCOB
+        case mealWindowPhantomCOBGrams
+        case mealWindowSMBMinutesMultiplier
+        case mealWindowToughMealCapPercent
     }
 }

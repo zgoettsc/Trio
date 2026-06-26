@@ -584,9 +584,58 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             activeOverrideDuration: adj.overrideDuration,
             activeTempTargetName: adj.tempTargetName,
             activeTempTargetTarget: adj.tempTargetTargetMgdL,
-            activeTempTargetDuration: adj.tempTargetDuration
+            activeTempTargetDuration: adj.tempTargetDuration,
+            mealWindowBoostSMBRatio: s.mealWindowBoostSMBRatio,
+            mealWindowSMBRatioValue: Double(truncating: s.mealWindowSMBRatioValue as NSDecimalNumber),
+            mealWindowRelaxRisingGuard: s.mealWindowRelaxRisingGuard,
+            mealWindowAdditiveFloor: s.mealWindowAdditiveFloor,
+            mealWindowForceUAM: s.mealWindowForceUAM,
+            mealWindowPhantomCOB: s.mealWindowPhantomCOB,
+            mealWindowPhantomCOBGrams: Double(truncating: s.mealWindowPhantomCOBGrams as NSDecimalNumber),
+            mealWindowSMBMinutesMultiplier: Double(truncating: s.mealWindowSMBMinutesMultiplier as NSDecimalNumber),
+            mealWindowToughMealCapPercent: Double(truncating: s.mealWindowToughMealCapPercent as NSDecimalNumber)
         )
         logger.writeSettingsSnapshot(snapshot)
+        detectAndEmitTuningTransitions()
+    }
+
+    // Track each tuning field's last-known value to emit transition events on change.
+    private var lastTuningSnapshot: [String: String] = [:]
+    private let tuningAuditQueue = DispatchQueue(label: "AlgorithmTelemetry.tuningAudit")
+
+    private func detectAndEmitTuningTransitions() {
+        let s = settingsManager.settings
+        let current: [String: String] = [
+            "mealWindowBoostSMBRatio": String(s.mealWindowBoostSMBRatio),
+            "mealWindowSMBRatioValue": "\(s.mealWindowSMBRatioValue)",
+            "mealWindowRelaxRisingGuard": String(s.mealWindowRelaxRisingGuard),
+            "mealWindowAdditiveFloor": String(s.mealWindowAdditiveFloor),
+            "mealWindowForceUAM": String(s.mealWindowForceUAM),
+            "mealWindowPhantomCOB": String(s.mealWindowPhantomCOB),
+            "mealWindowPhantomCOBGrams": "\(s.mealWindowPhantomCOBGrams)",
+            "mealWindowSMBMinutesMultiplier": "\(s.mealWindowSMBMinutesMultiplier)",
+            "mealWindowToughMealCapPercent": "\(s.mealWindowToughMealCapPercent)"
+        ]
+        tuningAuditQueue.sync {
+            // First call seeds the cache; no events on initial run.
+            if self.lastTuningSnapshot.isEmpty {
+                self.lastTuningSnapshot = current
+                return
+            }
+            for (field, value) in current where self.lastTuningSnapshot[field] != value {
+                var payload: [String: AlgorithmTelemetryJSONValue] = [:]
+                payload["field"] = .string(field)
+                payload["oldValue"] = .string(self.lastTuningSnapshot[field] ?? "")
+                payload["newValue"] = .string(value)
+                logEvent(AlgorithmTelemetryEvent(
+                    kind: .mealWindowTuningChanged,
+                    timestamp: Date(),
+                    windowId: settingsManager.settings.mealWindowId,
+                    payload: payload
+                ))
+            }
+            self.lastTuningSnapshot = current
+        }
     }
 
     /// 30-day rolling local cleanup. loop.jsonl in old directories is purged; summary

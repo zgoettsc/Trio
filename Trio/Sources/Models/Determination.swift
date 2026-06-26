@@ -39,6 +39,10 @@ struct Determination: JSON, Equatable {
     /// insulinReq floor fires. Read by AlgorithmTelemetry to avoid having to parse
     /// the human-readable `reason` string. Nil when the floor did not activate.
     var mealWindowFloor: MealWindowFloorData?
+
+    /// Snapshot of the eating-mode tuning values actually applied this pass
+    /// (PLAN.md items 1-6). Populated by JS whenever the meal window is active.
+    var mealWindowApplied: MealWindowAppliedData?
 }
 
 struct MealWindowFloorData: JSON, Equatable {
@@ -49,6 +53,17 @@ struct MealWindowFloorData: JSON, Equatable {
     let risingDelta: Decimal
     let bg: Decimal
     let target: Decimal
+}
+
+struct MealWindowAppliedData: JSON, Equatable {
+    let smbDeliveryRatio: Decimal
+    let maxSMBBasalMinutes: Decimal
+    let maxUAMSMBBasalMinutes: Decimal
+    let toughMealCapPercent: Decimal
+    let floorBehavior: String          // "off" / "replacement" / "additive"
+    let forcedUAM: Bool
+    let phantomCOBGrams: Decimal       // 0 if none injected this pass
+    let relaxedRisingGuard: Bool
 }
 
 struct Predictions: JSON, Equatable {
@@ -90,6 +105,7 @@ extension Determination {
         case carbRatio = "CR"
         case received
         case mealWindowFloor
+        case mealWindowApplied
     }
 }
 

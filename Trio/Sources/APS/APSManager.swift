@@ -601,6 +601,7 @@ final class BaseAPSManager: APSManager, Injectable {
                 tempTargetId: nil, tempTargetActive: false, tempTargetName: nil,
                 tempTargetTargetMgdL: nil, tempTargetDuration: nil, tempTargetMinutesRemaining: nil
             )
+        let applied = determination?.mealWindowApplied
         let sample = AlgorithmTelemetryLoopSample(
             timestamp: now,
             windowId: s.mealWindowId,
@@ -631,6 +632,14 @@ final class BaseAPSManager: APSManager, Injectable {
             floorPriorInsulinReq: floorPriorInsulinReq,
             floorMagnitude: floorMagnitude,
             floorVelocityFactor: floorVelocityFactor,
+            effectiveSmbDeliveryRatio: applied.map { Double(truncating: $0.smbDeliveryRatio as NSNumber) },
+            effectiveMaxSMBBasalMinutes: applied.map { Double(truncating: $0.maxSMBBasalMinutes as NSNumber) },
+            effectiveMaxUAMSMBBasalMinutes: applied.map { Double(truncating: $0.maxUAMSMBBasalMinutes as NSNumber) },
+            effectiveToughMealCapPercent: applied.map { Double(truncating: $0.toughMealCapPercent as NSNumber) },
+            floorBehavior: applied?.floorBehavior,
+            forcedUAM: applied?.forcedUAM,
+            phantomCOBGrams: applied.map { Double(truncating: $0.phantomCOBGrams as NSNumber) },
+            relaxedRisingGuard: applied?.relaxedRisingGuard,
             target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
             // ↑ Trio's Determination uses `current_target` (snake_case from oref JS)
             isf: determination?.isf.map { Double(truncating: $0 as NSNumber) },

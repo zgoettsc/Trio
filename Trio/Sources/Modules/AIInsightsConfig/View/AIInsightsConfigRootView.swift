@@ -178,6 +178,14 @@ extension AIInsightsConfig {
                             Text("Telemetry")
                         }
                     }
+
+                    NavigationLink(destination: EatingModeTuningView()) {
+                        HStack {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundColor(.orange)
+                            Text("Eating Mode Tuning")
+                        }
+                    }
                 }
                 .listRowBackground(Color.chart)
             }
