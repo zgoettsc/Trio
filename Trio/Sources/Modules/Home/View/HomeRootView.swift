@@ -1205,11 +1205,15 @@ extension Home {
                     bolusView(geo: geo, progress)
                         .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
                 } else {
-                    VStack(spacing: 6) {
-                        mealWindowBanner()
-                        adjustmentView(geo: geo)
-                    }
-                    .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
+                    adjustmentView(geo: geo)
+                        .overlay(alignment: .top) {
+                            // Float the eating-mode pill above the adjustment banner so
+                            // it doesn't push the adjustment off-screen on smaller devices
+                            // (the bottom area isn't scrollable).
+                            mealWindowBanner()
+                                .offset(y: -42)
+                        }
+                        .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
                 }
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
