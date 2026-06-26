@@ -47,3 +47,4 @@
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":0.55},"timestamp":"2026-06-26T23:03:22.722Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
 {"kind":"smbDelivered","payload":{"bg":189,"floorActivated":false,"insulinReq":0.18,"iob":3.864,"minutesSinceWindowOpen":34.906314831972125,"units":0.05},"timestamp":"2026-06-26T23:11:06.414Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowToughMealCapPercent","newValue":"80","oldValue":"85"},"timestamp":"2026-06-26T23:26:13.220Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
+{"kind":"mealWindowActivated","payload":{"bg":154,"cob":32,"delta5m":-14,"durationMinutes":90,"estimatedCarbs":null,"iob":3.3810000000000002,"source":"shortcut"},"timestamp":"2026-06-26T23:29:26.745Z","windowId":"BEE5DAE4-9024-46F3-9422-97E436D2BE8D"}
