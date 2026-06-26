@@ -586,9 +586,11 @@ final class BaseAPSManager: APSManager, Injectable {
         let reason = determination?.reason ?? ""
         let floor = determination?.mealWindowFloor
         let floorActivated = floor?.activated ?? reason.contains("Meal-window floor:")
-        let floorPriorInsulinReq = floor?.prior.map { Double(truncating: $0 as NSNumber) } ?? nil
-        let floorMagnitude = floor?.floored.map { Double(truncating: $0 as NSNumber) } ?? nil
-        let floorVelocityFactor = floor?.factor.map { Double(truncating: $0 as NSNumber) } ?? nil
+        // Map on the optional itself — `floor?.prior.map { ... }` parses as
+        // `floor?.(prior.map { ... })` and `.map` doesn't exist on `Decimal`.
+        let floorPriorInsulinReq: Double? = floor.map { Double(truncating: $0.prior as NSNumber) }
+        let floorMagnitude: Double? = floor.map { Double(truncating: $0.floored as NSNumber) }
+        let floorVelocityFactor: Double? = floor.map { Double(truncating: $0.factor as NSNumber) }
 
         let sig = signalPipeline.latestOutput
         let sample = AlgorithmTelemetryLoopSample(

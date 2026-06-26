@@ -817,7 +817,7 @@ extension Home.StateModel {
         settingsManager.settings = s
         refreshMealWindowState()
 
-        if let telemetry = resolver.resolve(AlgorithmTelemetryManager.self) {
+        if let telemetry = resolver?.resolve(AlgorithmTelemetryManager.self) {
             let now = Date()
             telemetry.logEvent(AlgorithmTelemetryEvent(
                 kind: .mealWindowCancelled,
@@ -837,9 +837,9 @@ extension Home.StateModel {
                     ? Double(truncating: preEstimatedCarbs as NSDecimalNumber)
                     : nil,
                 carbsConfirmed: preCarbsConfirmed,
-                bgAtActivation: nil,
-                iobAtActivation: nil,
-                cobAtActivation: nil
+                bgAtActivation: nil as Double?,
+                iobAtActivation: nil as Double?,
+                cobAtActivation: nil as Double?
             )
         }
 

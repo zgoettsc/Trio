@@ -79,20 +79,23 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
         if !areFetchedFromRemote {
             for entry in entriesToStore {
                 guard entry.carbs > 0 || (entry.fat ?? 0) > 0 || (entry.protein ?? 0) > 0 else { continue }
+                // Build the payload imperatively — the big literal-dictionary form
+                // hit the Swift type-checker's complexity ceiling for `.from`
+                // overload resolution across many keys.
+                var payload: [String: AlgorithmTelemetryJSONValue] = [:]
+                payload["carbs"] = .from(entry.carbs)
+                payload["fat"] = .from(entry.fat ?? 0)
+                payload["protein"] = .from(entry.protein ?? 0)
+                payload["isFPU"] = .bool(entry.isFPU)
+                payload["fpuID"] = entry.fpuID.map { .string($0) } ?? .null
+                payload["enteredBy"] = .string(entry.enteredBy ?? "unknown")
+                payload["note"] = entry.note.map { .string($0) } ?? .null
+                payload["duringMealWindow"] = .bool(settings.settings.mealWindowActivationDate != nil)
                 algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
                     kind: .carbEntry,
                     timestamp: entry.actualDate ?? entry.createdAt,
                     windowId: settings.settings.mealWindowId,
-                    payload: [
-                        "carbs": .from(entry.carbs),
-                        "fat": .from(entry.fat ?? 0),
-                        "protein": .from(entry.protein ?? 0),
-                        "isFPU": .bool(entry.isFPU),
-                        "fpuID": entry.fpuID.map { .string($0) } ?? .null,
-                        "enteredBy": .string(entry.enteredBy ?? "unknown"),
-                        "note": entry.note.map { .string($0) } ?? .null,
-                        "duringMealWindow": .bool(settings.settings.mealWindowActivationDate != nil)
-                    ]
+                    payload: payload
                 ))
             }
         }
