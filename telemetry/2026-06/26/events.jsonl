@@ -46,3 +46,4 @@
 {"kind":"carbEntry","payload":{"carbs":15,"duringMealWindow":true,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"","protein":0},"timestamp":"2026-06-26T23:03:15.268Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":0.55},"timestamp":"2026-06-26T23:03:22.722Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
 {"kind":"smbDelivered","payload":{"bg":189,"floorActivated":false,"insulinReq":0.18,"iob":3.864,"minutesSinceWindowOpen":34.906314831972125,"units":0.05},"timestamp":"2026-06-26T23:11:06.414Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
+{"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowToughMealCapPercent","newValue":"80","oldValue":"85"},"timestamp":"2026-06-26T23:26:13.220Z","windowId":"405F97DD-3A5C-46B2-B95B-63DAB4C25010"}
