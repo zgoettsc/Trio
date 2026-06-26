@@ -90,6 +90,7 @@ extension Notification.Name {
             _ = resolver.resolve(LiveActivityManager.self)!
         }
         _ = resolver.resolve(IOBService.self)!
+        _ = resolver.resolve(AlgorithmTelemetryManager.self)!
 
         // Start nutrition observer at app launch so meal deltas are captured
         // continuously, not just while the Treatments tab is visible.
@@ -502,6 +503,55 @@ extension Notification.Name {
         switch components?.host {
         case "device-select-resp":
             resolver.resolve(NotificationCenter.self)!.post(name: .openFromGarminConnect, object: url)
+        case "meal-window":
+            // Triggered by the cancel link on the Live Activity meal-window pill.
+            // Mirrors AnnounceMealIntentRequest.cancel(): clears the activation
+            // timestamp so the next determineBasal pass sees no active window.
+            if components?.path == "/cancel" {
+                if let settingsManager = resolver.resolve(SettingsManager.self),
+                   let activatedAt = settingsManager.settings.mealWindowActivationDate
+                {
+                    let windowId = settingsManager.settings.mealWindowId
+                    let preCarbsConfirmed = settingsManager.settings.mealWindowCarbsConfirmed
+                    let preEstimatedCarbs = settingsManager.settings.mealWindowEstimatedCarbs
+                    var s = settingsManager.settings
+                    s.mealWindowActivationDate = nil
+                    s.mealWindowEstimatedCarbs = 0
+                    s.mealWindowCarbsConfirmed = false
+                    s.mealWindowId = nil
+                    settingsManager.settings = s
+
+                    if let telemetry = resolver.resolve(AlgorithmTelemetryManager.self) {
+                        let now = Date()
+                        telemetry.logEvent(AlgorithmTelemetryEvent(
+                            kind: .mealWindowCancelled,
+                            timestamp: now,
+                            windowId: windowId,
+                            payload: [
+                                "source": .string("liveActivityLink"),
+                                "minutesSinceActivation": .double(now.timeIntervalSince(activatedAt) / 60)
+                            ]
+                        ))
+                        telemetry.recordWindowClose(
+                            windowId: windowId,
+                            activatedAt: activatedAt,
+                            closedAt: now,
+                            closeReason: "userCancelledLiveActivity",
+                            estimatedCarbs: preEstimatedCarbs > 0
+                                ? Double(truncating: preEstimatedCarbs as NSDecimalNumber)
+                                : nil,
+                            carbsConfirmed: preCarbsConfirmed,
+                            bgAtActivation: nil,
+                            iobAtActivation: nil,
+                            cobAtActivation: nil
+                        )
+                    }
+
+                    Task {
+                        try? await resolver.resolve(APSManager.self)?.determineBasalSync()
+                    }
+                }
+            }
         default: break
         }
     }

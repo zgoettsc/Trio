@@ -513,20 +513,9 @@ extension Treatments {
                     settings.settings.toughMealFatPlusProtein = fatPlusProtein
                     settings.settings.toughMealAutoDetected = toughMealAutoSuggested
 
-                    // Determine gate reason for tracking
-                    var gateReason = ""
-                    if currentBG > 180 {
-                        gateReason = "high_starting_bg_\(currentBG)"
-                    }
-                    if iob > 1.5 {
-                        gateReason += gateReason.isEmpty ? "" : ","
-                        gateReason += "high_iob_\(iob)"
-                    }
-                    settings.settings.toughMealGateReason = gateReason
-
                     debug(
                         .bolusState,
-                        "Tough Meal mode activated. BG=\(currentBG), IOB=\(iob), Fat+Protein=\(fatPlusProtein), autoSuggested=\(toughMealAutoSuggested), gate=\(gateReason)"
+                        "Tough Meal mode activated. BG=\(currentBG), IOB=\(iob), Fat+Protein=\(fatPlusProtein), autoSuggested=\(toughMealAutoSuggested), gate=\(Self.toughMealGateReason(currentBG: currentBG, iob: iob))"
                     )
                 }
 
@@ -843,7 +832,7 @@ extension Treatments {
                 superBolusEnabled: useSuperBolus,
                 toughMealEnabled: useToughMeal,
                 toughMealAutoDetected: toughMealAutoSuggested,
-                toughMealGateReason: settings.settings.toughMealGateReason,
+                toughMealGateReason: Treatments.StateModel.toughMealGateReason(currentBG: currentBG, iob: iob),
                 fatPlusProteinGrams: Double(truncating: (fat + protein) as NSDecimalNumber),
                 fraction: Double(truncating: fraction as NSDecimalNumber),
                 userConfirmedDose: insulinDelivered,
@@ -913,6 +902,21 @@ extension Treatments {
 
         func addToSummation() {
             summation.append(selection?.dish ?? "")
+        }
+
+        /// Compute tough-meal gate reason from live BG/IOB. Used at snapshot-write time so each
+        /// MealDecisionLog row reflects current conditions instead of a stale value persisted by
+        /// the most recent tough-meal activation.
+        static func toughMealGateReason(currentBG: Decimal, iob: Decimal) -> String {
+            var reason = ""
+            if currentBG > 180 {
+                reason = "high_starting_bg_\(currentBG)"
+            }
+            if iob > 1.5 {
+                reason += reason.isEmpty ? "" : ","
+                reason += "high_iob_\(iob)"
+            }
+            return reason
         }
     }
 }

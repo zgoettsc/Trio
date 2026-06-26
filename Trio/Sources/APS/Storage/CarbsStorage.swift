@@ -24,6 +24,7 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
     @Injected() private var storage: FileStorage!
     @Injected() private var broadcaster: Broadcaster!
     @Injected() private var settings: SettingsManager!
+    @Injected() private var algorithmTelemetryManager: AlgorithmTelemetryManager!
 
     private let updateSubject = PassthroughSubject<Void, Never>()
 
@@ -71,6 +72,65 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
 
         await saveCarbsToCoreData(entries: entriesToStore, areFetchedFromRemote: areFetchedFromRemote)
         await saveCarbEquivalents(entries: entriesToStore, areFetchedFromRemote: areFetchedFromRemote)
+
+        // Telemetry: log every local carb entry (regardless of whether a meal window is
+        // active). This is what missed-meal analysis joins against — a "missed meal"
+        // is a BG rise with no nearby carbEntry row to explain it.
+        if !areFetchedFromRemote {
+            for entry in entriesToStore {
+                guard entry.carbs > 0 || (entry.fat ?? 0) > 0 || (entry.protein ?? 0) > 0 else { continue }
+                // Build the payload imperatively — the big literal-dictionary form
+                // hit the Swift type-checker's complexity ceiling for `.from`
+                // overload resolution across many keys.
+                var payload: [String: AlgorithmTelemetryJSONValue] = [:]
+                payload["carbs"] = .from(entry.carbs)
+                payload["fat"] = .from(entry.fat ?? 0)
+                payload["protein"] = .from(entry.protein ?? 0)
+                payload["isFPU"] = .bool(entry.isFPU ?? false)
+                payload["fpuID"] = entry.fpuID.map { .string($0) } ?? .null
+                payload["enteredBy"] = .string(entry.enteredBy ?? "unknown")
+                payload["note"] = entry.note.map { .string($0) } ?? .null
+                payload["duringMealWindow"] = .bool(settings.settings.mealWindowActivationDate != nil)
+                algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                    kind: .carbEntry,
+                    timestamp: entry.actualDate ?? entry.createdAt,
+                    windowId: settings.settings.mealWindowId,
+                    payload: payload
+                ))
+            }
+        }
+
+        // If a meal-announcement window is open and the user just logged real carbs locally,
+        // extend the window to the post-prandial duration so SMB enhancements stay on while
+        // the meal actually absorbs. We deliberately ignore remote-fetched entries so NS
+        // backfill doesn't re-extend the window after the fact.
+        if !areFetchedFromRemote,
+           settings.settings.mealWindowActivationDate != nil,
+           !settings.settings.mealWindowCarbsConfirmed,
+           entriesToStore.contains(where: { $0.carbs > 0 })
+        {
+            let windowId = settings.settings.mealWindowId
+            let totalCarbs = entriesToStore.reduce(Decimal(0)) { $0 + $1.carbs }
+            let totalFat = entriesToStore.reduce(Decimal(0)) { $0 + ($1.fat ?? 0) }
+            let totalProtein = entriesToStore.reduce(Decimal(0)) { $0 + ($1.protein ?? 0) }
+            var s = settings.settings
+            s.mealWindowCarbsConfirmed = true
+            settings.settings = s
+
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .mealWindowCarbsConfirmed,
+                timestamp: Date(),
+                windowId: windowId,
+                payload: [
+                    "carbs": .from(totalCarbs),
+                    "fat": .from(totalFat),
+                    "protein": .from(totalProtein),
+                    "minutesSinceActivation": .from(
+                        s.mealWindowActivationDate.map { Date().timeIntervalSince($0) / 60 }
+                    )
+                ]
+            ))
+        }
     }
 
     private func filterRemoteEntries(entries: [CarbsEntry]) async throws -> [CarbsEntry] {

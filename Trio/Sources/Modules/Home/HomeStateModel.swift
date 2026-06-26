@@ -117,6 +117,15 @@ extension Home {
         var pendingProfileSwitchNotification: ProfileSwitchEvent?
 
         var showCarbsRequiredBadge: Bool = true
+
+        // Meal-window state, mirrored from TrioSettings for the Home banner.
+        // Updated in settingsDidChange (which fires from BaseSettingsManager.settings.didSet,
+        // including when AnnounceMealIntent writes to settings).
+        var isMealWindowActive: Bool = false
+        var mealWindowExpiresAt: Date = .distantPast
+        var mealWindowEstimatedCarbs: Decimal = 0
+        var mealWindowCarbsConfirmed: Bool = false
+
         private(set) var setupPumpType: PumpConfig.PumpType = .minimed
         var minForecast: [Int] = []
         var maxForecast: [Int] = []
@@ -440,6 +449,7 @@ extension Home {
             lowTTlowersSens = settingsManager.preferences.lowTemptargetLowersSensitivity
             settingHalfBasalTarget = settingsManager.preferences.halfBasalExerciseTarget
             maxIOB = settingsManager.preferences.maxIOB
+            refreshMealWindowState()
         }
 
         @MainActor private func setupCGMSettings() async {
@@ -685,6 +695,7 @@ extension Home.StateModel:
     }
 
     func settingsDidChange(_ settings: TrioSettings) {
+        Task { @MainActor in self.refreshMealWindowState() }
         allowManualTemp = !settings.closedLoop
         closedLoop = settingsManager.settings.closedLoop
         units = settingsManager.settings.units
@@ -762,6 +773,77 @@ extension Home.StateModel:
         displayPumpStatusHighlightMessage(true)
         displayPumpStatusBadge(true)
         batteryFromPersistence = []
+    }
+}
+
+extension Home.StateModel {
+    /// Pull the latest meal-window snapshot from TrioSettings into local observable state.
+    /// Mirrors the duration logic in OpenAPS.swift (extended duration kicks in once a real
+    /// carb entry confirms the window) and the 6h hard safety cap.
+    @MainActor func refreshMealWindowState() {
+        let s = settingsManager.settings
+        guard let activatedAt = s.mealWindowActivationDate else {
+            if isMealWindowActive { isMealWindowActive = false }
+            mealWindowExpiresAt = .distantPast
+            mealWindowEstimatedCarbs = 0
+            mealWindowCarbsConfirmed = false
+            return
+        }
+        let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
+            ? s.mealWindowExtendedDurationMinutes
+            : s.mealWindowDurationMinutes
+        let cappedDuration = min(durationMinutes, 360)
+        let expiresAt = activatedAt.addingTimeInterval(
+            TimeInterval(truncating: cappedDuration as NSDecimalNumber) * 60
+        )
+        mealWindowExpiresAt = expiresAt
+        mealWindowEstimatedCarbs = s.mealWindowEstimatedCarbs
+        mealWindowCarbsConfirmed = s.mealWindowCarbsConfirmed
+        isMealWindowActive = expiresAt > Date()
+    }
+
+    /// User-initiated cancel from the Home banner. Mirrors AnnounceMealIntentRequest.cancel()
+    /// and the trio://meal-window/cancel URL handler in TrioApp.
+    @MainActor func cancelMealWindow() async {
+        guard let activatedAt = settingsManager.settings.mealWindowActivationDate else { return }
+        let preWindowId = settingsManager.settings.mealWindowId
+        let preCarbsConfirmed = settingsManager.settings.mealWindowCarbsConfirmed
+        let preEstimatedCarbs = settingsManager.settings.mealWindowEstimatedCarbs
+        var s = settingsManager.settings
+        s.mealWindowActivationDate = nil
+        s.mealWindowEstimatedCarbs = 0
+        s.mealWindowCarbsConfirmed = false
+        s.mealWindowId = nil
+        settingsManager.settings = s
+        refreshMealWindowState()
+
+        if let telemetry = resolver?.resolve(AlgorithmTelemetryManager.self) {
+            let now = Date()
+            telemetry.logEvent(AlgorithmTelemetryEvent(
+                kind: .mealWindowCancelled,
+                timestamp: now,
+                windowId: preWindowId,
+                payload: [
+                    "source": .string("homeBanner"),
+                    "minutesSinceActivation": .double(now.timeIntervalSince(activatedAt) / 60)
+                ]
+            ))
+            telemetry.recordWindowClose(
+                windowId: preWindowId,
+                activatedAt: activatedAt,
+                closedAt: now,
+                closeReason: "userCancelledHomeBanner",
+                estimatedCarbs: preEstimatedCarbs > 0
+                    ? Double(truncating: preEstimatedCarbs as NSDecimalNumber)
+                    : nil,
+                carbsConfirmed: preCarbsConfirmed,
+                bgAtActivation: nil as Double?,
+                iobAtActivation: nil as Double?,
+                cobAtActivation: nil as Double?
+            )
+        }
+
+        try? await apsManager.determineBasalSync()
     }
 }
 

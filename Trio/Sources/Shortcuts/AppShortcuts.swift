@@ -75,5 +75,23 @@ struct AppShortcuts: AppShortcutsProvider {
             shortTitle: "Restart Live Activity",
             systemImageName: "arrow.clockwise.circle.fill"
         )
+        AppShortcut(
+            intent: AnnounceMealIntent(),
+            phrases: [
+                "I'm eating in \(.applicationName)",
+                "Tell \(.applicationName) I'm eating"
+            ],
+            shortTitle: "I'm Eating",
+            systemImageName: "fork.knife.circle.fill"
+        )
+        AppShortcut(
+            intent: CancelMealAnnouncementIntent(),
+            phrases: [
+                "Cancel \(.applicationName) eating mode",
+                "Stop \(.applicationName) eating mode"
+            ],
+            shortTitle: "Cancel Eating Mode",
+            systemImageName: "xmark.circle.fill"
+        )
     }
 }

@@ -77,7 +77,27 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var toughMealIOBAtDose: Decimal = 0
     var toughMealFatPlusProtein: Decimal = 0
     var toughMealAutoDetected: Bool = false
-    var toughMealGateReason: String = ""
+
+    // Meal-window state, set by AnnounceMealIntent ("I'm eating now" Action Button).
+    // Active from activation until activation + mealWindowDurationMinutes, then auto-expires.
+    var mealWindowActivationDate: Date? = nil
+    var mealWindowDurationMinutes: Decimal = 90
+    var mealWindowExtendedDurationMinutes: Decimal = 240
+    var mealWindowEstimatedCarbs: Decimal = 0
+    var mealWindowCarbsConfirmed: Bool = false
+    /// Stable identifier for the currently-active meal window. Set on activation, read
+    /// by every site that logs telemetry events so all events for one window can be joined.
+    var mealWindowId: String? = nil
+
+    // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
+    // on the trio repo for tuning analysis. PAT is in Keychain, not here.
+    var telemetryEnabled: Bool = false
+    var telemetryRepo: String = "zgoettsc/trio"
+    var telemetryBranch: String = "telemetry"
+    var telemetryLastSuccessfulPushDate: Date? = nil
+    var telemetryLastError: String? = nil
+    var telemetryLastRemoteCleanupDate: Date? = nil
+
     var displayPresets: Bool = true
     var confirmBolus: Bool = false
     var useLiveActivity: Bool = false
@@ -248,8 +268,55 @@ extension TrioSettings: Decodable {
             settings.toughMealAutoDetected = toughMealAutoDetected
         }
 
-        if let toughMealGateReason = try? container.decode(String.self, forKey: .toughMealGateReason) {
-            settings.toughMealGateReason = toughMealGateReason
+        if let mealWindowActivationDate = try? container.decode(Date.self, forKey: .mealWindowActivationDate) {
+            settings.mealWindowActivationDate = mealWindowActivationDate
+        }
+
+        if let mealWindowDurationMinutes = try? container.decode(Decimal.self, forKey: .mealWindowDurationMinutes) {
+            settings.mealWindowDurationMinutes = mealWindowDurationMinutes
+        }
+
+        if let mealWindowExtendedDurationMinutes = try? container.decode(
+            Decimal.self,
+            forKey: .mealWindowExtendedDurationMinutes
+        ) {
+            settings.mealWindowExtendedDurationMinutes = mealWindowExtendedDurationMinutes
+        }
+
+        if let mealWindowEstimatedCarbs = try? container.decode(Decimal.self, forKey: .mealWindowEstimatedCarbs) {
+            settings.mealWindowEstimatedCarbs = mealWindowEstimatedCarbs
+        }
+
+        if let mealWindowCarbsConfirmed = try? container.decode(Bool.self, forKey: .mealWindowCarbsConfirmed) {
+            settings.mealWindowCarbsConfirmed = mealWindowCarbsConfirmed
+        }
+        if let mealWindowId = try? container.decode(String.self, forKey: .mealWindowId) {
+            settings.mealWindowId = mealWindowId
+        }
+
+        if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {
+            settings.telemetryEnabled = telemetryEnabled
+        }
+        if let telemetryRepo = try? container.decode(String.self, forKey: .telemetryRepo) {
+            settings.telemetryRepo = telemetryRepo
+        }
+        if let telemetryBranch = try? container.decode(String.self, forKey: .telemetryBranch) {
+            settings.telemetryBranch = telemetryBranch
+        }
+        if let telemetryLastSuccessfulPushDate = try? container.decode(
+            Date.self,
+            forKey: .telemetryLastSuccessfulPushDate
+        ) {
+            settings.telemetryLastSuccessfulPushDate = telemetryLastSuccessfulPushDate
+        }
+        if let telemetryLastError = try? container.decode(String.self, forKey: .telemetryLastError) {
+            settings.telemetryLastError = telemetryLastError
+        }
+        if let telemetryLastRemoteCleanupDate = try? container.decode(
+            Date.self,
+            forKey: .telemetryLastRemoteCleanupDate
+        ) {
+            settings.telemetryLastRemoteCleanupDate = telemetryLastRemoteCleanupDate
         }
 
         if let overrideFactor = try? container.decode(Decimal.self, forKey: .overrideFactor) {

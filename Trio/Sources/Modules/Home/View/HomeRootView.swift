@@ -859,6 +859,69 @@ extension Home {
             }
         }
 
+        /// Eating-mode banner — mirrors the Live Activity pill but on the Home screen.
+        /// Hidden when no window is active. The countdown is rendered with
+        /// `Text(timerInterval:countsDown:)`, which self-ticks via the system and does NOT
+        /// re-evaluate this closure. A single `.task(id:)` waits until expiry to flip
+        /// visibility — there is no per-second polling, so this banner has no idle cost.
+        @ViewBuilder func mealWindowBanner() -> some View {
+            if state.isMealWindowActive {
+                let expiresAt = state.mealWindowExpiresAt
+                HStack(spacing: 8) {
+                    Image(systemName: "fork.knife")
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Eating Mode")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                        Text(timerInterval: Date() ... expiresAt, countsDown: true)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    if state.mealWindowCarbsConfirmed {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.white.opacity(0.85))
+                    } else if state.mealWindowEstimatedCarbs > 0 {
+                        Text("~\(NSDecimalNumber(decimal: state.mealWindowEstimatedCarbs).intValue) g")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        Task { await state.cancelMealWindow() }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("End eating mode"))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background {
+                    RoundedRectangle(cornerRadius: 15)
+                        .fill(Color.orange.opacity(colorScheme == .dark ? 0.7 : 0.85))
+                }
+                .padding(.horizontal, 10)
+                .task(id: expiresAt) {
+                    // Sleep exactly until expiry then refresh state so visibility flips
+                    // without polling. If the user cancels first, the task is invalidated
+                    // because the view rebuilds with isMealWindowActive=false.
+                    let delay = expiresAt.timeIntervalSinceNow
+                    guard delay > 0 else {
+                        state.refreshMealWindowState()
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    state.refreshMealWindowState()
+                }
+            }
+        }
+
         @ViewBuilder func adjustmentView(geo: GeometryProxy) -> some View {
 //            let background = colorScheme == .dark ? Material.ultraThinMaterial.opacity(0.5) : Color.black.opacity(0.2)
 
@@ -1089,6 +1152,13 @@ extension Home {
                     }
                 }
                 .padding(.top, 10)
+                // Why High/Low banner floats as an overlay so it doesn't push the
+                // header / glucose-bobble / pump panels down. zIndex keeps it above
+                // those panels; the banner internally handles dismissal.
+                .overlay(alignment: .top) {
+                    whyHighLowBanner
+                        .zIndex(1)
+                }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 8) {
                         if notificationsDisabled {
@@ -1098,9 +1168,6 @@ extension Home {
                             pumpTimezoneView(badgeImage, badgeColor)
                                 .padding(.horizontal, 20)
                         }
-                        // Why High/Low Banner
-                        whyHighLowBanner
-
                         // Physio Test Banner
                         physioTestBanner
                     }
@@ -1138,7 +1205,15 @@ extension Home {
                     bolusView(geo: geo, progress)
                         .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
                 } else {
-                    adjustmentView(geo: geo).padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
+                    adjustmentView(geo: geo)
+                        .overlay(alignment: .top) {
+                            // Float the eating-mode pill above the adjustment banner so
+                            // it doesn't push the adjustment off-screen on smaller devices
+                            // (the bottom area isn't scrollable).
+                            mealWindowBanner()
+                                .offset(y: -42)
+                        }
+                        .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
                 }
             }
             .background(appState.trioBackgroundColor(for: colorScheme))

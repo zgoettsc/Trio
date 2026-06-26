@@ -126,6 +126,10 @@ private extension LiveActivityAttributes.ContentState {
             tempTargetDate: Date().addingTimeInterval(-1800),
             tempTargetDuration: 60,
             tempTargetTarget: 120,
+            isMealWindowActive: false,
+            mealWindowExpiresAt: Date().addingTimeInterval(60 * 45),
+            mealWindowEstimatedCarbs: 0,
+            mealWindowCarbsConfirmed: false,
             widgetItems: LiveActivityAttributes.LiveActivityItem.defaultItems
         )
 

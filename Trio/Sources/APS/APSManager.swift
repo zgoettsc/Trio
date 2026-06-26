@@ -84,6 +84,7 @@ final class BaseAPSManager: APSManager, Injectable {
     @Injected() private var broadcaster: Broadcaster!
     @Injected() private var profileManager: ProfileManager!
     @Injected() private var signalPipeline: OrefSignalPipeline!
+    @Injected() private var algorithmTelemetryManager: AlgorithmTelemetryManager!
     @Persisted(key: "lastLoopStartDate") private var lastLoopStartDate: Date = .distantPast
     @Persisted(key: "lastLoopDate") var lastLoopDate: Date = .distantPast {
         didSet {
@@ -524,6 +525,11 @@ final class BaseAPSManager: APSManager, Injectable {
                     }
                 }
             }
+
+            // Telemetry: log a loop sample iff a meal window is active. Outside windows
+            // we don't write per-loop rows (would balloon to thousands of entries/day).
+            // The manager itself gates on telemetryEnabled so this is cheap when off.
+            logTelemetryLoopSample(determination: determination)
         } catch {
             iobFileDidUpdate.send(())
 
@@ -541,6 +547,129 @@ final class BaseAPSManager: APSManager, Injectable {
 
     func determineBasalSync() async throws {
         _ = try await determineBasal()
+    }
+
+    /// Telemetry: emit one row per loop pass into loop.jsonl. We log CONTINUOUSLY (not
+    /// only during meal windows) so we have the data we need for:
+    /// - missed-meal detection (find unexplained rises with no carb entry)
+    /// - basal / ISF / carb-ratio tuning (Claude-o-Tune style analysis)
+    /// - quick-action validation (A/B compare meal vs non-meal periods)
+    ///
+    /// Volume: ~288 rows/day × ~600 bytes ≈ 170 KB/day → 5 MB/month. The manager
+    /// short-circuits when telemetry is disabled so this is free when off.
+    ///
+    /// Floor activation is inferred from the oref reason string (Phase A heuristic).
+    /// Phase B replaces this with a structured `rT.mealWindowFloor` field from the JS.
+    private func logTelemetryLoopSample(determination: Determination?) {
+        let s = settingsManager.settings
+        guard s.telemetryEnabled else { return }
+
+        let now = Date()
+        let activatedAt = s.mealWindowActivationDate
+        let minutesSinceOpen = activatedAt.map { now.timeIntervalSince($0) / 60 }
+
+        let remainingMinutes: Double? = {
+            guard let activatedAt else { return nil }
+            let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
+                ? s.mealWindowExtendedDurationMinutes
+                : s.mealWindowDurationMinutes
+            let cappedDuration = min(durationMinutes, 360)
+            return max(
+                0,
+                Double(truncating: cappedDuration as NSDecimalNumber) - now.timeIntervalSince(activatedAt) / 60
+            )
+        }()
+        let mealWindowActive = (remainingMinutes ?? 0) > 0
+
+        // Structured floor data from determine-basal.js (preferred). Falls back to
+        // parsing the reason string if the structured field is missing (older oref).
+        let reason = determination?.reason ?? ""
+        let floor = determination?.mealWindowFloor
+        let floorActivated = floor?.activated ?? reason.contains("Meal-window floor:")
+        // Map on the optional itself — `floor?.prior.map { ... }` parses as
+        // `floor?.(prior.map { ... })` and `.map` doesn't exist on `Decimal`.
+        let floorPriorInsulinReq: Double? = floor.map { Double(truncating: $0.prior as NSNumber) }
+        let floorMagnitude: Double? = floor.map { Double(truncating: $0.floored as NSNumber) }
+        let floorVelocityFactor: Double? = floor.map { Double(truncating: $0.factor as NSNumber) }
+
+        let sig = signalPipeline.latestOutput
+        let sample = AlgorithmTelemetryLoopSample(
+            timestamp: now,
+            windowId: s.mealWindowId,
+            minutesSinceWindowOpen: minutesSinceOpen,
+            bg: determination?.bg.map { Double(truncating: $0 as NSNumber) },
+            smoothedBG: sig?.smoothedBG,
+            velocity: sig?.velocity,
+            acceleration: sig?.acceleration,
+            jerk: sig?.jerk,
+            delta5m: determination?.minDelta.map { Double(truncating: $0 as NSNumber) },
+            shortAvgDelta: nil,
+            longAvgDelta: nil,
+            mealDetection: sig?.mealDetectionConfidence.rawValue,
+            iob: determination?.iob.map { Double(truncating: $0 as NSNumber) },
+            cob: determination?.cob.map { Double(truncating: $0 as NSNumber) },
+            bayesianCOB: nil,
+            eventualBG: determination?.eventualBG.map { Double($0) },
+            minPredBG: determination?.minPredBG.map { Double(truncating: $0 as NSNumber) },
+            insulinReq: determination?.insulinReq.map { Double(truncating: $0 as NSNumber) },
+            smbDelivered: determination?.units.map { Double(truncating: $0 as NSNumber) },
+            tempBasalRate: determination?.rate.map { Double(truncating: $0 as NSNumber) },
+            sensitivityRatio: determination?.sensitivityRatio.map { Double(truncating: $0 as NSNumber) },
+            mealWindowActive: mealWindowActive,
+            mealWindowMinutesRemaining: remainingMinutes,
+            mealWindowCarbsConfirmed: s.mealWindowCarbsConfirmed,
+            mealWindowEstimatedCarbs: Double(truncating: s.mealWindowEstimatedCarbs as NSDecimalNumber),
+            floorActivated: floorActivated,
+            floorPriorInsulinReq: floorPriorInsulinReq,
+            floorMagnitude: floorMagnitude,
+            floorVelocityFactor: floorVelocityFactor,
+            target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
+            // ↑ Trio's Determination uses `current_target` (snake_case from oref JS)
+            isf: determination?.isf.map { Double(truncating: $0 as NSNumber) },
+            carbRatio: determination?.carbRatio.map { Double(truncating: $0 as NSNumber) },
+            maxIOB: Double(truncating: settingsManager.preferences.maxIOB as NSDecimalNumber),
+            reason: reason
+        )
+        algorithmTelemetryManager?.logLoopSample(sample)
+
+        // Floor activation gets its own event so we can find them quickly without
+        // scanning every loop row.
+        if floorActivated {
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .insulinReqFloorActivated,
+                timestamp: now,
+                windowId: s.mealWindowId,
+                payload: [
+                    "bg": .from(sample.bg),
+                    "delta5m": .from(sample.delta5m),
+                    "velocity": .from(sample.velocity),
+                    "iob": .from(sample.iob),
+                    "floorPriorInsulinReq": .from(floorPriorInsulinReq),
+                    "floorMagnitude": .from(floorMagnitude),
+                    "floorVelocityFactor": .from(floorVelocityFactor),
+                    "insulinReq": .from(sample.insulinReq),
+                    "smbDelivered": .from(sample.smbDelivered),
+                    "minutesSinceWindowOpen": .from(minutesSinceOpen)
+                ]
+            ))
+        }
+
+        // Surface any SMB the loop just enacted as a discrete event.
+        if let smb = sample.smbDelivered, smb > 0 {
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .smbDelivered,
+                timestamp: now,
+                windowId: s.mealWindowId,
+                payload: [
+                    "units": .double(smb),
+                    "bg": .from(sample.bg),
+                    "iob": .from(sample.iob),
+                    "insulinReq": .from(sample.insulinReq),
+                    "minutesSinceWindowOpen": .from(minutesSinceOpen),
+                    "floorActivated": .bool(floorActivated)
+                ]
+            ))
+        }
     }
 
     func simulateDetermineBasal(
@@ -608,6 +737,26 @@ final class BaseAPSManager: APSManager, Injectable {
             debug(.apsManager, "Bolus succeeded")
             bolusProgress.send(0)
             callback?(true, String(localized: "Bolus enacted successfully.", comment: "Success message for enacting a bolus"))
+
+            // Telemetry: capture every bolus the pump enacts via Trio. Manual user
+            // boluses are the gold-standard signal for ISF/CR tuning; SMBs are already
+            // surfaced separately by the loop hook but doubling here keeps the bolus
+            // event stream comprehensive.
+            let s = settingsManager.settings
+            if s.telemetryEnabled {
+                let kind: AlgorithmTelemetryEventKind = isSMB ? .smbDelivered : .userBolus
+                algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                    kind: kind,
+                    timestamp: Date(),
+                    windowId: s.mealWindowId,
+                    payload: [
+                        "units": .double(roundedAmount),
+                        "isSMB": .bool(isSMB),
+                        "duringMealWindow": .bool(s.mealWindowActivationDate != nil)
+                    ]
+                ))
+            }
+
             if !isSMB {
                 do {
                     try await determineBasalSync()

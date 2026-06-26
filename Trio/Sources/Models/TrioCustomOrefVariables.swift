@@ -27,7 +27,10 @@ struct TrioCustomOrefVariables: JSON, Equatable {
     var toughMealIOBAtDose: Decimal
     var toughMealFatPlusProtein: Decimal
     var toughMealAutoDetected: Bool
-    var toughMealGateReason: String
+    var mealWindowActive: Bool
+    var mealWindowMinutesRemaining: Decimal
+    var mealWindowEstimatedCarbs: Decimal
+    var mealWindowCarbsConfirmed: Bool
 
     init(
         average_total_data: Decimal,
@@ -56,7 +59,10 @@ struct TrioCustomOrefVariables: JSON, Equatable {
         toughMealIOBAtDose: Decimal = 0,
         toughMealFatPlusProtein: Decimal = 0,
         toughMealAutoDetected: Bool = false,
-        toughMealGateReason: String = ""
+        mealWindowActive: Bool = false,
+        mealWindowMinutesRemaining: Decimal = 0,
+        mealWindowEstimatedCarbs: Decimal = 0,
+        mealWindowCarbsConfirmed: Bool = false
     ) {
         self.average_total_data = average_total_data
         self.weightedAverage = weightedAverage
@@ -84,7 +90,10 @@ struct TrioCustomOrefVariables: JSON, Equatable {
         self.toughMealIOBAtDose = toughMealIOBAtDose
         self.toughMealFatPlusProtein = toughMealFatPlusProtein
         self.toughMealAutoDetected = toughMealAutoDetected
-        self.toughMealGateReason = toughMealGateReason
+        self.mealWindowActive = mealWindowActive
+        self.mealWindowMinutesRemaining = mealWindowMinutesRemaining
+        self.mealWindowEstimatedCarbs = mealWindowEstimatedCarbs
+        self.mealWindowCarbsConfirmed = mealWindowCarbsConfirmed
     }
 }
 
@@ -116,6 +125,9 @@ extension TrioCustomOrefVariables {
         case toughMealIOBAtDose
         case toughMealFatPlusProtein
         case toughMealAutoDetected
-        case toughMealGateReason
+        case mealWindowActive
+        case mealWindowMinutesRemaining
+        case mealWindowEstimatedCarbs
+        case mealWindowCarbsConfirmed
     }
 }

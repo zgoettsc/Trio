@@ -48,6 +48,10 @@ struct LiveActivityAttributes: ActivityAttributes {
         let tempTargetDate: Date
         let tempTargetDuration: Decimal
         let tempTargetTarget: Decimal
+        let isMealWindowActive: Bool
+        let mealWindowExpiresAt: Date
+        let mealWindowEstimatedCarbs: Decimal
+        let mealWindowCarbsConfirmed: Bool
         let widgetItems: [LiveActivityItem]
     }
 

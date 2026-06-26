@@ -24,6 +24,7 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
     @Injected() private var storage: FileStorage!
     @Injected() private var broadcaster: Broadcaster!
     @Injected() private var settings: SettingsManager!
+    @Injected() private var algorithmTelemetryManager: AlgorithmTelemetryManager!
 
     private let updateSubject = PassthroughSubject<Void, Never>()
 
@@ -239,6 +240,20 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
     }
 
     func storeExternalInsulinEvent(amount: Decimal, timestamp: Date) async {
+        // Telemetry: capture externally-administered insulin too. Important for ISF
+        // tuning analysis: a manual pen dose followed by a BG drop tells us about
+        // sensitivity at that moment.
+        if settings.settings.telemetryEnabled {
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .externalBolus,
+                timestamp: timestamp,
+                windowId: settings.settings.mealWindowId,
+                payload: [
+                    "units": .from(amount),
+                    "duringMealWindow": .bool(settings.settings.mealWindowActivationDate != nil)
+                ]
+            ))
+        }
         await context.perform {
             // create pump event
             let newPumpEvent = PumpEventStored(context: self.context)
