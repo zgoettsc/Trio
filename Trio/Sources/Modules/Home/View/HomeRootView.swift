@@ -1142,6 +1142,13 @@ extension Home {
                     }
                 }
                 .padding(.top, 10)
+                // Why High/Low banner floats as an overlay so it doesn't push the
+                // header / glucose-bobble / pump panels down. zIndex keeps it above
+                // those panels; the banner internally handles dismissal.
+                .overlay(alignment: .top) {
+                    whyHighLowBanner
+                        .zIndex(1)
+                }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 8) {
                         if notificationsDisabled {
@@ -1151,9 +1158,6 @@ extension Home {
                             pumpTimezoneView(badgeImage, badgeColor)
                                 .padding(.horizontal, 20)
                         }
-                        // Why High/Low Banner
-                        whyHighLowBanner
-
                         // Physio Test Banner
                         physioTestBanner
                     }
