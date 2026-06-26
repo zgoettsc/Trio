@@ -12,6 +12,81 @@ findings` at the bottom.
 
 ---
 
+## 2026-06-26 round 4 (CRITICAL retrospective — JS never shipped before now)
+
+**Discovery while reviewing round 3 data:** the `effectiveSmbDeliveryRatio`,
+`floorBehavior`, and other per-loop "applied" fields were nil on EVERY loop
+pass — even during active meal windows. Investigation found that the app's
+algorithm loads from `Trio/Resources/javascript/bundle/determine-basal.js`
+(a minified webpack bundle), NOT from `trio-oref/lib/determine-basal/`
+where I had been editing. Per `trio-oref/oref_source_file_info.txt`:
+
+> *"These source files are copied from upstream and are for information
+> purposes only. The algorithm is run based on minimised files in
+> Trio/Resources/javascript/bundle."*
+
+**What this means for prior findings:** every JS-side claim I made from
+rounds 1–3 was running on STOCK upstream oref. No floor was ever in the
+bundle. No SMB ratio boost. No enableSMB meal-window branch.
+
+The only meal-window behavior the user actually experienced was the
+**Swift-side toughMealActive auto-engage** from OpenAPS.swift, which
+fires the existing tough-meal cap multipliers (1.5×/2×/2.5×) in stock
+oref. Plus the UI plumbing — Action Button, meal window state, Live
+Activity pill, Home banner. Those all worked.
+
+### Findings that need to be re-assessed once the rebuilt bundle ships
+
+- **F-1** (floor dormant during well-bolused meals): **tautological** in
+  retrospect. The floor wasn't in the bundle. Re-assess after round 5.
+- **F-2** (rising guard suppressing at delta≈0): **moot** until round 5.
+- **F-5** (215 peak from late bolus): was running stock oref, not the
+  loop with meal-window enhancements. Re-evaluate after the rebuilt
+  bundle is deployed.
+- **F-6** (insReq healthy but throttled by 0.5 ratio): stock oref's
+  behavior. Item 1 (boost to 0.8) was never live. Re-evaluate.
+- **F-7** (~30 min COB-registration lag): stock oref's behavior. Phantom
+  COB (item 5) was never live either.
+
+### What this round shipped
+
+Commit `59d7fd11f` on the working branch: re-ran the webpack build from
+trio-oref/lib via `scripts/webpack.config.js`, copied
+`dist/determineBasal.js` into
+`Trio/Resources/javascript/bundle/determine-basal.js`. The bundle now
+contains all the meal-window code from the past three rounds.
+
+### Process improvement
+
+Going forward, any JS change must be followed by:
+
+```
+cd trio-oref && npm install     # one-time
+npx webpack --config ../scripts/webpack.config.js
+cp dist/determineBasal.js ../Trio/Resources/javascript/bundle/determine-basal.js
+```
+
+Worth adding an Xcode build phase or CI step to do this automatically.
+Until that's in place I'll do it manually on every JS-touching commit.
+
+### What to watch in round 5
+
+Once the rebuilt bundle deploys:
+- Loop sample's `effectiveSmbDeliveryRatio`, `effectiveMaxSMBBasalMinutes`,
+  `floorBehavior`, etc. should populate on every loop pass during active
+  meal windows. If they're still nil, the bundle didn't deploy or
+  decoding is broken.
+- A meal during an active window should show genuinely different
+  behavior than rounds 1–3. Specifically: more aggressive SMBs.
+- `rT.mealWindowFloor` should populate when the floor activates.
+
+If a meal that previously hit peak 215 now hits e.g. 180, that's the
+ship working. If it's still 215, we have a different problem (e.g.,
+the current tuning settings aren't aggressive enough; revisit item 3 or
+item 5 opt-in).
+
+---
+
 ## 2026-06-26 round 3 (PLAN.md items 1-6 ship)
 
 **Data window:** code change only — no new telemetry data analyzed this
