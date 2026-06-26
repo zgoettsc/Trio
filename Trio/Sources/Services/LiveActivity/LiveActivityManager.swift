@@ -47,8 +47,6 @@ final class LiveActivityData: ObservableObject {
     @Published var override: OverrideData?
     /// The current temp target data (if any).
     @Published var tempTarget: TempTargetData?
-    /// The current meal-window data (if any) — set by the "I'm eating" Action Button intent.
-    @Published var mealWindow: MealWindowData?
     /// The widget items displayed within the live activity.
     @Published var widgetItems: [LiveActivityAttributes.LiveActivityItem]?
 }
@@ -466,10 +464,13 @@ final class LiveActivityData: ObservableObject {
             return
         }
 
-        // Refresh the meal-window snapshot from TrioSettings on every push. The source of
-        // truth lives in settings, and `settingsDidChange` already triggers `pushCurrentContent`
-        // so the LA reflects intent activations within one CGM cycle at most.
-        data.mealWindow = currentMealWindowData()
+        // Snapshot the meal-window state into a LOCAL variable rather than writing back into
+        // `data.mealWindow`. The previous version wrote to the @Published property here, which
+        // fired `data.objectWillChange`, which re-triggered `pushCurrentContent` via the
+        // subscription wired up in init() — an unbounded queue on the main actor that
+        // manifested as visible UI lag. `settingsDidChange` already triggers a push when the
+        // intent flips activation, so the LA stays in sync without us mutating @Published here.
+        let mealWindow = currentMealWindowData()
 
         let content = LiveActivityAttributes.ContentState(
             new: bg,
@@ -481,7 +482,7 @@ final class LiveActivityData: ObservableObject {
             iob: data.iob,
             override: data.override,
             tempTarget: data.tempTarget,
-            mealWindow: data.mealWindow,
+            mealWindow: mealWindow,
             widgetItems: data.widgetItems
         )
 
