@@ -12,6 +12,102 @@ findings` at the bottom.
 
 ---
 
+## 2026-06-26 round 3 (PLAN.md items 1-6 ship)
+
+**Data window:** code change only — no new telemetry data analyzed this
+round. Ships the eating-mode aggression package described in PLAN.md.
+
+### Shipped this round
+
+Implementation of the six aggression items (commit `8a66c0ae7` on the
+working branch). Each item is independently toggleable from the new
+**AI Insights → Eating Mode Tuning** screen. Default behavior:
+
+- **Item 1 (default ON)** SMB delivery ratio bumps from 0.5 to 0.8
+  whenever the meal window is active, not just when the floor rescued.
+- **Item 2 (default ON)** Floor's rising guard relaxed from `delta > 0`
+  to `delta > -2`. Should catch the 17:56-18:06 round-1 scenario
+  (F-2/F-6) where BG hovered near zero delta.
+- **Item 4 (default ON)** `enableUAM` forced true during window.
+- **Item 6 (default ON)** `maxSMBBasalMinutes` and
+  `maxUAMSMBBasalMinutes` doubled (45→90) inside the window.
+- **Item 3 (default OFF)** Additive floor mode plumbed; opt-in.
+- **Item 5 (default OFF)** Phantom COB plumbed; opt-in. Requires the
+  user enables it AND mealCOB < 15 AND BG positive-delta-and-rising
+  before injecting.
+- **75% tough-meal cap (default 75 unchanged)** now configurable via
+  the same screen — exposed so we can raise to 90% if item 1's effect
+  is being clipped by the cap.
+
+### Telemetry additions
+
+New per-loop columns in `loop.jsonl` capturing what was *actually
+applied* this pass (from oref's `rT.mealWindowApplied`):
+`effectiveSmbDeliveryRatio`, `effectiveMaxSMBBasalMinutes`,
+`effectiveMaxUAMSMBBasalMinutes`, `effectiveToughMealCapPercent`,
+`floorBehavior` (`"off"` / `"replacement"` / `"additive"`),
+`forcedUAM`, `phantomCOBGrams` (0 if not injected),
+`relaxedRisingGuard`.
+
+New fields in daily `settings.json`: the 9 tuning settings'
+current configured values.
+
+New event kind in `events.jsonl`: `mealWindowTuningChanged` —
+emitted per-field when any of the 9 settings change, with
+`{field, oldValue, newValue}`.
+
+### Hypothesis status
+
+- **H-1** (floor will fire on poorly-bolused meals): **— still no
+  data**. Need a meal where the user under-doses to test.
+- **H-2** (relax rising guard to `delta > -2`): **shipped as item 2,
+  default on.** Effectively closed unless we observe regressions.
+- **H-3** (bump smb_delivery_ratio whenever window active, not just
+  when floor fires): **shipped as item 1, default on, value 0.8.**
+  Closed pending validation. Watch for the round-2 215-peak scenario
+  to be improved.
+- **H-4** (detect late-bolus shape): **— deferred**. Not addressed by
+  this round's changes. Still relevant.
+
+### What to watch on the next data round
+
+- **Compare to round 2's 215 peak.** A similar meal with the new
+  ratio + multiplier active should peak lower. Item 1 + 6 are the
+  load-bearing ones for that scenario.
+- **Floor activation rate.** With item 2 active, expect more
+  activations in flat-delta moments. Look at `floorBehavior` column
+  in loop.jsonl to count.
+- **Item 5 / phantom COB** stays off until we see a few weeks of
+  outcomes with items 1+2+4+6 active.
+- **Tuning-change events** — verify the screen actually flips
+  settings and the events fire as expected.
+
+### Status of prior findings
+
+- **F-1** (floor dormant during well-bolused meals): **✓ still
+  expected**. Item 1's ratio boost may surface more SMBs even when
+  the floor stays off; F-1's "floor doesn't fire" observation still
+  holds, but the loop's behavior in well-bolused meals should be more
+  active overall.
+- **F-2** (rising guard suppresses at delta≈0): **addressed by item 2.**
+  Hypothesis closed pending validation.
+- **F-3** (manual-bolus + window = happy path): **upgraded** — should
+  now extend to "manual-bolus + window + new tuning" being even
+  happier.
+- **F-4** (carbEntry `enteredBy: "Trio"`): **✓ unchanged**.
+- **F-5** (late-bolus 30min gap → peak 215): **partially addressed by
+  items 1, 6.** The bolus delay itself remains a user-behavior issue,
+  but the loop will react faster within the window now.
+- **F-6** (loop's insReq healthy but throttled by 0.5 ratio):
+  **directly addressed by item 1.** Plus the cap is now tunable if
+  the 75% ceiling clips the boost.
+- **F-7** (~30 min COB-registration lag): **addressable by item 5
+  (phantom COB), but item 5 ships default off.** Watch this lag in
+  more data; if it's the dominant blocker for late-bolus scenarios,
+  consider turning item 5 on.
+
+---
+
 ## 2026-06-26 round 2 (snack-during-window through ~3h post-bolus)
 
 **Data window:** 26 events (10 new), 73 loop rows (32 new), through 20:56Z.

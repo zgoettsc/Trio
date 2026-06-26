@@ -23,6 +23,11 @@ One JSON object per line. Common fields: `kind`, `timestamp`, `windowId`,
 | `userBolus` | units, isSMB=false, duringMealWindow |
 | `externalBolus` | units, duringMealWindow |
 | `carbEntry` | carbs, fat, protein, isFPU, fpuID, enteredBy, note, duringMealWindow |
+| `overrideStarted` | overrideId, name, percentage, targetMgdL, durationMinutes |
+| `overrideCancelled` | overrideId |
+| `tempTargetStarted` | tempTargetId, name, targetMgdL, durationMinutes |
+| `tempTargetCancelled` | tempTargetId |
+| `mealWindowTuningChanged` | field, oldValue, newValue — emitted per-field when any of the 9 PLAN.md tuning settings change |
 
 ### `loop.jsonl`
 
@@ -38,6 +43,11 @@ One row per `determineBasal` pass. Always written (continuous), with
   `smbDelivered`, `tempBasalRate`, `sensitivityRatio`
 - **Floor diagnostics:** `floorActivated`, `floorPriorInsulinReq`,
   `floorMagnitude`, `floorVelocityFactor`
+- **Eating-mode tuning, applied this pass** (nil when window inactive):
+  `effectiveSmbDeliveryRatio`, `effectiveMaxSMBBasalMinutes`,
+  `effectiveMaxUAMSMBBasalMinutes`, `effectiveToughMealCapPercent`,
+  `floorBehavior` (`"off"`/`"replacement"`/`"additive"`), `forcedUAM`,
+  `phantomCOBGrams` (0 if not injected), `relaxedRisingGuard`
 - **Profile-at-this-loop:** `target`, `isf`, `carbRatio`, `maxIOB`
 - **Full oref reason:** `reason` (string — invaluable for understanding why)
 
@@ -200,6 +210,42 @@ missed["outcome"] = missed.ts.apply(outcome)
 - What's the SMB-to-peak relationship? Could a meal-window-style flag have helped?
 - Train an early-warning classifier that suggests opening a meal window when the
   signature matches.
+
+---
+
+## Analysis 3a — Did changing tuning Z affect outcomes?
+
+**Goal:** answer "did flipping `mealWindowBoostSMBRatio` on improve
+post-meal peak BG?" or "what's the effect of raising
+`mealWindowToughMealCapPercent` from 75 to 90?"
+
+**Inputs:** `events.jsonl` (`mealWindowTuningChanged`), `loop.jsonl`
+(effective-value columns + outcome traces), `summary.jsonl`.
+
+```python
+# 1) Find every tuning change
+tuning_changes = events[events.kind == "mealWindowTuningChanged"]
+for col in ["field", "oldValue", "newValue"]:
+    tuning_changes[col] = tuning_changes.payload.apply(lambda p: p.get(col))
+
+# 2) For each setting, find the windows BEFORE and AFTER it changed
+def windows_before_after(field, change_ts):
+    pre  = outcomes[outcomes.activatedAt <  change_ts]
+    post = outcomes[outcomes.activatedAt >= change_ts]
+    return pre, post
+
+# 3) Compare median peak BG and time-above-180 between pre/post
+for _, change in tuning_changes.iterrows():
+    pre, post = windows_before_after(change.field, change.timestamp)
+    if len(pre) < 3 or len(post) < 3: continue  # need sample
+    print(f"{change.field}: {change.oldValue} → {change.newValue}")
+    print(f"  pre: peakBG median {pre.peakBG.median():.0f}, n={len(pre)}")
+    print(f"  post: peakBG median {post.peakBG.median():.0f}, n={len(post)}")
+```
+
+**Caveat:** this is observational, not causal. Other things change too
+(carb counting accuracy, time of day, exercise). Treat findings as
+hypotheses, not proofs.
 
 ---
 
