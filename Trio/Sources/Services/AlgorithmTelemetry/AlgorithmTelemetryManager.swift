@@ -28,6 +28,26 @@ protocol AlgorithmTelemetryManager: AnyObject {
     /// Safe to call any time. Returns the windowId if an expiry was just logged.
     @discardableResult
     func auditExpiredMealWindow() -> String?
+
+    /// Write today's settings snapshot if not already present.
+    func maintainDailySnapshot()
+
+    /// Run 30-day rolling local retention.
+    func runRetentionCleanup()
+
+    /// Append a per-window close summary. Called from every close path so each window
+    /// has a discoverable row in summary.jsonl, independent of the event stream.
+    func recordWindowClose(
+        windowId: String?,
+        activatedAt: Date,
+        closedAt: Date,
+        closeReason: String,
+        estimatedCarbs: Double?,
+        carbsConfirmed: Bool,
+        bgAtActivation: Double?,
+        iobAtActivation: Double?,
+        cobAtActivation: Double?
+    )
 }
 
 /// Keychain key for the GitHub Personal Access Token. We store ONLY the PAT here;
@@ -60,9 +80,16 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.auditExpiredMealWindow()
+                self.maintainDailySnapshot()
+                self.runRetentionCleanup()
                 Task { await self.pushNow() }
             }
             .store(in: &subscriptions)
+
+        // Snapshot + cleanup also run once at startup so launching after a long sleep
+        // doesn't have to wait for the next foreground to refresh.
+        maintainDailySnapshot()
+        runRetentionCleanup()
     }
 
     // MARK: - Public API
@@ -184,6 +211,19 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 "wasCarbsConfirmed": .bool(s.mealWindowCarbsConfirmed)
             ]
         ))
+        recordWindowClose(
+            windowId: windowId,
+            activatedAt: activatedAt,
+            closedAt: expiresAt,
+            closeReason: "naturalExpiry",
+            estimatedCarbs: s.mealWindowEstimatedCarbs > 0
+                ? Double(truncating: s.mealWindowEstimatedCarbs as NSDecimalNumber)
+                : nil,
+            carbsConfirmed: s.mealWindowCarbsConfirmed,
+            bgAtActivation: nil,
+            iobAtActivation: nil,
+            cobAtActivation: nil
+        )
 
         DispatchQueue.main.async {
             var ns = self.settingsManager.settings
@@ -227,5 +267,109 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withFullDate, .withFullTime, .withColonSeparatorInTime, .withSpaceBetweenDateAndTime]
         return f.string(from: Date())
+    }
+
+    // MARK: - Phase 3: daily snapshot + cleanup
+
+    /// Write today's settings.json snapshot if one isn't already on disk. Cheap to call
+    /// repeatedly because TelemetryLogger.writeSettingsSnapshot does an atomic overwrite.
+    func maintainDailySnapshot() {
+        guard settingsManager.settings.telemetryEnabled else { return }
+        let s = settingsManager.settings
+        let p = settingsManager.preferences
+        let snapshot = AlgorithmTelemetrySettingsSnapshot(
+            timestamp: Date(),
+            mealWindowDurationMinutes: Double(truncating: s.mealWindowDurationMinutes as NSDecimalNumber),
+            mealWindowExtendedDurationMinutes: Double(
+                truncating: s.mealWindowExtendedDurationMinutes as NSDecimalNumber
+            ),
+            target: nil, // profile-time computed; not flat in settings/preferences
+            isf: nil,
+            carbRatio: nil,
+            maxIOB: Double(truncating: p.maxIOB as NSDecimalNumber),
+            smbDeliveryRatio: Double(truncating: p.smbDeliveryRatio as NSDecimalNumber),
+            maxSMBBasalMinutes: Double(truncating: p.maxSMBBasalMinutes as NSDecimalNumber),
+            maxUAMSMBBasalMinutes: Double(truncating: p.maxUAMSMBBasalMinutes as NSDecimalNumber),
+            smbInterval: Double(truncating: p.smbInterval as NSDecimalNumber),
+            enableUAM: p.enableUAM,
+            enableSMBAlways: p.enableSMBAlways,
+            enableSMBWithCOB: p.enableSMBWithCOB,
+            enableSMBAfterCarbs: p.enableSMBAfterCarbs,
+            enableSMBWithTemptarget: p.enableSMBWithTemptarget,
+            enableSMBHighBG: p.enableSMB_high_bg,
+            enableSMBHighBGTarget: Double(truncating: p.enableSMB_high_bg_target as NSDecimalNumber),
+            toughMealEnabled: s.toughMeals,
+            activeOverrideName: nil, // populated by a future hook if needed
+            activeTempTargetTarget: nil
+        )
+        logger.writeSettingsSnapshot(snapshot)
+    }
+
+    /// 30-day rolling local cleanup. loop.jsonl in old directories is purged; summary
+    /// data is kept indefinitely on the device. The remote branch isn't touched here —
+    /// the GitHub-side retention pass is a separate, less-frequent operation.
+    func runRetentionCleanup() {
+        guard settingsManager.settings.telemetryEnabled else { return }
+        logger.purgeLocal(olderThan: 30)
+    }
+
+    /// Record a per-window close-time summary. Outcomes that require post-prandial data
+    /// (peak BG, time-above-180, etc.) are intentionally NOT computed here — those need
+    /// a +6h delayed pass that's deferred to a follow-up commit. For now, summary.jsonl
+    /// contains the metadata of every closed window (id, activation, close reason,
+    /// hint vs real carbs, activation snapshot). Client-side analysis fills in outcomes
+    /// from the matching loop.jsonl rows.
+    func recordWindowClose(
+        windowId: String?,
+        activatedAt: Date,
+        closedAt: Date,
+        closeReason: String,
+        estimatedCarbs: Double?,
+        carbsConfirmed: Bool,
+        bgAtActivation: Double?,
+        iobAtActivation: Double?,
+        cobAtActivation: Double?
+    ) {
+        guard settingsManager.settings.telemetryEnabled else { return }
+        let p = settingsManager.preferences
+        let summary = AlgorithmTelemetryWindowSummary(
+            windowId: windowId ?? UUID().uuidString,
+            activatedAt: activatedAt,
+            closedAt: closedAt,
+            closeReason: closeReason,
+            estimatedCarbsHint: estimatedCarbs,
+            realCarbsLogged: nil,
+            realFatLogged: nil,
+            realProteinLogged: nil,
+            carbsConfirmed: carbsConfirmed,
+            bgAtActivation: bgAtActivation,
+            iobAtActivation: iobAtActivation,
+            cobAtActivation: cobAtActivation,
+            velocityAtActivation: nil,
+            accelerationAtActivation: nil,
+            mealDetectionAtActivation: nil,
+            peakBG: nil,
+            peakBGMinutesAfterActivation: nil,
+            nadirBG: nil,
+            nadirBGMinutesAfterActivation: nil,
+            bgAt2hr: nil,
+            bgAt4hr: nil,
+            bgAt6hr: nil,
+            minutesAbove180: nil,
+            minutesAbove250: nil,
+            minutesBelow70: nil,
+            totalSMBInsulin: nil,
+            totalScheduledBasalInsulin: nil,
+            totalManualBolusInsulin: nil,
+            floorActivationCount: 0,
+            target: nil,
+            isf: nil,
+            carbRatio: nil,
+            maxIOB: Double(truncating: p.maxIOB as NSDecimalNumber),
+            smbDeliveryRatio: Double(truncating: p.smbDeliveryRatio as NSDecimalNumber),
+            maxSMBBasalMinutes: Double(truncating: p.maxSMBBasalMinutes as NSDecimalNumber),
+            maxUAMSMBBasalMinutes: Double(truncating: p.maxUAMSMBBasalMinutes as NSDecimalNumber)
+        )
+        logSummary(summary)
     }
 }

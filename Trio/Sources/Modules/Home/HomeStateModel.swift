@@ -806,7 +806,9 @@ extension Home.StateModel {
     /// and the trio://meal-window/cancel URL handler in TrioApp.
     @MainActor func cancelMealWindow() async {
         guard let activatedAt = settingsManager.settings.mealWindowActivationDate else { return }
-        let windowId = settingsManager.settings.mealWindowId
+        let preWindowId = settingsManager.settings.mealWindowId
+        let preCarbsConfirmed = settingsManager.settings.mealWindowCarbsConfirmed
+        let preEstimatedCarbs = settingsManager.settings.mealWindowEstimatedCarbs
         var s = settingsManager.settings
         s.mealWindowActivationDate = nil
         s.mealWindowEstimatedCarbs = 0
@@ -816,15 +818,29 @@ extension Home.StateModel {
         refreshMealWindowState()
 
         if let telemetry = resolver.resolve(AlgorithmTelemetryManager.self) {
+            let now = Date()
             telemetry.logEvent(AlgorithmTelemetryEvent(
                 kind: .mealWindowCancelled,
-                timestamp: Date(),
-                windowId: windowId,
+                timestamp: now,
+                windowId: preWindowId,
                 payload: [
                     "source": .string("homeBanner"),
-                    "minutesSinceActivation": .double(Date().timeIntervalSince(activatedAt) / 60)
+                    "minutesSinceActivation": .double(now.timeIntervalSince(activatedAt) / 60)
                 ]
             ))
+            telemetry.recordWindowClose(
+                windowId: preWindowId,
+                activatedAt: activatedAt,
+                closedAt: now,
+                closeReason: "userCancelledHomeBanner",
+                estimatedCarbs: preEstimatedCarbs > 0
+                    ? Double(truncating: preEstimatedCarbs as NSDecimalNumber)
+                    : nil,
+                carbsConfirmed: preCarbsConfirmed,
+                bgAtActivation: nil,
+                iobAtActivation: nil,
+                cobAtActivation: nil
+            )
         }
 
         try? await apsManager.determineBasalSync()

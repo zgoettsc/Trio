@@ -67,17 +67,33 @@ import Foundation
         settingsManager.settings = s
 
         let snapshot = await currentSnapshot()
+        let now = Date()
         algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
             kind: .mealWindowCancelled,
-            timestamp: Date(),
+            timestamp: now,
             windowId: windowId,
             payload: [
                 "source": .string("shortcut"),
-                "minutesSinceActivation": .from(activatedAt.map { Date().timeIntervalSince($0) / 60 }),
+                "minutesSinceActivation": .from(activatedAt.map { now.timeIntervalSince($0) / 60 }),
                 "bg": .from(snapshot.bg),
                 "iob": .from(snapshot.iob)
             ]
         ))
+        if let activatedAt {
+            algorithmTelemetryManager?.recordWindowClose(
+                windowId: windowId,
+                activatedAt: activatedAt,
+                closedAt: now,
+                closeReason: "userCancelledShortcut",
+                estimatedCarbs: settingsManager.settings.mealWindowEstimatedCarbs > 0
+                    ? Double(truncating: settingsManager.settings.mealWindowEstimatedCarbs as NSDecimalNumber)
+                    : nil,
+                carbsConfirmed: settingsManager.settings.mealWindowCarbsConfirmed,
+                bgAtActivation: snapshot.bg,
+                iobAtActivation: snapshot.iob,
+                cobAtActivation: snapshot.cob.map { Double($0) }
+            )
+        }
 
         try await apsManager.determineBasalSync()
         return String(localized: "Eating mode cancelled.")

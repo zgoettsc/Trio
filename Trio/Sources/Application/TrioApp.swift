@@ -512,6 +512,8 @@ extension Notification.Name {
                    let activatedAt = settingsManager.settings.mealWindowActivationDate
                 {
                     let windowId = settingsManager.settings.mealWindowId
+                    let preCarbsConfirmed = settingsManager.settings.mealWindowCarbsConfirmed
+                    let preEstimatedCarbs = settingsManager.settings.mealWindowEstimatedCarbs
                     var s = settingsManager.settings
                     s.mealWindowActivationDate = nil
                     s.mealWindowEstimatedCarbs = 0
@@ -520,15 +522,29 @@ extension Notification.Name {
                     settingsManager.settings = s
 
                     if let telemetry = resolver.resolve(AlgorithmTelemetryManager.self) {
+                        let now = Date()
                         telemetry.logEvent(AlgorithmTelemetryEvent(
                             kind: .mealWindowCancelled,
-                            timestamp: Date(),
+                            timestamp: now,
                             windowId: windowId,
                             payload: [
                                 "source": .string("liveActivityLink"),
-                                "minutesSinceActivation": .double(Date().timeIntervalSince(activatedAt) / 60)
+                                "minutesSinceActivation": .double(now.timeIntervalSince(activatedAt) / 60)
                             ]
                         ))
+                        telemetry.recordWindowClose(
+                            windowId: windowId,
+                            activatedAt: activatedAt,
+                            closedAt: now,
+                            closeReason: "userCancelledLiveActivity",
+                            estimatedCarbs: preEstimatedCarbs > 0
+                                ? Double(truncating: preEstimatedCarbs as NSDecimalNumber)
+                                : nil,
+                            carbsConfirmed: preCarbsConfirmed,
+                            bgAtActivation: nil,
+                            iobAtActivation: nil,
+                            cobAtActivation: nil
+                        )
                     }
 
                     Task {
