@@ -3,3 +3,9 @@
 {"kind":"smbDelivered","payload":{"bg":121,"floorActivated":false,"insulinReq":0.44000000000000006,"iob":0.607,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-06-26T16:51:07.106Z"}
 {"kind":"smbDelivered","payload":{"bg":137,"floorActivated":false,"insulinReq":0.22000000000000003,"iob":0.672,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-06-26T17:06:04.642Z"}
 {"kind":"smbDelivered","payload":{"bg":135,"floorActivated":false,"insulinReq":0.16,"iob":0.6220000000000001,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-06-26T17:21:04.816Z"}
+{"kind":"mealWindowActivated","payload":{"bg":135,"cob":0,"delta5m":7,"durationMinutes":90,"estimatedCarbs":null,"iob":0.6220000000000001,"source":"shortcut"},"timestamp":"2026-06-26T17:21:59.699Z","windowId":"26BF9C16-275D-4D25-86C6-C36ECEB7A538"}
+{"kind":"carbEntry","payload":{"carbs":70,"duringMealWindow":true,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"","protein":0},"timestamp":"2026-06-26T17:22:24.100Z","windowId":"26BF9C16-275D-4D25-86C6-C36ECEB7A538"}
+{"kind":"mealWindowCarbsConfirmed","payload":{"carbs":70,"fat":0,"minutesSinceActivation":0.5096712986628215,"protein":0},"timestamp":"2026-06-26T17:22:30.280Z","windowId":"26BF9C16-275D-4D25-86C6-C36ECEB7A538"}
+{"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":4.15},"timestamp":"2026-06-26T17:22:31.926Z","windowId":"26BF9C16-275D-4D25-86C6-C36ECEB7A538"}
+{"kind":"smbDelivered","payload":{"bg":133,"floorActivated":false,"insulinReq":0.64,"iob":4.846,"minutesSinceWindowOpen":4.134443432092667,"units":0.3},"timestamp":"2026-06-26T17:26:07.766Z","windowId":"26BF9C16-275D-4D25-86C6-C36ECEB7A538"}
+{"kind":"smbDelivered","payload":{"bg":129,"floorActivated":false,"insulinReq":0.29,"iob":4.952,"minutesSinceWindowOpen":9.323527499039967,"units":0.1},"timestamp":"2026-06-26T17:31:19.111Z","windowId":"26BF9C16-275D-4D25-86C6-C36ECEB7A538"}
