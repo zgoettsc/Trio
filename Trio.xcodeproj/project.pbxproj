@@ -484,6 +484,7 @@
 		F2B0C3D40006000000000001 /* AlgorithmTelemetryGitHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40005000000000001 /* AlgorithmTelemetryGitHubClient.swift */; };
 		F2B0C3D40008000000000001 /* AlgorithmTelemetryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40007000000000001 /* AlgorithmTelemetryManager.swift */; };
 		F2B0C3D4000A000000000001 /* TelemetryConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40009000000000001 /* TelemetryConfigView.swift */; };
+		F2B0C3D4000D000000000001 /* AlgorithmTelemetryOutcomes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4000C000000000001 /* AlgorithmTelemetryOutcomes.swift */; };
 		BDC2EA452C3043B000E5BBD0 /* OverrideStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC2EA442C3043B000E5BBD0 /* OverrideStorage.swift */; };
 		BDC2EA472C3045AD00E5BBD0 /* Override.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC2EA462C3045AD00E5BBD0 /* Override.swift */; };
 		BDC530FF2D0F6BE300088832 /* ContactImageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC530FE2D0F6BE300088832 /* ContactImageManager.swift */; };
@@ -1413,6 +1414,7 @@
 		F2B0C3D40005000000000001 /* AlgorithmTelemetryGitHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlgorithmTelemetryGitHubClient.swift; sourceTree = "<group>"; };
 		F2B0C3D40007000000000001 /* AlgorithmTelemetryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlgorithmTelemetryManager.swift; sourceTree = "<group>"; };
 		F2B0C3D40009000000000001 /* TelemetryConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryConfigView.swift; sourceTree = "<group>"; };
+		F2B0C3D4000C000000000001 /* AlgorithmTelemetryOutcomes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlgorithmTelemetryOutcomes.swift; sourceTree = "<group>"; };
 		BDC2EA442C3043B000E5BBD0 /* OverrideStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverrideStorage.swift; sourceTree = "<group>"; };
 		BDC2EA462C3045AD00E5BBD0 /* Override.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Override.swift; sourceTree = "<group>"; };
 		BDC530FE2D0F6BE300088832 /* ContactImageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactImageManager.swift; sourceTree = "<group>"; };
@@ -2330,6 +2332,7 @@
 				F2B0C3D40003000000000001 /* AlgorithmTelemetryLogger.swift */,
 				F2B0C3D40005000000000001 /* AlgorithmTelemetryGitHubClient.swift */,
 				F2B0C3D40007000000000001 /* AlgorithmTelemetryManager.swift */,
+				F2B0C3D4000C000000000001 /* AlgorithmTelemetryOutcomes.swift */,
 			);
 			path = AlgorithmTelemetry;
 			sourceTree = "<group>";
@@ -4687,6 +4690,7 @@
 				F2B0C3D40004000000000001 /* AlgorithmTelemetryLogger.swift in Sources */,
 				F2B0C3D40006000000000001 /* AlgorithmTelemetryGitHubClient.swift in Sources */,
 				F2B0C3D40008000000000001 /* AlgorithmTelemetryManager.swift in Sources */,
+				F2B0C3D4000D000000000001 /* AlgorithmTelemetryOutcomes.swift in Sources */,
 				F2B0C3D4000A000000000001 /* TelemetryConfigView.swift in Sources */,
 				A1B1C1D1E1F101010101A1B5 /* ClaudeAPIService.swift in Sources */,
 				A1B1C1D1E1F101010101A1B6 /* HealthDataExporter.swift in Sources */,

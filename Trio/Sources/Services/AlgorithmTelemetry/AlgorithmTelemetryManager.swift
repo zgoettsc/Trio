@@ -48,6 +48,10 @@ protocol AlgorithmTelemetryManager: AnyObject {
         iobAtActivation: Double?,
         cobAtActivation: Double?
     )
+
+    /// Process any closed windows whose +6h post-prandial tail has elapsed. Writes
+    /// outcome-enriched summary rows. Called automatically on app foreground.
+    func processReadyOutcomes()
 }
 
 /// Keychain key for the GitHub Personal Access Token. We store ONLY the PAT here;
@@ -63,6 +67,12 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
 
     private let logger = AlgorithmTelemetryLogger()
     private let client = AlgorithmTelemetryGitHubClient()
+    private let outcomes = AlgorithmTelemetryOutcomes()
+
+    /// Count of floor activations seen during the currently-open window. Reset on
+    /// activation, snapshotted into the pending outcome on close.
+    private var floorActivationsThisWindow: Int = 0
+    private var lastWindowIdForFloorTracking: String?
 
     /// Pushes are debounced: if multiple triggers fire within a short window, only one push runs.
     private let pushDebounceInterval: TimeInterval = 30
@@ -83,6 +93,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 self.auditExpiredMealWindow()
                 self.maintainDailySnapshot()
                 self.runRetentionCleanup()
+                self.processReadyOutcomes()
                 Task { await self.pushNow() }
             }
             .store(in: &subscriptions)
@@ -91,6 +102,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         // doesn't have to wait for the next foreground to refresh.
         maintainDailySnapshot()
         runRetentionCleanup()
+        processReadyOutcomes()
     }
 
     // MARK: - Public API
@@ -98,6 +110,19 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     func logEvent(_ event: AlgorithmTelemetryEvent) {
         guard settingsManager.settings.telemetryEnabled else { return }
         logger.appendEvent(event)
+
+        // Track floor activations per window for the outcome summary.
+        switch event.kind {
+        case .mealWindowActivated:
+            floorActivationsThisWindow = 0
+            lastWindowIdForFloorTracking = event.windowId
+        case .insulinReqFloorActivated:
+            if event.windowId == lastWindowIdForFloorTracking {
+                floorActivationsThisWindow += 1
+            }
+        default:
+            break
+        }
     }
 
     func logLoopSample(_ sample: AlgorithmTelemetryLoopSample) {
@@ -380,9 +405,10 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         cobAtActivation: Double?
     ) {
         guard settingsManager.settings.telemetryEnabled else { return }
+        let resolvedWindowId = windowId ?? UUID().uuidString
         let p = settingsManager.preferences
         let summary = AlgorithmTelemetryWindowSummary(
-            windowId: windowId ?? UUID().uuidString,
+            windowId: resolvedWindowId,
             activatedAt: activatedAt,
             closedAt: closedAt,
             closeReason: closeReason,
@@ -410,7 +436,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             totalSMBInsulin: nil,
             totalScheduledBasalInsulin: nil,
             totalManualBolusInsulin: nil,
-            floorActivationCount: 0,
+            floorActivationCount: floorActivationsThisWindow,
             target: nil,
             isf: nil,
             carbRatio: nil,
@@ -420,5 +446,49 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             maxUAMSMBBasalMinutes: Double(truncating: p.maxUAMSMBBasalMinutes as NSDecimalNumber)
         )
         logSummary(summary)
+
+        // Queue this window for the +6h post-prandial outcome pass. The next
+        // foreground after closedAt + 6h will compute peak BG / time-above-180 /
+        // total insulin from CoreData and emit a second summary row.
+        outcomes.enqueue(AlgorithmTelemetryOutcomes.Pending(
+            windowId: resolvedWindowId,
+            activatedAt: activatedAt,
+            closedAt: closedAt,
+            closeReason: closeReason,
+            estimatedCarbs: estimatedCarbs,
+            carbsConfirmed: carbsConfirmed
+        ))
+    }
+
+    /// Process any pending outcome computations whose +6h tail has elapsed. Called
+    /// from app foreground. Writes a second summary.jsonl row per resolved window
+    /// (carrying the outcome metrics that need post-prandial data to compute).
+    func processReadyOutcomes() {
+        guard settingsManager.settings.telemetryEnabled else { return }
+        let ready = outcomes.dequeueReady()
+        guard !ready.isEmpty else { return }
+
+        let ctx = CoreDataStack.shared.newTaskContext()
+        let p = settingsManager.preferences
+        for pending in ready {
+            // Re-use the floor activation count we tracked at close-time. If the app was
+            // restarted in between we don't have it; fall back to 0.
+            let count = pending.windowId == lastWindowIdForFloorTracking
+                ? floorActivationsThisWindow : 0
+            if let summary = outcomes.computeOutcome(
+                for: pending,
+                bgAtActivation: nil,
+                iobAtActivation: nil,
+                cobAtActivation: nil,
+                floorActivationCount: count,
+                currentMaxIOB: p.maxIOB,
+                currentSmbDeliveryRatio: p.smbDeliveryRatio,
+                currentMaxSMBBasalMinutes: p.maxSMBBasalMinutes,
+                currentMaxUAMSMBBasalMinutes: p.maxUAMSMBBasalMinutes,
+                context: ctx
+            ) {
+                logSummary(summary)
+            }
+        }
     }
 }
