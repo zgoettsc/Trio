@@ -12,6 +12,96 @@ findings` at the bottom.
 
 ---
 
+## 2026-06-27 round 9 (Indian-food overnight: fat absorption outlasts meal-window)
+
+**Meal:** 50g carb + 30g fat (Indian food), entered 20:27 CT (2026-06-27T01:27Z),
+bolused at entry. Window ID `1496D071…` activated at the same moment.
+
+### F-18 — The eating-mode window expired right when fat absorption peaked
+
+Timeline (CT, BG / Δ5m / IOB / SMB):
+
+```
+8:27pm   137 +10  1.5  bolus       ← meal entry, fast climb begins
+8:36pm   148 +6   4.1  0.75        ← post-bolus SMBs winning briefly
+8:51pm   142 -10  4.7  -           ← bolus over-corrects
+9:21pm   114 -1   3.4  -           ← bottom
+9:31pm   111 -3   2.9  -    COB 33→51 (FPU equivalent added at +60min)
+9:51pm    87 -7   2.0  -           ← clean recovery, BG back to baseline
+10:21pm   98 +3   1.2  0.1         ← second-wave climb starting (fat onset)
+10:56pm  136 +1.6 0.8  0.1         ← climb accelerating, big temps and SMBs
+11:21pm  161 +5.8 2.3  -           ← IOB stacking
+11:26pm  173 +10  2.1  1.05        ← biggest SMB of the night
+11:30pm  ───── meal window EXPIRED (4h after activation) ─────
+12:36am  220 -4   3.0  -           ← BG plateau begins
+1:21am   238 +3   3.6  0.3         ← peak rising
+2:31am   234 +3   2.7  0.65        ← still climbing despite max-safe 3 U/h temp
+3:31am   ~240                      ← sustained plateau ~240 for 3 hours
+6:00am   163                       ← finally returning
+8:42am   152                       ← where we are now
+```
+
+### F-19 — Eating-mode aggression turned off precisely when it was most needed
+
+The fat-protein absorption from a typical Indian meal peaks 4-6h post-eating
+(well-documented in CGM literature). The window's 240-min duration expired at
+11:30pm — exactly when the fat-driven climb was accelerating. After that:
+
+- `smbDeliveryRatio` reverted from 0.8 (boost) to 0.5 (default)
+- `maxSMBBasalMinutes` halved back from 90 to 45
+- `mealWindowFloor` no longer eligible to fire
+- `toughMealCapPercent` dropped from user's 85% to default 75%
+
+The loop kept dosing — SMBs of 0.3-1.05U, temps at the 3 U/h max-safe ceiling
+— but with stock (non-boosted) aggression. BG plateaued 220-240 for ~3 hours.
+
+### F-20 — FPU equivalents under-modeled the fat impact
+
+The 30g fat alone produced one 18-21g carb-equivalent entry at +60min
+(the 9:31pm COB jump from 33 to 51). By 11:26pm that COB had drained to 0,
+yet BG kept climbing for another 4+ hours. The 270 kcal of fat absorbed over
+6+ hours of actual physiological impact; the FPU model condensed it into
+a single 18g dose absorbed in ~3h.
+
+### Possible mitigations (user has not committed to any of these)
+
+These came up while diagnosing the night. Captured here as options for
+future analysis sessions to consider; none are decided.
+
+- **Longer extended duration for fat-heavy meals.** Bumping
+  `mealWindowExtendedDurationMinutes` from 240 to 360-480 would keep the
+  boost active through the fat peak. Cost: more aggressive late-window
+  dosing in normal meals too unless tied to a meal-type signal.
+- **Enable Item 5 (Phantom COB) for known fat-heavy meals.** Currently off
+  by default for safety. Would inject 20g virtual COB to keep oref's
+  insulinReq math alive after real COB drains. Effective but risky on
+  unknown meals.
+- **Higher FPU adjustment percentage.** Raising from 80% toward 100% would
+  produce slightly bigger FPU equivalent but still one dot per typical
+  meal under the 33g-per-bucket ceiling.
+- **Manual additional carb entries.** Entering 15-20g at +90min for known
+  high-fat meals would keep COB alive longer. Tedious.
+
+### Open thread: secondary classification feature (under discussion)
+
+User raised the idea of a follow-up flow: after the initial quick action,
+the app reliably detects that food was eaten (~30-45min later) and prompts
+the user to classify the meal (simple / medium / complex/fat-heavy). The
+classification then auto-tunes the window's duration and aggressiveness
+for THIS window only. Discussion ongoing — none of the recommendations
+above need to ship if the classification feature lands well, since the
+right per-window behavior would be inferred from the classification.
+
+### Status of prior findings
+
+- **F-12 (rising-meal catch-up):** ✓ Round 9 reaffirms — the loop did
+  catch the initial carb climb. Failed only on the LATE fat phase, which
+  is structurally outside what the current eating-mode addresses.
+- **F-15, F-16:** ✓ Effective fields fully populated throughout this
+  window (the round 8 fix is solid).
+
+---
+
 ## 2026-06-27 round 8 (FULL VERIFICATION — every PLAN.md item observed in telemetry)
 
 **Sample:** `2026-06-27T11:42:21Z`, windowId in progress, buildSchema 5
