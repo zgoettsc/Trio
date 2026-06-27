@@ -152,6 +152,11 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     func logLoopSample(_ sample: AlgorithmTelemetryLoopSample) {
         guard settingsManager.settings.telemetryEnabled else { return }
         logger.appendLoopSample(sample)
+        // Push after each loop sample so backgrounded apps still ship data.
+        // pushNow() debounces internally (30s window), so a 5-minute loop cadence
+        // means at most one upload per pass — but it also means data lands within
+        // a minute of being written instead of waiting for the next foreground.
+        Task { await self.pushNow() }
     }
 
     func logSummary(_ summary: AlgorithmTelemetryWindowSummary) {
