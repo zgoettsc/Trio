@@ -486,10 +486,10 @@ struct SavedMealDetailView: View {
         Section(
             header: Text("Insulin burden (median per instance)"),
             footer: hasBackfilled
-                ? Text("Total = SMBs only (not basal). Floor activations are from live-tracked instances only — backfilled rows can't reconstruct floor events from history.")
-                : Text("Total = SMBs only (not basal).")
+                ? Text("Insulin above baseline = SMBs + (high temps - low temps) vs your scheduled basal. Floor activations are from live-tracked instances only — backfilled rows can't reconstruct floor events from history.")
+                : Text("Insulin above baseline = SMBs + (high temps - low temps) vs your scheduled basal.")
         ) {
-            statRow("SMB total delivered", value: String(format: "%.1f U", burden.medianTotalU))
+            statRow("Insulin above baseline", value: String(format: "%.1f U", burden.medianTotalU))
             statRow("SMBs fired", value: "\(burden.medianSMBCount)")
             statRow("Floor activations", value: burden.medianFloorCount < 0 ? "— (no live data)" : "\(burden.medianFloorCount)")
         }

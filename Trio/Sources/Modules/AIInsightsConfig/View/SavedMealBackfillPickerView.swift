@@ -285,14 +285,14 @@ struct SavedMealBackfillPickerView: View {
             row("Time above range", value: "\(p.outcomeMetrics.timeAboveRangeMinutes) min")
             row("Time below range", value: "\(p.outcomeMetrics.timeBelowRangeMinutes) min")
             row("Lows", value: "\(p.outcomeMetrics.lowsCount)")
-            row("Total SMB insulin", value: String(format: "%.2f U", p.outcomeMetrics.totalInsulinDeliveredU))
+            row("Insulin above baseline", value: String(format: "%.2f U", p.outcomeMetrics.totalInsulinDeliveredU))
             row("SMBs delivered", value: "\(p.outcomeMetrics.smbCount)")
             row("Outcome score", value: "\(p.outcomeScore)/100")
         }.listRowBackground(Color.chart)
 
         Section(
             header: Text("Historical data limitations"),
-            footer: Text("Backfilled instances are reconstructed from BG / SMB history. Two metrics aren't reliable from historical data:\n\n• Floor activations — only logged as reason-string text by oref at run time, not as structured events. We can't tell after-the-fact how many of the SMBs above were floor-triggered. Displayed as “—” in this meal's stats.\n\n• Total insulin shown is SMBs only — basal delivery isn't included.\n\nGoing forward, live-tracked instances capture both fully.")
+            footer: Text("Backfilled instances are reconstructed from pump history. One metric isn't reliable from historical data:\n\n• Floor activations — oref only logs them as reason-string text at run time, not as structured events. We can't tell after-the-fact how many of the SMBs above were floor-triggered. Displayed as “—” in this meal's stats.\n\nInsulin above baseline IS reliable from history — it's reconstructed from pump SMB events + temp basal records vs your scheduled basal.")
         ) {
             EmptyView()
         }.listRowBackground(Color.clear)

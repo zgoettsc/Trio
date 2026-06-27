@@ -108,7 +108,13 @@ struct SavedMealOutcomeCalculator {
             }
         }
 
-        let totalSMB = smbs.reduce(0) { $0 + $1.units }
+        // Insulin "above baseline" = SMBs + integral of (temp basal rate -
+        // scheduled basal) over the window. Captures the full algorithm
+        // response, not just SMBs. A meal where the loop ran a 3 U/h temp
+        // for 90 minutes adds ~3.5U of insulin that pure-SMB-counting misses.
+        let smbContribution = smbs.reduce(0) { $0 + $1.units }
+        let tempBasalContribution = integrateTempBasalDelta(from: activatedAt, to: closedAt)
+        let insulinAboveBaseline = smbContribution + tempBasalContribution
 
         let metrics = SavedMealInstanceMetrics(
             peakBG: peak,
@@ -117,7 +123,7 @@ struct SavedMealOutcomeCalculator {
             timeBelowRangeMinutes: tbr,
             lowsCount: lowsCount,
             timeToBaselineMinutes: timeToBaseline,
-            totalInsulinDeliveredU: totalSMB,
+            totalInsulinDeliveredU: insulinAboveBaseline,
             smbCount: smbs.count,
             floorActivationCount: 0  // caller fills from telemetry's running tally
         )
@@ -193,6 +199,109 @@ struct SavedMealOutcomeCalculator {
             for evt in events {
                 if let ts = evt.timestamp, let bolus = evt.bolus, let amt = bolus.amount {
                     results.append((ts, Double(truncating: amt)))
+                }
+            }
+        }
+        return results
+    }
+
+    // MARK: - Temp basal delta integral
+
+    /// Sums the (actual rate - scheduled rate) × duration over the window
+    /// for all temp basals that overlapped it. Result is in units of insulin.
+    /// Positive when the loop ran above baseline (high temps), negative when
+    /// below (low temps / zero temps that suppressed scheduled basal).
+    ///
+    /// Combined with SMBs, this gives "insulin above what the user would have
+    /// gotten from the plain basal profile" — a much truer "meal cost" than
+    /// SMB-only counting.
+    private func integrateTempBasalDelta(from start: Date, to end: Date) -> Double {
+        let basalProfile = loadBasalProfile()
+        let tempBasals = fetchTempBasals(from: start, to: end)
+        guard !basalProfile.isEmpty else { return 0 }
+
+        // Compute slice-by-slice contribution. We walk through each temp
+        // basal that overlapped the window; for the no-temp periods between
+        // them, actual = scheduled so contribution is 0.
+        var total: Double = 0
+        for tempBasal in tempBasals {
+            guard let tempStart = tempBasal.start, let rate = tempBasal.rate else { continue }
+            let tempEnd = tempStart.addingTimeInterval(Double(tempBasal.duration) * 60)
+            let sliceStart = max(tempStart, start)
+            let sliceEnd = min(tempEnd, end)
+            guard sliceEnd > sliceStart else { continue }
+            // Within this slice the scheduled rate may change at hour
+            // boundaries. Integrate at 5-min granularity (sufficient — basal
+            // schedule entries are aligned to whole-minute offsets-of-day).
+            let stepSeconds: TimeInterval = 5 * 60
+            var cursor = sliceStart
+            while cursor < sliceEnd {
+                let stepEnd = min(cursor.addingTimeInterval(stepSeconds), sliceEnd)
+                let durationHours = stepEnd.timeIntervalSince(cursor) / 3600
+                let scheduledRate = scheduledBasalRate(at: cursor, profile: basalProfile)
+                let actualRate = Double(truncating: rate)
+                total += (actualRate - scheduledRate) * durationHours
+                cursor = stepEnd
+            }
+        }
+        return total
+    }
+
+    /// Looks up the scheduled basal rate U/h at a given wall-clock moment
+    /// using the day's basal schedule.
+    private func scheduledBasalRate(at date: Date, profile: [BasalProfileEntry]) -> Double {
+        let cal = Calendar(identifier: .gregorian)
+        let comps = cal.dateComponents([.hour, .minute], from: date)
+        let minutesIntoDay = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+        // Profile entries are sorted by `minutes`; find the latest one at or
+        // before this minute.
+        var best: BasalProfileEntry?
+        for entry in profile {
+            if entry.minutes <= minutesIntoDay {
+                best = entry
+            } else {
+                break
+            }
+        }
+        guard let chosen = best ?? profile.first else { return 0 }
+        return Double(truncating: chosen.rate as NSNumber)
+    }
+
+    private func loadBasalProfile() -> [BasalProfileEntry] {
+        // FileStorage path: `OpenAPS.Settings.basalProfile` is the persisted
+        // JSON the loop uses. Read synchronously via the standard file path.
+        // Falls back to an empty array if missing (delta then collapses to 0).
+        let path = OpenAPS.Settings.basalProfile
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = docs.appendingPathComponent(path)
+        guard let data = try? Data(contentsOf: url),
+              let entries = try? JSONDecoder().decode([BasalProfileEntry].self, from: data)
+        else { return [] }
+        return entries.sorted { $0.minutes < $1.minutes }
+    }
+
+    /// All temp basal events that overlapped the window.
+    private func fetchTempBasals(from start: Date, to end: Date) -> [(start: Date?, rate: NSDecimalNumber?, duration: Int16)] {
+        var results: [(Date?, NSDecimalNumber?, Int16)] = []
+        viewContext.performAndWait {
+            let req = PumpEventStored.fetchRequest()
+            // Pull anything overlapping; we'll filter precisely below.
+            let earliestPossibleStart = start.addingTimeInterval(-24 * 3600)
+            req.predicate = NSPredicate(
+                format: "timestamp >= %@ AND timestamp <= %@ AND tempBasal != nil",
+                earliestPossibleStart as NSDate, end as NSDate
+            )
+            req.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: true)]
+            let events = (try? viewContext.fetch(req)) ?? []
+            for e in events {
+                guard let tb = e.tempBasal else { continue }
+                let evStart = e.timestamp
+                let durMin = tb.duration
+                if let evStart {
+                    let evEnd = evStart.addingTimeInterval(Double(durMin) * 60)
+                    if evStart < end && evEnd > start {
+                        results.append((evStart, tb.rate, durMin))
+                    }
                 }
             }
         }
