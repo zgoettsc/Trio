@@ -181,7 +181,7 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
                     // etc.) — useful for meal-analysis context (absorption can
                     // differ at fresh vs end-of-pod-life sites). Rewind is the
                     // canonical marker; prime follows but we only emit once.
-                    algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                    self.algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
                         kind: .podChanged,
                         timestamp: event.date,
                         windowId: nil,
