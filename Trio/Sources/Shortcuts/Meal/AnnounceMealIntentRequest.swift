@@ -20,12 +20,30 @@ import Foundation
     /// If the meal has no default carbs/fat/protein set, this falls back
     /// to opening the window only (same as plain announce).
     func startMealAndLogCarbs(savedMealId: UUID) async throws -> String {
+        try await startMealAndLogCarbs(
+            savedMealId: savedMealId,
+            carbsOverride: nil,
+            fatOverride: nil,
+            proteinOverride: nil
+        )
+    }
+
+    /// Like `startMealAndLogCarbs(savedMealId:)` but uses the supplied macro
+    /// values instead of the meal's defaults. Used by the in-app confirm
+    /// sheet where the user can scale a half portion / edit values before
+    /// committing. Pass `nil` for any field to keep the default.
+    func startMealAndLogCarbs(
+        savedMealId: UUID,
+        carbsOverride: Decimal?,
+        fatOverride: Decimal?,
+        proteinOverride: Decimal?
+    ) async throws -> String {
         guard let meal = savedMealStorage.meal(id: savedMealId) else {
             return try await announce(estimatedCarbs: nil, savedMealId: savedMealId)
         }
-        let carbs = (meal.defaultCarbs as Decimal?) ?? 0
-        let fat = (meal.defaultFat as Decimal?) ?? 0
-        let protein = (meal.defaultProtein as Decimal?) ?? 0
+        let carbs = carbsOverride ?? (meal.defaultCarbs as Decimal?) ?? 0
+        let fat = fatOverride ?? (meal.defaultFat as Decimal?) ?? 0
+        let protein = proteinOverride ?? (meal.defaultProtein as Decimal?) ?? 0
 
         // Only write a CarbEntry when the meal has macros configured.
         // Without macros, this collapses to a plain "open window only" call.

@@ -73,69 +73,213 @@ struct SavedMealsListView: View {
                 SavedMealEditView(meal: nil)
             }
         }
-        .confirmationDialog(
-            "Start \(showStartConfirm?.name ?? "this meal")?",
+        .sheet(
             isPresented: Binding(
                 get: { showStartConfirm != nil },
                 set: { if !$0 { showStartConfirm = nil } }
-            ),
-            presenting: showStartConfirm
-        ) { meal in
-            Button("Start eating mode") {
-                Task { await startMeal(meal) }
+            )
+        ) {
+            if let meal = showStartConfirm {
+                NavigationView {
+                    StartSavedMealConfirmSheet(meal: meal) { carbs, fat, protein in
+                        showStartConfirm = nil
+                        Task { await startMeal(meal, carbs: carbs, fat: fat, protein: protein) }
+                    } onCancel: {
+                        showStartConfirm = nil
+                    }
+                }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { meal in
-            Text(startConfirmationText(for: meal))
         }
-    }
-
-    private func startConfirmationText(for meal: SavedMeal) -> String {
-        var lines: [String] = []
-
-        // Lead with the macros that will be logged as a carb entry — this is
-        // the thing the user most needs to confirm before tapping Start.
-        var macroParts: [String] = []
-        if let c = meal.defaultCarbs, c.doubleValue > 0 {
-            macroParts.append("\(c.intValue)g carbs")
-        }
-        if let f = meal.defaultFat, f.doubleValue > 0 {
-            macroParts.append("\(f.intValue)g fat")
-        }
-        if let p = meal.defaultProtein, p.doubleValue > 0 {
-            macroParts.append("\(p.intValue)g protein")
-        }
-        if macroParts.isEmpty {
-            lines.append("No carbs will be logged (meal has no defaults).")
-        } else {
-            lines.append("Will log: " + macroParts.joined(separator: ", ") + ".")
-        }
-
-        if let cls = meal.defaultClassification {
-            lines.append("Classification: \(cls.capitalized).")
-        }
-        if meal.defaultPhantomCOBEnabled {
-            let g = meal.defaultPhantomCOBGrams.map { "\($0.intValue)g" } ?? "(default dose)"
-            lines.append("Phantom COB: \(g).")
-        }
-        if meal.defaultExtendedDurationMinutes > 0 {
-            let h = Double(meal.defaultExtendedDurationMinutes) / 60.0
-            lines.append("Extended duration: \(String(format: "%.1f", h)) h.")
-        }
-        return lines.joined(separator: " ")
     }
 
     @MainActor
-    private func startMeal(_ meal: SavedMeal) async {
+    private func startMeal(
+        _ meal: SavedMeal,
+        carbs: Decimal?,
+        fat: Decimal?,
+        protein: Decimal?
+    ) async {
         guard #available(iOS 16.0, *), let mealId = meal.id else { return }
         let req = AnnounceMealIntentRequest()
         do {
-            // Logs a CarbEntry with the meal's defaults AND opens the window —
-            // matches user expectation that "Start with this meal" means
-            // "log this meal." Bolus is still a separate step.
-            startResult = try await req.startMealAndLogCarbs(savedMealId: mealId)
+            // Logs a CarbEntry with the (possibly edited) macros AND opens
+            // the window. Bolus is still a separate step.
+            startResult = try await req.startMealAndLogCarbs(
+                savedMealId: mealId,
+                carbsOverride: carbs,
+                fatOverride: fat,
+                proteinOverride: protein
+            )
         } catch {
             startResult = "Failed to start: \(error.localizedDescription)"
+        }
+    }
+}
+
+/// Confirmation sheet shown when the user taps the play button on a saved
+/// meal. Pre-fills the meal's default macros, lets the user scale by a quick
+/// portion shortcut (½, ¾, 1, 1¼, 1½, 2) or hand-edit each field before
+/// committing to log the carb entry and open the eating-mode window.
+private struct StartSavedMealConfirmSheet: View {
+    @Environment(\.colorScheme) var colorScheme
+    @Environment(AppState.self) var appState
+
+    @ObservedObject var meal: SavedMeal
+    let onStart: (Decimal?, Decimal?, Decimal?) -> Void
+    let onCancel: () -> Void
+
+    // Defaults captured once on init so portion math is stable even if the
+    // user types into a field and then changes their mind via a portion chip.
+    private let defaultCarbs: Decimal
+    private let defaultFat: Decimal
+    private let defaultProtein: Decimal
+
+    @State private var carbsText: String
+    @State private var fatText: String
+    @State private var proteinText: String
+
+    init(
+        meal: SavedMeal,
+        onStart: @escaping (Decimal?, Decimal?, Decimal?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.meal = meal
+        self.onStart = onStart
+        self.onCancel = onCancel
+        let dc = (meal.defaultCarbs as Decimal?) ?? 0
+        let df = (meal.defaultFat as Decimal?) ?? 0
+        let dp = (meal.defaultProtein as Decimal?) ?? 0
+        defaultCarbs = dc
+        defaultFat = df
+        defaultProtein = dp
+        _carbsText = State(initialValue: Self.format(dc))
+        _fatText = State(initialValue: Self.format(df))
+        _proteinText = State(initialValue: Self.format(dp))
+    }
+
+    private static func format(_ d: Decimal) -> String {
+        let n = NSDecimalNumber(decimal: d)
+        return n.doubleValue == 0 ? "" : "\(n.intValue)"
+    }
+
+    private static func parse(_ s: String) -> Decimal {
+        Decimal(string: s.replacingOccurrences(of: ",", with: ".")) ?? 0
+    }
+
+    private func applyPortion(_ factor: Double) {
+        func scale(_ d: Decimal) -> String {
+            let v = NSDecimalNumber(decimal: d).doubleValue * factor
+            return v <= 0 ? "" : "\(Int(v.rounded()))"
+        }
+        carbsText = scale(defaultCarbs)
+        fatText = scale(defaultFat)
+        proteinText = scale(defaultProtein)
+    }
+
+    var body: some View {
+        Form {
+            Section(header: Text(meal.name ?? "(unnamed)")) {
+                HStack {
+                    Text(meal.icon ?? "🍽️").font(.largeTitle)
+                    if let cls = meal.defaultClassification {
+                        Spacer()
+                        Text(cls.capitalized)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                    }
+                }
+            }
+            .listRowBackground(Color.chart)
+
+            Section(
+                header: Text("Portion"),
+                footer: Text("Tap to scale all macros from the meal's defaults. You can also fine-tune each field below.")
+            ) {
+                HStack {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { factor in
+                        Button(label(for: factor)) { applyPortion(factor) }
+                            .font(.caption)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.15)))
+                            .buttonStyle(.plain)
+                    }
+                }
+            }
+            .listRowBackground(Color.chart)
+
+            Section(header: Text("Macros to log")) {
+                macroField("Carbs", text: $carbsText)
+                macroField("Fat", text: $fatText)
+                macroField("Protein", text: $proteinText)
+            }
+            .listRowBackground(Color.chart)
+
+            if meal.defaultPhantomCOBEnabled || meal.defaultExtendedDurationMinutes > 0 {
+                Section(header: Text("Window")) {
+                    if meal.defaultPhantomCOBEnabled {
+                        HStack {
+                            Text("Phantom COB")
+                            Spacer()
+                            Text(meal.defaultPhantomCOBGrams.map { "\($0.intValue) g" } ?? "default")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if meal.defaultExtendedDurationMinutes > 0 {
+                        HStack {
+                            Text("Extended duration")
+                            Spacer()
+                            Text(String(format: "%.1f h", Double(meal.defaultExtendedDurationMinutes) / 60.0))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .listRowBackground(Color.chart)
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(appState.trioBackgroundColor(for: colorScheme))
+        .navigationTitle("Start meal")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: onCancel)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Start") {
+                    let c = Self.parse(carbsText)
+                    let f = Self.parse(fatText)
+                    let p = Self.parse(proteinText)
+                    onStart(c, f, p)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func macroField(_ label: String, text: Binding<String>) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", text: text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 80)
+            Text("g").foregroundStyle(.secondary)
+        }
+    }
+
+    private func label(for factor: Double) -> String {
+        switch factor {
+        case 0.5: return "½"
+        case 0.75: return "¾"
+        case 1.0: return "1×"
+        case 1.25: return "1¼"
+        case 1.5: return "1½"
+        case 2.0: return "2×"
+        default: return String(format: "%.2f×", factor)
         }
     }
 }
