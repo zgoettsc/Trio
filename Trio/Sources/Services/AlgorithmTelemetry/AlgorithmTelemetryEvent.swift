@@ -95,6 +95,14 @@ struct AlgorithmTelemetryLoopSample: Codable {
     /// (independent of Swift decoding). Null when JS didn't emit it.
     let mealWindowAppliedRaw: String?
     let mealWindowFloorRaw: String?
+    /// Diagnostic — inline decode result on the raw snippet itself. Tells us
+    /// whether decoding the EXACT bytes JS emitted, with the EXACT same
+    /// decoder, produces a value when called independently of Determination.
+    /// If this is true while mealWindowAppliedDecoded is false, the issue
+    /// is in Determination's outer decode, not the inner type.
+    let mealWindowAppliedRawDecodes: Bool?
+    let mealWindowFloorRawDecodes: Bool?
+    let mealWindowAppliedDecodeError: String?
     /// Diagnostic — schema marker so we can prove which build produced this row.
     let buildSchema: Int?
 

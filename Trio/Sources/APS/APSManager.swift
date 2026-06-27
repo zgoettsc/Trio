@@ -560,6 +560,24 @@ final class BaseAPSManager: APSManager, Injectable {
     ///
     /// Floor activation is inferred from the oref reason string (Phase A heuristic).
     /// Phase B replaces this with a structured `rT.mealWindowFloor` field from the JS.
+    /// Diagnostic: attempts to JSON-decode `snippet` as `type` and returns
+    /// (success, error-description-if-failed). Both nil-snippet and empty-snippet
+    /// produce (false, nil) so we can tell the JS-not-emitting case from a real
+    /// decode failure.
+    private static func tryDecodeSnippet<T: Decodable>(
+        _ snippet: String?,
+        as type: T.Type
+    ) -> (Bool, String?) {
+        guard let snippet, !snippet.isEmpty else { return (false, nil) }
+        guard let data = snippet.data(using: .utf8) else { return (false, "snippet→utf8 failed") }
+        do {
+            _ = try JSONDecoder().decode(T.self, from: data)
+            return (true, nil)
+        } catch {
+            return (false, String(describing: error))
+        }
+    }
+
     private func logTelemetryLoopSample(determination: Determination?) {
         let s = settingsManager.settings
         guard s.telemetryEnabled else { return }
@@ -642,7 +660,19 @@ final class BaseAPSManager: APSManager, Injectable {
             mealWindowFloorDecoded: mealWindowActive ? (floor != nil) : nil,
             mealWindowAppliedRaw: mealWindowActive ? openAPS.lastRawMealWindowAppliedSnippet : nil,
             mealWindowFloorRaw: mealWindowActive ? openAPS.lastRawMealWindowFloorSnippet : nil,
-            buildSchema: 3,
+            mealWindowAppliedRawDecodes: mealWindowActive ? Self.tryDecodeSnippet(
+                openAPS.lastRawMealWindowAppliedSnippet,
+                as: MealWindowAppliedData.self
+            ).0 : nil,
+            mealWindowFloorRawDecodes: mealWindowActive ? Self.tryDecodeSnippet(
+                openAPS.lastRawMealWindowFloorSnippet,
+                as: MealWindowFloorData.self
+            ).0 : nil,
+            mealWindowAppliedDecodeError: mealWindowActive ? Self.tryDecodeSnippet(
+                openAPS.lastRawMealWindowAppliedSnippet,
+                as: MealWindowAppliedData.self
+            ).1 : nil,
+            buildSchema: 4,
             target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
             // ↑ Trio's Determination uses `current_target` (snake_case from oref JS)
             isf: determination?.isf.map { Double(truncating: $0 as NSNumber) },

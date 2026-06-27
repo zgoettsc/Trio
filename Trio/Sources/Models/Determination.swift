@@ -45,12 +45,11 @@ struct Determination: JSON, Equatable {
     var mealWindowApplied: MealWindowAppliedData?
 }
 
-// Plain Codable, NOT the JSON protocol. The JSON protocol's `init?(from: String)`
-// extension was preventing the Codable synthesizer from generating the
-// `init(from decoder: Decoder)` these need to decode as nested fields of
-// Determination — round-7 diagnostics proved the JSON arrives intact but the
-// inner decode silently fails. These types are never decoded standalone, so
-// they don't need JSON's String-to-self plumbing.
+// Explicit decoders. Two earlier attempts (drop-JSON, make-fields-optional)
+// failed despite round-7 diagnostics proving the JSON arrives intact. Synthesized
+// Codable was silently producing nil instances for these nested types. Hand-rolled
+// init(from:) bypasses whatever interaction was breaking synthesis and gives us
+// an obvious error path if any field can't decode.
 struct MealWindowFloorData: Codable, Equatable {
     let activated: Bool?
     let prior: Decimal?
@@ -59,6 +58,21 @@ struct MealWindowFloorData: Codable, Equatable {
     let risingDelta: Decimal?
     let bg: Decimal?
     let target: Decimal?
+
+    enum CodingKeys: String, CodingKey {
+        case activated, prior, floored, factor, risingDelta, bg, target
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        activated = try c.decodeIfPresent(Bool.self, forKey: .activated)
+        prior = try c.decodeIfPresent(Decimal.self, forKey: .prior)
+        floored = try c.decodeIfPresent(Decimal.self, forKey: .floored)
+        factor = try c.decodeIfPresent(Decimal.self, forKey: .factor)
+        risingDelta = try c.decodeIfPresent(Decimal.self, forKey: .risingDelta)
+        bg = try c.decodeIfPresent(Decimal.self, forKey: .bg)
+        target = try c.decodeIfPresent(Decimal.self, forKey: .target)
+    }
 }
 
 struct MealWindowAppliedData: Codable, Equatable {
@@ -70,6 +84,24 @@ struct MealWindowAppliedData: Codable, Equatable {
     let forcedUAM: Bool?
     let phantomCOBGrams: Decimal?       // 0 if none injected this pass
     let relaxedRisingGuard: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case smbDeliveryRatio, maxSMBBasalMinutes, maxUAMSMBBasalMinutes
+        case toughMealCapPercent, floorBehavior, forcedUAM
+        case phantomCOBGrams, relaxedRisingGuard
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        smbDeliveryRatio = try c.decodeIfPresent(Decimal.self, forKey: .smbDeliveryRatio)
+        maxSMBBasalMinutes = try c.decodeIfPresent(Decimal.self, forKey: .maxSMBBasalMinutes)
+        maxUAMSMBBasalMinutes = try c.decodeIfPresent(Decimal.self, forKey: .maxUAMSMBBasalMinutes)
+        toughMealCapPercent = try c.decodeIfPresent(Decimal.self, forKey: .toughMealCapPercent)
+        floorBehavior = try c.decodeIfPresent(String.self, forKey: .floorBehavior)
+        forcedUAM = try c.decodeIfPresent(Bool.self, forKey: .forcedUAM)
+        phantomCOBGrams = try c.decodeIfPresent(Decimal.self, forKey: .phantomCOBGrams)
+        relaxedRisingGuard = try c.decodeIfPresent(Bool.self, forKey: .relaxedRisingGuard)
+    }
 }
 
 struct Predictions: JSON, Equatable {
