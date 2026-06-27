@@ -160,3 +160,4 @@
 {"kind":"carbEntry","payload":{"carbs":65,"duringMealWindow":true,"enteredBy":"Trio","fat":10,"fpuID":"BDA3EB64-5686-4600-B771-B4C788E1D72F","isFPU":false,"note":"","protein":20},"timestamp":"2026-06-27T22:18:31.170Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":3.6},"timestamp":"2026-06-27T22:18:51.610Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
 {"kind":"smbDelivered","payload":{"bg":162,"floorActivated":false,"insulinReq":2.29,"iob":5.827,"minutesSinceWindowOpen":4.8288747827212015,"units":1.2},"timestamp":"2026-06-27T22:22:35.449Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
+{"kind":"smbDelivered","payload":{"bg":187,"floorActivated":false,"insulinReq":2.2399999999999998,"iob":6.87,"minutesSinceWindowOpen":9.779971583684285,"units":1.2},"timestamp":"2026-06-27T22:27:32.514Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
