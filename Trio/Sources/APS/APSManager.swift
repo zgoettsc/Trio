@@ -672,7 +672,7 @@ final class BaseAPSManager: APSManager, Injectable {
                 openAPS.lastRawMealWindowAppliedSnippet,
                 as: MealWindowAppliedData.self
             ).1 : nil,
-            buildSchema: 4,
+            buildSchema: 5,
             target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
             // ↑ Trio's Determination uses `current_target` (snake_case from oref JS)
             isf: determination?.isf.map { Double(truncating: $0 as NSNumber) },

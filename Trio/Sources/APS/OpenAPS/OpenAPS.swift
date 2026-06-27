@@ -512,6 +512,25 @@ final class OpenAPS {
             // AAPS does it the same way! we'll follow their example!
             determination.timestamp = deliverAt
 
+            // Backfill the nested telemetry objects directly from the raw JSON.
+            // Round-8 diagnostics proved the snippet decodes standalone but
+            // Determination's synthesized decoder silently drops these two
+            // optional nested fields (likely a CodingKeys-in-extension issue
+            // we can't resolve without rewriting the whole 30-field decode by
+            // hand). This bypass is cheap and works.
+            if let snippet = lastRawMealWindowAppliedSnippet,
+               let data = snippet.data(using: .utf8),
+               let applied = try? JSONDecoder().decode(MealWindowAppliedData.self, from: data)
+            {
+                determination.mealWindowApplied = applied
+            }
+            if let snippet = lastRawMealWindowFloorSnippet,
+               let data = snippet.data(using: .utf8),
+               let floor = try? JSONDecoder().decode(MealWindowFloorData.self, from: data)
+            {
+                determination.mealWindowFloor = floor
+            }
+
             if !simulation {
                 // save to core data asynchronously
                 await processDetermination(determination)
