@@ -104,3 +104,4 @@
 {"kind":"mealWindowExpired","payload":{"elapsedMinutes":110.64310253461203,"source":"naturalExpiry","wasCarbsConfirmed":false},"timestamp":"2026-06-27T15:00:31.670Z","windowId":"6BB02E32-456F-4020-8F25-2A08CCDA8C7F"}
 {"kind":"mealWindowActivated","payload":{"bg":212,"cob":0,"delta5m":-7,"durationMinutes":90,"estimatedCarbs":null,"iob":0.5279999999999999,"source":"shortcut"},"timestamp":"2026-06-27T15:21:19.356Z","windowId":"2C1AA59A-63A2-4F61-9664-BCD66F4E7D40"}
 {"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Running","overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5","percentage":75,"targetMgdL":160},"timestamp":"2026-06-27T16:15:11.170Z","windowId":"2C1AA59A-63A2-4F61-9664-BCD66F4E7D40"}
+{"kind":"overrideCancelled","payload":{"overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5"},"timestamp":"2026-06-27T16:17:17.664Z","windowId":"2C1AA59A-63A2-4F61-9664-BCD66F4E7D40"}
