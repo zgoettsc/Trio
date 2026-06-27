@@ -121,6 +121,12 @@ extension Treatments {
         var smartSenseOverride: Double = 0.0
         var detectedMeals: [DetectedMeal] = []
         var selectedMealID: UUID?
+
+        /// When the user picks a SavedMeal from the picker on this screen,
+        /// we remember its id so the meal-window activation after saveMeal()
+        /// can seed classification + phantom-COB + extended duration from
+        /// the meal's defaults. Nil for plain carb entries.
+        var pendingSavedMealId: UUID?
         var smartSenseMaxAdjustment: Double = 0.20
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
@@ -756,6 +762,17 @@ extension Treatments {
                 )]
                 try await carbsStorage.storeCarbs(carbsToStore, areFetchedFromRemote: false)
 
+                // If the user picked a saved meal in the picker, activate
+                // eating-mode for that meal AFTER the carbs are stored so the
+                // window's first loop pass sees the COB. Carb-entry side effect
+                // already extends the existing window if one was active, so this
+                // only fires when none was active or the user is starting fresh.
+                if let savedMealId = pendingSavedMealId, #available(iOS 16.0, *) {
+                    let req = AnnounceMealIntentRequest()
+                    _ = try? await req.announce(estimatedCarbs: carbs, savedMealId: savedMealId)
+                    await MainActor.run { self.pendingSavedMealId = nil }
+                }
+
                 // only perform determine basal sync if the user doesn't use the pump bolus, otherwise the enact bolus func in the APSManger does a sync
                 if amount <= 0 {
                     await MainActor.run {
@@ -776,6 +793,16 @@ extension Treatments {
             protein = Decimal(meal.protein)
             date = meal.detectedAt
             selectedMealID = meal.id
+        }
+
+        /// Picker handoff from the new Saved Meals sheet. Pre-fills macros from
+        /// the meal's defaults (only when defined) and remembers the meal id so
+        /// saveMeal() can seed the eating-mode window for this meal at submit.
+        func selectSavedMeal(_ meal: SavedMeal) {
+            if let c = meal.defaultCarbs { carbs = c as Decimal }
+            if let f = meal.defaultFat { fat = f as Decimal }
+            if let p = meal.defaultProtein { protein = p as Decimal }
+            pendingSavedMealId = meal.id
         }
 
         private func exportMealDecision(detectedMeal: DetectedMeal?, insulinDelivered: Double) {

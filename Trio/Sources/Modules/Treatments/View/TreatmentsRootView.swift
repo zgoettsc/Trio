@@ -20,6 +20,7 @@ extension Treatments {
         @State var state = StateModel()
 
         @State private var showPresetSheet = false
+        @State private var showSavedMealSheet = false
         @State private var autofocus: Bool = true
         @State private var calculatorDetent = PresentationDetent.large
         @State private var pushed: Bool = false
@@ -601,6 +602,16 @@ extension Treatments {
                         })
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: {
+                        showSavedMealSheet = true
+                    }, label: {
+                        HStack {
+                            Text("Meals")
+                            Image(systemName: "bookmark")
+                        }
+                    })
+                }
             })
             .onAppear {
                 configureView {
@@ -628,6 +639,12 @@ extension Treatments {
                 showPresetSheet = false
             }) {
                 MealPresetView(state: state)
+            }
+            .sheet(isPresented: $showSavedMealSheet) {
+                SavedMealPickerView { meal in
+                    state.selectSavedMeal(meal)
+                    handleDebouncedInput()
+                }
             }
             .alert("Error while processing Treatment", isPresented: $state.showDeterminationFailureAlert) {
                 Button("OK", role: .cancel) {
