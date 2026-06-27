@@ -238,6 +238,9 @@ struct SavedMealBackfillService {
             mealInCtx.updatedAt = Date()
             try? context.save()
         }
+        // Push this row to telemetry (meals.jsonl + per-meal history) and
+        // refresh the definitions snapshot so cachedInstanceCount updates.
+        resolver.resolve(AlgorithmTelemetryManager.self)?.emitBackfilledInstance(instanceId: instanceId)
         return instanceId
     }
 

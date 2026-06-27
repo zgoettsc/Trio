@@ -139,6 +139,14 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// See MEAL_INTELLIGENCE_DESIGN.md §7.5.
     var telemetryAnonymizeMealNames: Bool = false
 
+    /// Bumped each time the SavedMealInstance telemetry emit format changes
+    /// or we add a back-emit pass for previously-saved instances. When the
+    /// app launches and this value is < latest, the manager sweeps every
+    /// SavedMealInstance and re-emits it to telemetry. Allows fixing missed
+    /// emits (e.g. Phase E backfills that ran before emitBackfilledInstance
+    /// was wired up).
+    var lastInstanceTelemetrySweepGeneration: Int = 0
+
     // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
     // on the trio repo for tuning analysis. PAT is in Keychain, not here.
     var telemetryEnabled: Bool = false
@@ -431,6 +439,9 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Bool.self, forKey: .telemetryAnonymizeMealNames) {
             settings.telemetryAnonymizeMealNames = v
+        }
+        if let v = try? container.decode(Int.self, forKey: .lastInstanceTelemetrySweepGeneration) {
+            settings.lastInstanceTelemetrySweepGeneration = v
         }
 
         if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {

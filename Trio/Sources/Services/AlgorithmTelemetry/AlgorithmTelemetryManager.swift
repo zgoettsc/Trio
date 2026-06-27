@@ -39,6 +39,12 @@ protocol AlgorithmTelemetryManager: AnyObject {
     /// and push. Called by SavedMealStorage after every CRUD action.
     func emitMealDefinitionsSnapshot()
 
+    /// Emit a meals.jsonl + per-meal-history row for an already-closed
+    /// SavedMealInstance (no recordWindowClose round trip). Used by the
+    /// retroactive backfill flow which creates closed instances without going
+    /// through the live meal-window close path.
+    func emitBackfilledInstance(instanceId: UUID)
+
     /// Append a per-window close summary. Called from every close path so each window
     /// has a discoverable row in summary.jsonl, independent of the event stream.
     func recordWindowClose(
@@ -137,6 +143,48 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         maintainDailySnapshot()
         runRetentionCleanup()
         processReadyOutcomes()
+        sweepUnemittedInstancesIfNeeded()
+    }
+
+    /// Current sweep generation. Bump when there's a known emit-format change
+    /// or back-emit needed for previously-saved instances that didn't ship.
+    /// Devices with `lastInstanceTelemetrySweepGeneration` < this value will
+    /// re-emit every closed SavedMealInstance on next launch.
+    /// Generation 1 covers the Phase E backfills made before
+    /// emitBackfilledInstance was wired into SavedMealBackfillService.
+    private static let currentTelemetrySweepGeneration = 1
+
+    /// On launch, if the device hasn't run the current sweep generation,
+    /// emit telemetry for every closed SavedMealInstance. Append-only so a
+    /// few duplicate rows on the remote are harmless.
+    private func sweepUnemittedInstancesIfNeeded() {
+        guard settingsManager.settings.telemetryEnabled else { return }
+        let lastSweep = settingsManager.settings.lastInstanceTelemetrySweepGeneration
+        guard lastSweep < Self.currentTelemetrySweepGeneration else { return }
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var ids: [UUID] = []
+        ctx.performAndWait {
+            let req = SavedMealInstance.fetchRequest()
+            req.predicate = NSPredicate(format: "closedAt != nil")
+            let all = (try? ctx.fetch(req)) ?? []
+            ids = all.compactMap { $0.id }
+        }
+        guard !ids.isEmpty else {
+            // Still bump the generation so we don't scan on every launch
+            // until the user has instances.
+            var s = settingsManager.settings
+            s.lastInstanceTelemetrySweepGeneration = Self.currentTelemetrySweepGeneration
+            settingsManager.settings = s
+            return
+        }
+        debug(.service, "[Telemetry] Sweeping \(ids.count) SavedMealInstance(s) for back-emit (gen \(Self.currentTelemetrySweepGeneration))")
+        for id in ids {
+            emitBackfilledInstance(instanceId: id)
+        }
+        emitMealDefinitionsSnapshot()
+        var s = settingsManager.settings
+        s.lastInstanceTelemetrySweepGeneration = Self.currentTelemetrySweepGeneration
+        settingsManager.settings = s
     }
 
     // MARK: - Public API
@@ -508,6 +556,71 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     /// Rewrites `telemetry/meals/definitions.json` with the current set of
     /// SavedMeal definitions. Called on every SavedMeal CRUD action by the
     /// storage layer (which forwards the snapshot to us).
+    /// Emits a meals.jsonl + per-meal-history row for a SavedMealInstance
+    /// that was created outside the live recordWindowClose path
+    /// (specifically, the retroactive backfill flow).
+    func emitBackfilledInstance(instanceId: UUID) {
+        guard settingsManager.settings.telemetryEnabled else { return }
+        guard let storage = savedMealStorage else { return }
+        // Find by id via the storage's lookup. We need the full instance to
+        // read macros / outcome metrics — storage exposes instance(forWindowId:)
+        // but backfilled rows use a synthetic windowId. Fetch directly.
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var inst: SavedMealInstance?
+        ctx.performAndWait {
+            let req = SavedMealInstance.fetchRequest()
+            req.predicate = NSPredicate(format: "id == %@", instanceId as CVarArg)
+            req.fetchLimit = 1
+            inst = (try? ctx.fetch(req))?.first
+        }
+        guard let inst = inst, let meal = inst.savedMeal, let mealId = meal.id,
+              let startedAt = inst.startedAt, let closedAt = inst.closedAt
+        else { return }
+        let anonymize = settingsManager.settings.telemetryAnonymizeMealNames
+        let finalClassification = MealClassification(rawValue: inst.finalClassification ?? "")
+            ?? .simple
+        let row = SavedMealTelemetryRow(
+            kind: "savedMealInstance",
+            instanceId: instanceId.uuidString,
+            savedMealId: mealId.uuidString,
+            savedMealName: anonymize ? nil : meal.name,
+            savedMealNamePrivate: anonymize,
+            windowId: inst.windowId ?? "backfill-\(instanceId.uuidString)",
+            startedAt: startedAt,
+            closedAt: closedAt,
+            deviceTimeZone: TimeZone.current.identifier,
+            macros: SavedMealTelemetryRow.Macros(
+                carbs: inst.carbsAtActivation.map { $0.doubleValue },
+                fat: inst.fatAtActivation.map { $0.doubleValue },
+                protein: inst.proteinAtActivation.map { $0.doubleValue }
+            ),
+            carbBucket: inst.carbBucket?.rawValue,
+            initialClassification: inst.initialClassification,
+            finalClassification: finalClassification.rawValue,
+            bgCurveJSON: inst.bgCurveJSON,
+            smbsJSON: inst.smbsJSON,
+            floorActivationsJSON: inst.floorActivationsJSON,
+            classifierUpgradesJSON: inst.classifierUpgradesJSON,
+            outcomeScore: Int(inst.outcomeScore),
+            metrics: SavedMealTelemetryRow.Metrics(
+                peakBG: inst.peakBG,
+                timeInRangeMinutes: Int(inst.timeInRangeMinutes),
+                timeAboveRangeMinutes: Int(inst.timeAboveRangeMinutes),
+                timeBelowRangeMinutes: Int(inst.timeBelowRangeMinutes),
+                lowsCount: Int(inst.lowsCount),
+                timeToBaselineMinutes: Int(inst.timeToBaselineMinutes),
+                totalInsulinDeliveredU: inst.totalInsulinDeliveredU,
+                smbCount: Int(inst.smbCount),
+                floorActivationCount: Int(inst.floorActivationCount)
+            ),
+            buildSchema: 9
+        )
+        logger.appendMealInstance(row, on: closedAt)
+        logger.appendPerMealHistory(row, mealId: mealId)
+        // Refresh definitions.json — cachedInstanceCount changed.
+        emitMealDefinitionsSnapshot()
+    }
+
     func emitMealDefinitionsSnapshot() {
         guard settingsManager.settings.telemetryEnabled else { return }
         guard let storage = savedMealStorage else { return }

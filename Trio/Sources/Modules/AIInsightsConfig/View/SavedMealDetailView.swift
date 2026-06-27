@@ -87,6 +87,16 @@ struct SavedMealDetailView: View {
 
     private var hasAnyData: Bool { !filteredInstances.isEmpty }
 
+    /// The in-flight instance (window open) for this meal, if any.
+    /// Phase F live-progress section renders only when this is non-nil.
+    private var currentInstance: SavedMealInstance? {
+        let all = (meal.instances?.allObjects as? [SavedMealInstance]) ?? []
+        return all
+            .filter { $0.closedAt == nil }
+            .sorted { ($0.startedAt ?? .distantPast) > ($1.startedAt ?? .distantPast) }
+            .first
+    }
+
     var body: some View {
         Form {
             Section {
@@ -105,6 +115,10 @@ struct SavedMealDetailView: View {
                 }
             }
             .listRowBackground(Color.chart)
+
+            if let current = currentInstance {
+                currentlyActiveSection(current)
+            }
 
             Section(header: Text("Seeded behavior")) {
                 statRow("Carbs default", value: meal.defaultCarbs.map { "\($0.intValue)g" } ?? "—")
@@ -240,6 +254,139 @@ struct SavedMealDetailView: View {
             Spacer()
             Text(value).foregroundStyle(.secondary)
         }
+    }
+
+    // MARK: - Currently active (Phase F)
+
+    @ViewBuilder
+    private func currentlyActiveSection(_ instance: SavedMealInstance) -> some View {
+        Section(
+            header: HStack {
+                Image(systemName: "circle.fill").foregroundStyle(.green).font(.caption)
+                Text("Currently active")
+            },
+            footer: Text("Live snapshot — outcome metrics will appear once the window closes.")
+        ) {
+            TimelineView(.periodic(from: .now, by: 60)) { _ in
+                liveContent(instance)
+            }
+        }
+        .listRowBackground(Color.chart)
+    }
+
+    @ViewBuilder
+    private func liveContent(_ instance: SavedMealInstance) -> some View {
+        let now = Date()
+        let started = instance.startedAt ?? now
+        let elapsed = now.timeIntervalSince(started)
+        let elapsedH = Int(elapsed) / 3600
+        let elapsedM = (Int(elapsed) % 3600) / 60
+
+        let bgs = liveBGSamples(from: started, to: now)
+        let latestBG = bgs.last.map { Int($0.bg) }
+        let peakSoFar = bgs.map { $0.bg }.max().map { Int($0) }
+        let cls = instance.finalClassification ?? instance.initialClassification ?? "simple"
+        let smbs = liveSMBCount(from: started, to: now)
+        let floors = Int(instance.floorActivationCount)
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Elapsed").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "%dh %02dm", elapsedH, elapsedM))
+                    .monospacedDigit().fontWeight(.medium)
+            }
+
+            HStack {
+                Text("Now").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if let bg = latestBG {
+                    Text("\(bg) mg/dL").monospacedDigit().fontWeight(.medium)
+                } else {
+                    Text("—").foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Text("Peak so far").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(peakSoFar.map { "\($0)" } ?? "—")
+                    .monospacedDigit().fontWeight(.medium)
+            }
+
+            HStack {
+                Text("Classification").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(cls.capitalized)
+                    .foregroundStyle(colorForClassification(cls))
+                    .fontWeight(.medium)
+            }
+
+            HStack(spacing: 16) {
+                Label("\(smbs) SMBs", systemImage: "syringe")
+                    .font(.caption).foregroundStyle(.secondary)
+                Label("\(floors) floor", systemImage: "shield")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if !bgs.isEmpty {
+                Chart {
+                    ForEach(bgs.indices, id: \.self) { i in
+                        LineMark(
+                            x: .value("min", bgs[i].t),
+                            y: .value("bg", bgs[i].bg)
+                        )
+                        .foregroundStyle(.green)
+                    }
+                }
+                .frame(height: 120)
+                .chartXAxisLabel("Min since start", alignment: .center)
+                .chartYScale(domain: 40...300)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func colorForClassification(_ raw: String) -> Color {
+        switch raw.lowercased() {
+        case "complex": return .red
+        case "medium": return .orange
+        default: return .green
+        }
+    }
+
+    /// Reads BG samples between two dates from CoreData. Returns time-from-start
+    /// in minutes + BG mg/dL. Done lazily per refresh, no caching.
+    private func liveBGSamples(from start: Date, to end: Date) -> [(t: Double, bg: Double)] {
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var results: [(Double, Double)] = []
+        ctx.performAndWait {
+            let req = GlucoseStored.fetchRequest()
+            req.predicate = NSPredicate(format: "date >= %@ AND date <= %@", start as NSDate, end as NSDate)
+            req.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+            let samples = (try? ctx.fetch(req)) ?? []
+            results = samples.compactMap { s in
+                guard let d = s.date else { return nil }
+                return (d.timeIntervalSince(start) / 60, Double(s.glucose))
+            }
+        }
+        return results
+    }
+
+    /// Counts SMB events from PumpEventStored in the window.
+    private func liveSMBCount(from start: Date, to end: Date) -> Int {
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var count = 0
+        ctx.performAndWait {
+            let req = PumpEventStored.fetchRequest()
+            req.predicate = NSPredicate(
+                format: "timestamp >= %@ AND timestamp <= %@ AND bolus != nil AND bolus.isSMB == YES",
+                start as NSDate, end as NSDate
+            )
+            count = (try? ctx.count(for: req)) ?? 0
+        }
+        return count
     }
 
     // MARK: - Analytics
