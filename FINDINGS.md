@@ -12,6 +12,99 @@ findings` at the bottom.
 
 ---
 
+## 2026-06-27 round 6 (eating-mode working — second floor + rising-meal catch)
+
+**Data window:** `751A0A4F-228D-4E14-9F8A-4CEE26DE1A4F`, opened
+2026-06-27T00:46:10Z. 40+ min of post-activation data through 01:27Z. User
+reopened the window immediately after the previous one ended.
+
+**Headline:** items 1–6 are demonstrably keeping pressure on a rising-BG
+no-bolus scenario. The loop fired **7 SMBs and 1 floor activation in the
+first 40 minutes**, including a 0.8U SMB + maxSafeBasal 3U/h temp when BG
+hit 137 with +10 mg/dL/5min. Before any of this work shipped, an
+unbolused meal of this shape would have left BG climbing for an hour.
+
+### Findings
+
+#### F-11 — Floor fired a SECOND time, mid-window, same shape as round-5
+
+At 01:01:06Z: BG 121, delta5m +2, eventualBG 105 → oref's raw insulinReq
+**0** → floor pushed to 0.086U → 0.05U SMB delivered. Reason text:
+"Meal-window floor: insulinReq 0U → 0.086U". Confirms the round-5 floor
+wasn't a fluke. The exact gate (bg ≥ 120 && rising && IOB headroom && bg >
+target+20) keeps firing on the right shape.
+
+#### F-12 — Rising-meal catch-up dramatically faster than baseline
+
+Timeline of window-2 SMB activity:
+
+| Time   | BG  | Δ5m   | eventualBG | insulinReq | SMB | tempBasal |
+|--------|-----|-------|------------|------------|-----|-----------|
+| 00:51  | 115 | +1.0  | 115        | 0.22       | 0.15 | 0.09  |
+| 00:56  | 119 | +3.2  | 126        | 0.30       | 0.20 | (passes) |
+| 01:01  | 121 | +2.0  | 105        | **0→0.086 (floor)** | 0.05 | 0.23 |
+| 01:06  | 117 | −4.0  | 84         | 0          | —   | 0     |
+| 01:11  | 113 | −4.0  | 98         | −0.15      | —   | 0.5   |
+| 01:16  | 120 | +2.7  | 127        | 0.20       | 0.15 | 1.75  |
+| 01:21  | 123 | +3.0  | 118        | 0.20       | 0.15 | 1.75  |
+| 01:26  | 137 | +10.2 | 168        | 1.04       | **0.80** | **3.0 (maxSafe)** |
+
+The 01:26 pass is the key data point — when the meal "broke through" the
+noise, the loop delivered 0.8U SMB **plus** drove temp to the 3 U/h
+max-safe ceiling in a single pass. Without item 1 (SMB ratio boost to
+0.8) the SMB would've been ~0.5U. Without item 6 (SMB minutes ×2) the
+per-bolus cap would have throttled it. Cumulative tuning doing real work.
+
+#### F-13 — Loop firing SMBs before oref declares "meal possible"
+
+00:51 pass: SMB 0.15U at BG 115, delta +1, `mealDetection: "none"`. That
+is the meal-window context overriding oref's "wait and see" default —
+exactly the priming behavior the Action Button was designed for.
+
+#### F-14 — `effective*` fields STILL null on the floor-firing pass
+
+Round 5 attributed nil values to a JS-side gate. But 01:01:06 has
+`smbDelivered: 0.05` — the SMB branch executed, the floor assignment ran,
+the late `rT.mealWindowApplied` ran. Still all-null in the loop sample.
+
+**Refined hypothesis (round 6):** This is a Swift Codable issue, not a JS
+issue. The struct fields were non-optional. If any one JS-emitted field
+renders as JSON null (e.g. Math.max() over an undefined
+`glucose_status.short_avgdelta`), inner decode throws → `decodeIfPresent`
+on the parent silently nils the WHOLE nested object → every field in it
+is lost.
+
+**Fix:** Commit `5a2a5dd84` on the feature branch makes every field in
+`MealWindowFloorData` / `MealWindowAppliedData` optional. Each inner
+field now decodes independently. **Not yet installed by user** (data
+ends 01:27Z; commit post-dates the upload). Validation criterion for
+round 7: at minimum `effectiveSmbDeliveryRatio` populates on every
+in-window loop, and at floor-firing passes `floorPriorInsulinReq` = 0
+with `floorMagnitude` = 0.086.
+
+### Status of prior findings
+
+- **H-1 (floor fires on under-bolused meal): ✓ CONFIRMED.** Two clean
+  activations across two windows on rising-BG / weak-insulinReq shape.
+- **F-8 (telemetry gate inside SMB branch): ~ REVISED.** Was contributing
+  factor, not the only cause. Both `6fcbb8f0f` and `5a2a5dd84` needed.
+- **F-9 (loop sat in zero-temp because BG dropping): — PRIOR ROUND ONLY.**
+- **F-10 (toughMealCapPercent 80): ✓ STILL TRUE.**
+- **H-2 (relax rising guard to delta > −2): —** Both floor activations
+  were at delta > 0 anyway.
+- **H-3 (SMB ratio boost shortens time-above-target):** Indirectly
+  supported by 01:26 0.8U SMB — confirmation pending round 7 telemetry.
+
+### New hypotheses
+
+- **H-4:** Did the 01:01 floor prevent the subsequent zero-temp at 01:06,
+  or would BG have dropped anyway? Hard to test without counterfactual.
+- **H-5:** The 137 / +10 / eventualBG 168 at 01:26 suggests substantial
+  carbs and the loop is still catching up. Need next 30+ min to confirm
+  the SMB cascade brings BG to target without going low.
+
+---
+
 ## 2026-06-27 round 5 (first post-fix data + telemetry gate bug)
 
 **Bundle now correct (`var trio_determineBasal`).** No more "Invalid Algorithm
@@ -460,9 +553,11 @@ something to know for filtering later.
 
 ## Findings index by feature area
 
-- **Floor activation rules:** F-1, F-2, H-1, H-2, F-9
-- **SMB delivery ratio:** H-3, F-10
+- **Floor activation rules:** F-1, F-2, H-1, H-2, F-9, F-11
+- **SMB delivery ratio:** H-3, F-10, F-12
 - **Carb entry attribution:** F-4
-- **Meal-window UX:** F-3
-- **Telemetry plumbing:** F-8, F-10
+- **Meal-window UX:** F-3, F-13
+- **Telemetry plumbing:** F-8, F-10, F-14
 - **Algorithm gating on dropping BG:** F-9
+- **Rising-meal aggression (items 1-6 combined):** F-12, F-13, H-5
+- **Counterfactual reasoning:** H-4
