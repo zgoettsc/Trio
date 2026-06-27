@@ -130,6 +130,8 @@ private extension LiveActivityAttributes.ContentState {
             mealWindowExpiresAt: Date().addingTimeInterval(60 * 45),
             mealWindowEstimatedCarbs: 0,
             mealWindowCarbsConfirmed: false,
+            mealWindowSavedMealName: "",
+            mealWindowClassification: "simple",
             widgetItems: LiveActivityAttributes.LiveActivityItem.defaultItems
         )
 
