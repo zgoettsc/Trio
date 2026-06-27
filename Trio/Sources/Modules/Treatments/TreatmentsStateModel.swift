@@ -764,12 +764,17 @@ extension Treatments {
 
                 // If the user picked a saved meal in the picker, activate
                 // eating-mode for that meal AFTER the carbs are stored so the
-                // window's first loop pass sees the COB. Carb-entry side effect
-                // already extends the existing window if one was active, so this
-                // only fires when none was active or the user is starting fresh.
+                // window's first loop pass sees the COB. Pass the user's
+                // ACTUAL entered macros so the SavedMealInstance row reflects
+                // what was really eaten this time, not the meal's defaults.
                 if let savedMealId = pendingSavedMealId, #available(iOS 16.0, *) {
                     let req = AnnounceMealIntentRequest()
-                    _ = try? await req.announce(estimatedCarbs: carbs, savedMealId: savedMealId)
+                    _ = try? await req.announce(
+                        estimatedCarbs: carbs,
+                        savedMealId: savedMealId,
+                        actualFat: fat > 0 ? fat : nil,
+                        actualProtein: protein > 0 ? protein : nil
+                    )
                     await MainActor.run { self.pendingSavedMealId = nil }
                 }
 

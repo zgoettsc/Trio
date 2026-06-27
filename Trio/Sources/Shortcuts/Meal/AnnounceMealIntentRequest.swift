@@ -11,11 +11,31 @@ import Foundation
         try await announce(estimatedCarbs: estimatedCarbs, savedMealId: nil)
     }
 
+    /// Convenience overload — saved meal, no explicit fat/protein.
+    func announce(estimatedCarbs: Decimal?, savedMealId: UUID?) async throws -> String {
+        try await announce(
+            estimatedCarbs: estimatedCarbs,
+            savedMealId: savedMealId,
+            actualFat: nil,
+            actualProtein: nil
+        )
+    }
+
     /// Open a meal-announcement window. When `savedMealId` is provided, the
     /// window seeds with that meal's default classification / phantom-COB /
     /// extended duration, and a SavedMealInstance row is created and linked
     /// to the window for outcome tracking.
-    func announce(estimatedCarbs: Decimal?, savedMealId: UUID?) async throws -> String {
+    ///
+    /// `actualFat` / `actualProtein` are used to populate the
+    /// SavedMealInstance row with the user's real entered macros (from the
+    /// Treatments picker after they edited the fields). When nil, the
+    /// instance falls back to the meal's defaults.
+    func announce(
+        estimatedCarbs: Decimal?,
+        savedMealId: UUID?,
+        actualFat: Decimal?,
+        actualProtein: Decimal?
+    ) async throws -> String {
         var s = settingsManager.settings
         let now = Date()
         let windowId = UUID().uuidString
@@ -73,7 +93,14 @@ import Foundation
 
         // If we have a saved meal, create the instance row now and link it.
         if let mealId = savedMealId, let meal = savedMealStorage.meal(id: mealId) {
-            let instanceId = savedMealStorage.startInstance(meal: meal, windowId: windowId, startedAt: now)
+            let instanceId = savedMealStorage.startInstance(
+                meal: meal,
+                windowId: windowId,
+                startedAt: now,
+                actualCarbs: estimatedCarbs,
+                actualFat: actualFat,
+                actualProtein: actualProtein
+            )
             var s2 = settingsManager.settings
             s2.mealWindowSavedMealInstanceId = instanceId.uuidString
             settingsManager.settings = s2

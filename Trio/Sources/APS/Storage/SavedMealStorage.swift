@@ -24,8 +24,19 @@ protocol SavedMealStorage {
 
     /// Called when the user picks a saved meal to start a new window.
     /// Creates an instance row linked to the window and returns the instance id.
+    /// When the caller has actual entered macros (e.g. from the Treatments
+    /// picker after user edited the fields), pass them as overrides — they
+    /// take precedence over the SavedMeal's defaults so the instance reflects
+    /// what was really eaten this time.
     @discardableResult
-    func startInstance(meal: SavedMeal, windowId: String, startedAt: Date) -> UUID
+    func startInstance(
+        meal: SavedMeal,
+        windowId: String,
+        startedAt: Date,
+        actualCarbs: Decimal?,
+        actualFat: Decimal?,
+        actualProtein: Decimal?
+    ) -> UUID
 
     /// Called when a meal window closes. Backfills instance fields with the
     /// computed outcome and trims the per-meal history to the cap (20).
@@ -216,7 +227,14 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
     // MARK: - Instance lifecycle
 
     @discardableResult
-    func startInstance(meal: SavedMeal, windowId: String, startedAt: Date) -> UUID {
+    func startInstance(
+        meal: SavedMeal,
+        windowId: String,
+        startedAt: Date,
+        actualCarbs: Decimal? = nil,
+        actualFat: Decimal? = nil,
+        actualProtein: Decimal? = nil
+    ) -> UUID {
         let instanceId = UUID()
         context.performAndWait {
             guard let mealId = meal.id,
@@ -225,11 +243,13 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             inst.id = instanceId
             inst.windowId = windowId
             inst.startedAt = startedAt
-            inst.carbsAtActivation = mealInCtx.defaultCarbs
-            inst.fatAtActivation = mealInCtx.defaultFat
-            inst.proteinAtActivation = mealInCtx.defaultProtein
+            // Actual entered macros take precedence; fall back to meal defaults
+            // when not supplied (e.g. zero-entry Action Button flow).
+            inst.carbsAtActivation = actualCarbs.map(NSDecimalNumber.init(decimal:)) ?? mealInCtx.defaultCarbs
+            inst.fatAtActivation = actualFat.map(NSDecimalNumber.init(decimal:)) ?? mealInCtx.defaultFat
+            inst.proteinAtActivation = actualProtein.map(NSDecimalNumber.init(decimal:)) ?? mealInCtx.defaultProtein
             inst.initialClassification = mealInCtx.defaultClassification ?? MealClassification.simple.rawValue
-            inst.carbBucketSource = mealInCtx.defaultCarbs != nil ? "macros" : "inferred"
+            inst.carbBucketSource = (actualCarbs != nil || mealInCtx.defaultCarbs != nil) ? "macros" : "inferred"
             mealInCtx.addToInstances(inst)
             mealInCtx.updatedAt = startedAt
             try? context.save()
