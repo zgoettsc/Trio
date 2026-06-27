@@ -116,3 +116,4 @@
 {"kind":"smbDelivered","payload":{"bg":113,"floorActivated":false,"insulinReq":1.01,"iob":0.201,"minutesSinceWindowOpen":0.007733100652694702,"units":0.8},"timestamp":"2026-06-27T16:53:56.830Z","windowId":"E5772BD5-996C-4E80-BD47-9E059DECF12E"}
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":1.7},"timestamp":"2026-06-27T16:53:58.488Z","windowId":"E5772BD5-996C-4E80-BD47-9E059DECF12E"}
 {"kind":"smbDelivered","payload":{"bg":116,"floorActivated":false,"insulinReq":0.77,"iob":1.8380000000000003,"minutesSinceWindowOpen":3.6224439005057016,"units":0.6},"timestamp":"2026-06-27T16:57:33.713Z","windowId":"E5772BD5-996C-4E80-BD47-9E059DECF12E"}
+{"kind":"smbDelivered","payload":{"bg":112,"floorActivated":false,"insulinReq":0.16999999999999998,"iob":2.3649999999999998,"minutesSinceWindowOpen":8.620586484670639,"units":0.1},"timestamp":"2026-06-27T17:02:33.601Z","windowId":"E5772BD5-996C-4E80-BD47-9E059DECF12E"}
