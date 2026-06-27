@@ -85,6 +85,18 @@ struct AlgorithmTelemetryLoopSample: Codable {
     let forcedUAM: Bool?
     let phantomCOBGrams: Double?
     let relaxedRisingGuard: Bool?
+    /// Diagnostic — proves whether the rT.mealWindowApplied object decoded
+    /// successfully out of the oref JSON. If false on a meal-window pass,
+    /// the JS isn't emitting it (or Swift can't decode it). If true but the
+    /// effective* fields above are still nil, the inner fields are absent.
+    let mealWindowAppliedDecoded: Bool?
+    let mealWindowFloorDecoded: Bool?
+    /// Diagnostic — raw `mealWindowApplied` substring from the oref JSON
+    /// (independent of Swift decoding). Null when JS didn't emit it.
+    let mealWindowAppliedRaw: String?
+    let mealWindowFloorRaw: String?
+    /// Diagnostic — schema marker so we can prove which build produced this row.
+    let buildSchema: Int?
 
     // Context — effective values (already include override math). Pair with
     // the override/temp-target fields below to distinguish "loop math used X

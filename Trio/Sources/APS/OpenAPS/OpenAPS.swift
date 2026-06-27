@@ -14,6 +14,13 @@ final class OpenAPS {
 
     let jsonConverter = JSONConverter()
 
+    /// Diagnostic — last `rT.mealWindowApplied` substring from the raw oref JSON
+    /// (cheap to scan, not the full document). Read by APSManager telemetry to
+    /// distinguish "JS isn't emitting the field" from "Swift can't decode it".
+    /// Reset every determineBasal call.
+    private(set) var lastRawMealWindowAppliedSnippet: String?
+    private(set) var lastRawMealWindowFloorSnippet: String?
+
     init(storage: FileStorage, tddStorage: TDDStorage) {
         self.storage = storage
         self.tddStorage = tddStorage
@@ -24,6 +31,25 @@ final class OpenAPS {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+
+    /// Substring-scan a JSON document for `"<key>": { ... }`, returning the brace-balanced
+    /// object (truncated to ~400 chars). Cheap diagnostic — avoids re-parsing the full doc.
+    static func extractObjectSnippet(_ json: String, key: String) -> String? {
+        guard let keyRange = json.range(of: "\"\(key)\"") else { return nil }
+        // Find the first `{` after the key.
+        guard let openIdx = json[keyRange.upperBound...].firstIndex(of: "{") else { return nil }
+        var depth = 1
+        var i = json.index(after: openIdx)
+        while i < json.endIndex, depth > 0 {
+            let c = json[i]
+            if c == "{" { depth += 1 }
+            else if c == "}" { depth -= 1 }
+            i = json.index(after: i)
+        }
+        guard depth == 0 else { return nil }
+        let snippet = String(json[openIdx..<i])
+        return snippet.count > 400 ? String(snippet.prefix(400)) + "…" : snippet
+    }
 
     // Helper function to convert a Decimal? to NSDecimalNumber?
     func decimalToNSDecimalNumber(_ value: Decimal?) -> NSDecimalNumber? {
@@ -474,6 +500,12 @@ final class OpenAPS {
         )
 
         debug(.openAPS, "\(simulation ? "[SIMULATION]" : "") OREF DETERMINATION: \(orefDetermination)")
+
+        // Diagnostic: extract the raw substring of mealWindowApplied / mealWindowFloor
+        // so telemetry can prove whether the JS is emitting them at all (independent
+        // of whether Swift decodes them into the typed Determination).
+        lastRawMealWindowAppliedSnippet = Self.extractObjectSnippet(orefDetermination, key: "mealWindowApplied")
+        lastRawMealWindowFloorSnippet = Self.extractObjectSnippet(orefDetermination, key: "mealWindowFloor")
 
         if var determination = Determination(from: orefDetermination), let deliverAt = determination.deliverAt {
             // set both timestamp and deliverAt to the SAME date; this will be updated for timestamp once it is enacted

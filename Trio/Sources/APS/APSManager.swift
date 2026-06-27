@@ -638,6 +638,11 @@ final class BaseAPSManager: APSManager, Injectable {
             forcedUAM: applied?.forcedUAM,
             phantomCOBGrams: applied?.phantomCOBGrams.map { Double(truncating: $0 as NSNumber) },
             relaxedRisingGuard: applied?.relaxedRisingGuard,
+            mealWindowAppliedDecoded: mealWindowActive ? (applied != nil) : nil,
+            mealWindowFloorDecoded: mealWindowActive ? (floor != nil) : nil,
+            mealWindowAppliedRaw: mealWindowActive ? openAPS.lastRawMealWindowAppliedSnippet : nil,
+            mealWindowFloorRaw: mealWindowActive ? openAPS.lastRawMealWindowFloorSnippet : nil,
+            buildSchema: 3,
             target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
             // ↑ Trio's Determination uses `current_target` (snake_case from oref JS)
             isf: determination?.isf.map { Double(truncating: $0 as NSNumber) },
