@@ -147,6 +147,10 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         default:
             break
         }
+        // Every event-kind here is user-meaningful (quick-action activation,
+        // bolus, carb entry, override change). Push immediately — pushNow()
+        // debounces at 30s so back-to-back events coalesce.
+        Task { await self.pushNow() }
     }
 
     func logLoopSample(_ sample: AlgorithmTelemetryLoopSample) {
@@ -168,6 +172,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     func logSettingsSnapshot(_ snapshot: AlgorithmTelemetrySettingsSnapshot) {
         guard settingsManager.settings.telemetryEnabled else { return }
         logger.writeSettingsSnapshot(snapshot)
+        Task { await self.pushNow() }
     }
 
     func pushNow() async {

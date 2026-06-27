@@ -45,10 +45,13 @@ struct Determination: JSON, Equatable {
     var mealWindowApplied: MealWindowAppliedData?
 }
 
-struct MealWindowFloorData: JSON, Equatable {
-    // All optional so a single malformed value in JS (e.g. a NaN that
-    // JSON.stringify renders as null) doesn't cause the whole nested
-    // object to fail to decode and silently disappear.
+// Plain Codable, NOT the JSON protocol. The JSON protocol's `init?(from: String)`
+// extension was preventing the Codable synthesizer from generating the
+// `init(from decoder: Decoder)` these need to decode as nested fields of
+// Determination — round-7 diagnostics proved the JSON arrives intact but the
+// inner decode silently fails. These types are never decoded standalone, so
+// they don't need JSON's String-to-self plumbing.
+struct MealWindowFloorData: Codable, Equatable {
     let activated: Bool?
     let prior: Decimal?
     let floored: Decimal?
@@ -58,7 +61,7 @@ struct MealWindowFloorData: JSON, Equatable {
     let target: Decimal?
 }
 
-struct MealWindowAppliedData: JSON, Equatable {
+struct MealWindowAppliedData: Codable, Equatable {
     let smbDeliveryRatio: Decimal?
     let maxSMBBasalMinutes: Decimal?
     let maxUAMSMBBasalMinutes: Decimal?
