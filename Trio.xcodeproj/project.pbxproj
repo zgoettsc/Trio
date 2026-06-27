@@ -490,6 +490,14 @@
 		F2B0C3D40013000000000001 /* MealClassifierRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40012000000000001 /* MealClassifierRulesView.swift */; };
 		F2B0C3D40015000000000001 /* MealClassification.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40014000000000001 /* MealClassification.swift */; };
 		F2B0C3D40017000000000001 /* MealClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40016000000000001 /* MealClassifier.swift */; };
+		F2B0C3D40019000000000001 /* SavedMeal+CoreDataClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40018000000000001 /* SavedMeal+CoreDataClass.swift */; };
+		F2B0C3D4001B000000000001 /* SavedMeal+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4001A000000000001 /* SavedMeal+CoreDataProperties.swift */; };
+		F2B0C3D4001D000000000001 /* SavedMealInstance+CoreDataClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4001C000000000001 /* SavedMealInstance+CoreDataClass.swift */; };
+		F2B0C3D4001F000000000001 /* SavedMealInstance+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4001E000000000001 /* SavedMealInstance+CoreDataProperties.swift */; };
+		F2B0C3D40021000000000001 /* SavedMealStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40020000000000001 /* SavedMealStorage.swift */; };
+		F2B0C3D40023000000000001 /* SavedMealsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40022000000000001 /* SavedMealsListView.swift */; };
+		F2B0C3D40025000000000001 /* SavedMealEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40024000000000001 /* SavedMealEditView.swift */; };
+		F2B0C3D40027000000000001 /* SavedMealDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40026000000000001 /* SavedMealDetailView.swift */; };
 		BDC2EA452C3043B000E5BBD0 /* OverrideStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC2EA442C3043B000E5BBD0 /* OverrideStorage.swift */; };
 		BDC2EA472C3045AD00E5BBD0 /* Override.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC2EA462C3045AD00E5BBD0 /* Override.swift */; };
 		BDC530FF2D0F6BE300088832 /* ContactImageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC530FE2D0F6BE300088832 /* ContactImageManager.swift */; };
@@ -1425,6 +1433,14 @@
 		F2B0C3D40012000000000001 /* MealClassifierRulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealClassifierRulesView.swift; sourceTree = "<group>"; };
 		F2B0C3D40014000000000001 /* MealClassification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealClassification.swift; sourceTree = "<group>"; };
 		F2B0C3D40016000000000001 /* MealClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealClassifier.swift; sourceTree = "<group>"; };
+		F2B0C3D40018000000000001 /* SavedMeal+CoreDataClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SavedMeal+CoreDataClass.swift"; sourceTree = "<group>"; };
+		F2B0C3D4001A000000000001 /* SavedMeal+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SavedMeal+CoreDataProperties.swift"; sourceTree = "<group>"; };
+		F2B0C3D4001C000000000001 /* SavedMealInstance+CoreDataClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SavedMealInstance+CoreDataClass.swift"; sourceTree = "<group>"; };
+		F2B0C3D4001E000000000001 /* SavedMealInstance+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SavedMealInstance+CoreDataProperties.swift"; sourceTree = "<group>"; };
+		F2B0C3D40020000000000001 /* SavedMealStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealStorage.swift; sourceTree = "<group>"; };
+		F2B0C3D40022000000000001 /* SavedMealsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsListView.swift; sourceTree = "<group>"; };
+		F2B0C3D40024000000000001 /* SavedMealEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealEditView.swift; sourceTree = "<group>"; };
+		F2B0C3D40026000000000001 /* SavedMealDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealDetailView.swift; sourceTree = "<group>"; };
 		BDC2EA442C3043B000E5BBD0 /* OverrideStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverrideStorage.swift; sourceTree = "<group>"; };
 		BDC2EA462C3045AD00E5BBD0 /* Override.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Override.swift; sourceTree = "<group>"; };
 		BDC530FE2D0F6BE300088832 /* ContactImageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactImageManager.swift; sourceTree = "<group>"; };
@@ -2801,6 +2817,7 @@
 			isa = PBXGroup;
 			children = (
 				38AEE75625F0F18E0013F05B /* CarbsStorage.swift */,
+				F2B0C3D40020000000000001 /* SavedMealStorage.swift */,
 				DDB37CC42D05048F00D99BF4 /* ContactImageStorage.swift */,
 				38A0363A25ECF07E00FCBB52 /* GlucoseStorage.swift */,
 				38FCF3FC25E997A80078B0D1 /* PumpHistoryStorage.swift */,
@@ -3264,6 +3281,9 @@
 				F2B0C3D40009000000000001 /* TelemetryConfigView.swift */,
 				F2B0C3D40010000000000001 /* EatingModeTuningView.swift */,
 				F2B0C3D40012000000000001 /* MealClassifierRulesView.swift */,
+				F2B0C3D40022000000000001 /* SavedMealsListView.swift */,
+				F2B0C3D40024000000000001 /* SavedMealEditView.swift */,
+				F2B0C3D40026000000000001 /* SavedMealDetailView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -4111,6 +4131,10 @@
 				DDE179372C910127003CDDB7 /* BolusStored+CoreDataProperties.swift */,
 				DDE1793A2C910127003CDDB7 /* CarbEntryStored+CoreDataClass.swift */,
 				DDE1793B2C910127003CDDB7 /* CarbEntryStored+CoreDataProperties.swift */,
+				F2B0C3D40018000000000001 /* SavedMeal+CoreDataClass.swift */,
+				F2B0C3D4001A000000000001 /* SavedMeal+CoreDataProperties.swift */,
+				F2B0C3D4001C000000000001 /* SavedMealInstance+CoreDataClass.swift */,
+				F2B0C3D4001E000000000001 /* SavedMealInstance+CoreDataProperties.swift */,
 				DDB37CC22D05044D00D99BF4 /* ContactTrickEntryStored+CoreDataClass.swift */,
 				DDB37CC32D05044D00D99BF4 /* ContactTrickEntryStored+CoreDataProperties.swift */,
 				3B56079D2ECD62A800C723C1 /* DeletedGlucoseStored+CoreDataClass.swift */,
@@ -4712,6 +4736,14 @@
 				F2B0C3D40013000000000001 /* MealClassifierRulesView.swift in Sources */,
 				F2B0C3D40015000000000001 /* MealClassification.swift in Sources */,
 				F2B0C3D40017000000000001 /* MealClassifier.swift in Sources */,
+				F2B0C3D40019000000000001 /* SavedMeal+CoreDataClass.swift in Sources */,
+				F2B0C3D4001B000000000001 /* SavedMeal+CoreDataProperties.swift in Sources */,
+				F2B0C3D4001D000000000001 /* SavedMealInstance+CoreDataClass.swift in Sources */,
+				F2B0C3D4001F000000000001 /* SavedMealInstance+CoreDataProperties.swift in Sources */,
+				F2B0C3D40021000000000001 /* SavedMealStorage.swift in Sources */,
+				F2B0C3D40023000000000001 /* SavedMealsListView.swift in Sources */,
+				F2B0C3D40025000000000001 /* SavedMealEditView.swift in Sources */,
+				F2B0C3D40027000000000001 /* SavedMealDetailView.swift in Sources */,
 				A1B1C1D1E1F101010101A1B5 /* ClaudeAPIService.swift in Sources */,
 				A1B1C1D1E1F101010101A1B6 /* HealthDataExporter.swift in Sources */,
 				A1B1C1D1E1F101010101A1B8 /* MarkdownParser.swift in Sources */,

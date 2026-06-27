@@ -128,6 +128,12 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var mealClassifierPhase3CarbExclusionMinutes: Decimal = 30
     var mealClassifierPhantomCOBGramsOnUpgrade: Decimal = 20
 
+    /// Optional link to the SavedMeal that started the current window. Lets us
+    /// fetch the live instance row to backfill metrics at window close.
+    /// Both nil for windows started from "Quick (auto-classify)".
+    var mealWindowSavedMealId: String? = nil
+    var mealWindowSavedMealInstanceId: String? = nil
+
     // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
     // on the trio repo for tuning analysis. PAT is in Keychain, not here.
     var telemetryEnabled: Bool = false
@@ -411,6 +417,12 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhantomCOBGramsOnUpgrade) {
             settings.mealClassifierPhantomCOBGramsOnUpgrade = v
+        }
+        if let v = try? container.decode(String.self, forKey: .mealWindowSavedMealId) {
+            settings.mealWindowSavedMealId = v
+        }
+        if let v = try? container.decode(String.self, forKey: .mealWindowSavedMealInstanceId) {
+            settings.mealWindowSavedMealInstanceId = v
         }
 
         if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {

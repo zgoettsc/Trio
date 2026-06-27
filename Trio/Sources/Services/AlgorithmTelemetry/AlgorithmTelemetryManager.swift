@@ -85,6 +85,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     @Injected() private var settingsManager: SettingsManager!
     @Injected() private var keychain: Keychain!
     @Injected() private var fileStorage: FileStorage!
+    @Injected() private var savedMealStorage: SavedMealStorage!
 
     private let logger = AlgorithmTelemetryLogger()
     private let client = AlgorithmTelemetryGitHubClient()
@@ -427,6 +428,8 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             ns.mealClassifierPhase1Trough = nil
             ns.mealClassifierPhase2ConfirmedAt = nil
             ns.mealClassifierUpgradedAt = nil
+            ns.mealWindowSavedMealId = nil
+            ns.mealWindowSavedMealInstanceId = nil
             self.settingsManager.settings = ns
         }
         return windowId
@@ -740,6 +743,38 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             maxUAMSMBBasalMinutes: Double(truncating: p.maxUAMSMBBasalMinutes as NSDecimalNumber)
         )
         logSummary(summary)
+
+        // If this window was linked to a SavedMealInstance, close it. We have
+        // the current classification on hand from settings; full outcome
+        // metrics (TIR, peak, etc.) are best computed by the +6h pass below —
+        // for now we record what's known immediately. Phase C will backfill
+        // the full metrics via processReadyOutcomes.
+        if let instIdStr = settingsManager.settings.mealWindowSavedMealInstanceId,
+           let instId = UUID(uuidString: instIdStr)
+        {
+            let finalClassification = settingsManager.settings.mealCurrentClassification
+            savedMealStorage?.closeInstance(
+                instanceId: instId,
+                closedAt: closedAt,
+                finalClassification: finalClassification,
+                bgCurveJSON: nil,            // Phase C: serialize from loop samples
+                smbsJSON: nil,
+                floorActivationsJSON: nil,
+                classifierUpgradesJSON: nil,
+                outcomeScore: 0,             // Phase C: compute properly from metrics
+                metrics: SavedMealInstanceMetrics(
+                    peakBG: 0,
+                    timeInRangeMinutes: 0,
+                    timeAboveRangeMinutes: 0,
+                    timeBelowRangeMinutes: 0,
+                    lowsCount: 0,
+                    timeToBaselineMinutes: 0,
+                    totalInsulinDeliveredU: 0,
+                    smbCount: 0,
+                    floorActivationCount: floorActivationsThisWindow
+                )
+            )
+        }
 
         // Queue this window for the +6h post-prandial outcome pass. The next
         // foreground after closedAt + 6h will compute peak BG / time-above-180 /

@@ -19,6 +19,7 @@ import Swinject
     @Injected() var iobService: IOBService!
     @Injected() var bolusSafetyValidator: BolusSafetyValidator!
     @Injected() var algorithmTelemetryManager: AlgorithmTelemetryManager!
+    @Injected() var savedMealStorage: SavedMealStorage!
 
     let resolver: Resolver
 

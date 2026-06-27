@@ -821,6 +821,8 @@ extension Home.StateModel {
         s.mealClassifierPhase1Trough = nil
         s.mealClassifierPhase2ConfirmedAt = nil
         s.mealClassifierUpgradedAt = nil
+        s.mealWindowSavedMealId = nil
+        s.mealWindowSavedMealInstanceId = nil
         settingsManager.settings = s
         refreshMealWindowState()
 

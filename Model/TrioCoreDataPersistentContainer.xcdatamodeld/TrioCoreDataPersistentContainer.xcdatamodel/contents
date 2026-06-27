@@ -297,4 +297,57 @@
             <fetchIndexElement property="isPreset" type="Binary" order="descending"/>
         </fetchIndex>
     </entity>
+    <entity name="SavedMeal" representedClassName="SavedMeal" syncable="YES">
+        <attribute name="cachedInstanceCount" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="cachedRecommendedClassification" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="defaultCarbs" optional="YES" attributeType="Decimal"/>
+        <attribute name="defaultClassification" optional="YES" attributeType="String"/>
+        <attribute name="defaultExtendedDurationMinutes" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="defaultFat" optional="YES" attributeType="Decimal"/>
+        <attribute name="defaultPhantomCOBEnabled" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="defaultPhantomCOBGrams" optional="YES" attributeType="Decimal"/>
+        <attribute name="defaultProtein" optional="YES" attributeType="Decimal"/>
+        <attribute name="icon" optional="YES" attributeType="String" defaultValueString="🍽️"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="instances" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SavedMealInstance" inverseName="savedMeal" inverseEntity="SavedMealInstance"/>
+        <fetchIndex name="byUpdatedAt">
+            <fetchIndexElement property="updatedAt" type="Binary" order="descending"/>
+        </fetchIndex>
+    </entity>
+    <entity name="SavedMealInstance" representedClassName="SavedMealInstance" syncable="YES">
+        <attribute name="bgCurveJSON" optional="YES" attributeType="String"/>
+        <attribute name="carbBucketSource" optional="YES" attributeType="String"/>
+        <attribute name="carbsAtActivation" optional="YES" attributeType="Decimal"/>
+        <attribute name="classifierUpgradesJSON" optional="YES" attributeType="String"/>
+        <attribute name="closedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="fatAtActivation" optional="YES" attributeType="Decimal"/>
+        <attribute name="finalClassification" optional="YES" attributeType="String"/>
+        <attribute name="floorActivationCount" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="floorActivationsJSON" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="initialClassification" optional="YES" attributeType="String"/>
+        <attribute name="lowsCount" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="outcomeScore" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="peakBG" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="proteinAtActivation" optional="YES" attributeType="Decimal"/>
+        <attribute name="smbCount" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="smbsJSON" optional="YES" attributeType="String"/>
+        <attribute name="startedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="timeAboveRangeMinutes" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="timeBelowRangeMinutes" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="timeInRangeMinutes" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="timeToBaselineMinutes" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="totalInsulinDeliveredU" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="windowId" optional="YES" attributeType="String"/>
+        <relationship name="savedMeal" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="SavedMeal" inverseName="instances" inverseEntity="SavedMeal"/>
+        <fetchIndex name="byStartedAt">
+            <fetchIndexElement property="startedAt" type="Binary" order="descending"/>
+        </fetchIndex>
+        <fetchIndex name="byWindowId">
+            <fetchIndexElement property="windowId" type="Binary" order="ascending"/>
+        </fetchIndex>
+    </entity>
 </model>

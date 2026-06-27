@@ -6,7 +6,16 @@ import Foundation
     /// `TrioCustomOrefVariables` on its next pass and apply more aggressive coverage
     /// (auto-enabled tough-meal SMB cap, insulinReq floor when BG is rising, slowed
     /// COB drain). The window auto-expires; the user does not need to cancel it.
+    /// Convenience overload — no saved meal, classifier auto-discovers.
     func announce(estimatedCarbs: Decimal?) async throws -> String {
+        try await announce(estimatedCarbs: estimatedCarbs, savedMealId: nil)
+    }
+
+    /// Open a meal-announcement window. When `savedMealId` is provided, the
+    /// window seeds with that meal's default classification / phantom-COB /
+    /// extended duration, and a SavedMealInstance row is created and linked
+    /// to the window for outcome tracking.
+    func announce(estimatedCarbs: Decimal?, savedMealId: UUID?) async throws -> String {
         var s = settingsManager.settings
         let now = Date()
         let windowId = UUID().uuidString
@@ -27,7 +36,48 @@ import Foundation
         s.mealClassifierPhase1Trough = nil
         s.mealClassifierPhase2ConfirmedAt = nil
         s.mealClassifierUpgradedAt = nil
+        s.mealWindowSavedMealId = nil
+        s.mealWindowSavedMealInstanceId = nil
+
+        // Apply saved-meal seed BEFORE writing settings so subsequent reads
+        // see the seeded state. If the meal has a defaultClassification, we
+        // seed the live classifier to start at that level (upgrade-only rule
+        // means it can only go up from here).
+        var resolvedMealName: String?
+        if let mealId = savedMealId, let meal = savedMealStorage.meal(id: mealId) {
+            resolvedMealName = meal.name
+            s.mealWindowSavedMealId = mealId.uuidString
+            if let seedRaw = meal.defaultClassification,
+               let seed = MealClassification(rawValue: seedRaw)
+            {
+                s.mealCurrentClassification = seed
+            }
+            // Per-meal phantom COB override — if the saved meal has it on, turn
+            // it on for this window with the meal's configured dose.
+            if meal.defaultPhantomCOBEnabled {
+                s.mealWindowPhantomCOB = true
+                if let g = meal.defaultPhantomCOBGrams {
+                    s.mealWindowPhantomCOBGrams = g as Decimal
+                }
+            }
+            // Per-meal extended duration override.
+            if meal.defaultExtendedDurationMinutes > 0 {
+                s.mealWindowExtendedDurationMinutes = Decimal(meal.defaultExtendedDurationMinutes)
+                // Mark as confirmed so APSManager uses the extended duration
+                // immediately — the user explicitly told us this is a known meal.
+                s.mealWindowCarbsConfirmed = true
+            }
+        }
+
         settingsManager.settings = s
+
+        // If we have a saved meal, create the instance row now and link it.
+        if let mealId = savedMealId, let meal = savedMealStorage.meal(id: mealId) {
+            let instanceId = savedMealStorage.startInstance(meal: meal, windowId: windowId, startedAt: now)
+            var s2 = settingsManager.settings
+            s2.mealWindowSavedMealInstanceId = instanceId.uuidString
+            settingsManager.settings = s2
+        }
 
         // Telemetry: log activation with whatever context we have on-hand. Loop samples
         // (Phase 2 hook in OpenAPS) will fill in signal/velocity data on the next pass.
@@ -39,19 +89,25 @@ import Foundation
             s2.mealClassifierActivationBG = bg
             settingsManager.settings = s2
         }
+        var activationPayload: [String: AlgorithmTelemetryJSONValue] = [
+            "source": .string("shortcut"),
+            "estimatedCarbs": .from(estimatedCarbs),
+            "bg": .from(snapshot.bg),
+            "iob": .from(snapshot.iob),
+            "cob": .from(snapshot.cob),
+            "delta5m": .from(snapshot.delta5m),
+            "durationMinutes": .from(s.mealWindowDurationMinutes)
+        ]
+        if let mealId = savedMealId {
+            activationPayload["savedMealId"] = .string(mealId.uuidString)
+            activationPayload["savedMealName"] = .from(resolvedMealName)
+            activationPayload["seededClassification"] = .string(s.mealCurrentClassification.rawValue)
+        }
         algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
             kind: .mealWindowActivated,
             timestamp: now,
             windowId: windowId,
-            payload: [
-                "source": .string("shortcut"),
-                "estimatedCarbs": .from(estimatedCarbs),
-                "bg": .from(snapshot.bg),
-                "iob": .from(snapshot.iob),
-                "cob": .from(snapshot.cob),
-                "delta5m": .from(snapshot.delta5m),
-                "durationMinutes": .from(s.mealWindowDurationMinutes)
-            ]
+            payload: activationPayload
         ))
 
         // Force a loop pass so coverage starts immediately rather than on the next 5-min tick.
@@ -86,6 +142,8 @@ import Foundation
         s.mealClassifierPhase1Trough = nil
         s.mealClassifierPhase2ConfirmedAt = nil
         s.mealClassifierUpgradedAt = nil
+        s.mealWindowSavedMealId = nil
+        s.mealWindowSavedMealInstanceId = nil
         settingsManager.settings = s
 
         let snapshot = await currentSnapshot()

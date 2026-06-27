@@ -194,6 +194,14 @@ extension AIInsightsConfig {
                             Text("Classification Rules")
                         }
                     }
+
+                    NavigationLink(destination: SavedMealsListView()) {
+                        HStack {
+                            Image(systemName: "bookmark.circle.fill")
+                                .foregroundColor(.purple)
+                            Text("Saved Meals")
+                        }
+                    }
                 }
                 .listRowBackground(Color.chart)
             }
