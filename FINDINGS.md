@@ -12,6 +12,79 @@ findings` at the bottom.
 
 ---
 
+## 2026-06-27 round 8 (FULL VERIFICATION — every PLAN.md item observed in telemetry)
+
+**Sample:** `2026-06-27T11:42:21Z`, windowId in progress, buildSchema 5
+(backfill build `d66910609`).
+
+**Situation:** BG 152, +1.67 mg/dL/5min, COB 0, IOB 1.1, eventualBG 98.
+Classic unbolused rising-BG scenario. Floor fired.
+
+### F-15 — Every PLAN.md tuning value is now visible per loop pass
+
+| Field                             | Value         | Source / meaning                                   |
+|-----------------------------------|---------------|----------------------------------------------------|
+| `effectiveSmbDeliveryRatio`       | 0.8           | Item 1 — boosted from default 0.5                  |
+| `effectiveMaxSMBBasalMinutes`     | 90            | Item 6 — 45 × 2 multiplier                         |
+| `effectiveMaxUAMSMBBasalMinutes`  | 90            | same                                               |
+| `effectiveToughMealCapPercent`    | 85            | user's slider value (from settings.json)           |
+| `floorBehavior`                   | "replacement" | Item 3 OFF → standard max(insReq, floor) behavior  |
+| `forcedUAM`                       | false         | Item 4 — no force needed, profile already has UAM  |
+| `phantomCOBGrams`                 | 0             | Item 5 OFF → no virtual COB injected               |
+| `relaxedRisingGuard`              | true          | Item 2 ON → accepts delta > −2 vs > 0              |
+
+### F-16 — First telemetry-confirmed floor activation with structured data
+
+| Field                  | Value  | Meaning                                       |
+|------------------------|--------|-----------------------------------------------|
+| `floorActivated`       | true   |                                               |
+| `floorPriorInsulinReq` | 0.04   | what oref would have dosed alone              |
+| `floorMagnitude`       | 0.152  | what the floor pushed it to                   |
+| `floorVelocityFactor`  | 0.2    | gentle factor (low rising delta)              |
+
+The floor turned a near-zero recommendation (0.04U) into 0.152U — a **4×
+amplification**, exactly the design intent. Without the floor, oref would
+have read "eventualBG 98 ≈ target 95" and held; with the floor, the loop
+sets a 0.28U/h low temp and queues an SMB.
+
+### F-17 — Codable root cause finally diagnosed and bypassed
+
+After 4 attempts (drop-JSON, optional-fields, hand-rolled init, CodingKeys
+in extension), the data made it unambiguous: `mealWindowAppliedRawDecodes:
+true` while `mealWindowAppliedDecoded: false`. The captured JSON snippet
+decodes standalone — but Determination's synthesized outer decoder silently
+skips the nested fields. Most likely cause: CodingKeys cases declared in an
+extension don't always reach the synthesizer when the type's primary
+declaration didn't include them.
+
+Final fix (`d66910609`): bypass the synthesizer. After
+`Determination(from: orefDetermination)` runs the normal decode,
+`openAPS.determineBasal` manually `JSONDecoder().decode(...)` the captured
+raw snippets for `mealWindowApplied` and `mealWindowFloor` and assigns
+them to the determination's `var` properties. Both fields populate
+correctly from this point forward.
+
+### Status of prior findings
+
+- **F-8, F-14, H-1, F-11:** ✓ all super-superseded; F-15 + F-16 fully
+  validate the structured telemetry now arrives intact.
+- **H-3 (SMB ratio boost shortens time-above-target):** Now MEASURABLE.
+  We can finally compare in-window vs out-of-window post-prandial AUC
+  with effective ratios known per pass.
+- **H-2 (relax rising guard catches more activations):** Now MEASURABLE.
+  `relaxedRisingGuard:true` is logged on every floor-eligible pass; can
+  count "would have suppressed under strict guard" passes.
+- **Round 7/8 telemetry plumbing fixes:** all live (deviceTimeZone,
+  local-date folders, lazy 15-min debounce, eager event push).
+
+### Active hypotheses
+
+- **H-6 (new):** Now that effective values populate, post-window outcome
+  rollups can include average effective SMB ratio for the window. Should
+  let us cluster windows by tuning aggressiveness and compare outcomes.
+
+---
+
 ## 2026-06-27 round 6 (eating-mode working — second floor + rising-meal catch)
 
 **Data window:** `751A0A4F-228D-4E14-9F8A-4CEE26DE1A4F`, opened
