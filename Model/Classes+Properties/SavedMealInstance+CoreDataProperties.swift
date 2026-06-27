@@ -40,8 +40,22 @@ public extension SavedMealInstance {
     @NSManaged var smbCount: Int32
     @NSManaged var floorActivationCount: Int32
 
-    /// "macros" if user entered them, "inferred" if derived from BG response.
+    /// "macros" if user entered them, "inferred" if derived from BG response,
+    /// "manual" if entered at backfill time without a logged carb entry.
     @NSManaged var carbBucketSource: String?
+
+    /// True when this instance was created retroactively from a past carb
+    /// entry or custom time, not from a live meal-window activation.
+    @NSManaged var backfilled: Bool
+
+    /// Context markers — captured at instance close so analytics can filter
+    /// out instances that ran under unusual conditions (Running override,
+    /// low temp target, sensor outage) vs the normal coverage baseline.
+    @NSManaged var windowHadOverride: Bool
+    @NSManaged var overrideMinutesDuringWindow: Int32
+    @NSManaged var overrideSuppressedSMB: Bool
+    @NSManaged var windowHadTempTarget: Bool
+    @NSManaged var sensorGapMinutes: Int32
 
     @NSManaged var savedMeal: SavedMeal?
 }

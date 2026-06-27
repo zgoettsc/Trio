@@ -15,8 +15,22 @@ struct SavedMealDetailView: View {
 
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var showBackfill = false
     @State private var startResult: String?
     @State private var bucketFilter: BucketFilter = .all
+    @State private var conditionFilter: ConditionFilter = .normalOnly
+
+    enum ConditionFilter: String, CaseIterable, Identifiable {
+        case all, normalOnly, overrideAffected
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .all: return "All"
+            case .normalOnly: return "Normal only"
+            case .overrideAffected: return "⚠ Override"
+            }
+        }
+    }
 
     enum BucketFilter: String, CaseIterable, Identifiable {
         case all, small, medium, large
@@ -50,7 +64,25 @@ struct SavedMealDetailView: View {
     }
 
     private var filteredInstances: [SavedMealInstance] {
-        SavedMealAnalytics.stratify(instances: instancesArray, bucket: bucketFilter.bucket)
+        let bucketed = SavedMealAnalytics.stratify(instances: instancesArray, bucket: bucketFilter.bucket)
+        switch conditionFilter {
+        case .all:
+            return bucketed
+        case .normalOnly:
+            let normal = bucketed.filter { !$0.windowHadOverride && !$0.windowHadTempTarget }
+            // Fallback: if filtering would empty the list, show all + an annotation
+            // (rendered in the section header by hasOnlyOverrideAffected).
+            return normal.isEmpty ? bucketed : normal
+        case .overrideAffected:
+            return bucketed.filter { $0.windowHadOverride || $0.windowHadTempTarget }
+        }
+    }
+
+    /// True when every available instance is override-affected — surfaces a
+    /// note in the section header so "Normal only" isn't silently empty.
+    private var hasOnlyOverrideAffected: Bool {
+        guard !instancesArray.isEmpty else { return false }
+        return instancesArray.allSatisfy { $0.windowHadOverride || $0.windowHadTempTarget }
     }
 
     private var hasAnyData: Bool { !filteredInstances.isEmpty }
@@ -93,9 +125,25 @@ struct SavedMealDetailView: View {
 
             if !instancesArray.isEmpty {
                 // Stratification picker
-                Section(header: Text("Filter by carb size")) {
+                Section(
+                    header: Text("Filter"),
+                    footer: Group {
+                        if hasOnlyOverrideAffected && conditionFilter == .normalOnly {
+                            Text("All instances of this meal were override-affected — showing all instead.")
+                                .foregroundStyle(.orange)
+                        } else {
+                            EmptyView()
+                        }
+                    }
+                ) {
                     Picker("Carb bucket", selection: $bucketFilter) {
                         ForEach(BucketFilter.allCases) { f in
+                            Text(f.label).tag(f)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("Condition", selection: $conditionFilter) {
+                        ForEach(ConditionFilter.allCases) { f in
                             Text(f.label).tag(f)
                         }
                     }
@@ -129,6 +177,11 @@ struct SavedMealDetailView: View {
             }
 
             Section {
+                Button {
+                    showBackfill = true
+                } label: {
+                    Label("Backfill from history", systemImage: "clock.arrow.circlepath")
+                }
                 Button("Duplicate") {
                     _ = storage?.duplicateMeal(meal)
                     dismiss()
@@ -149,6 +202,12 @@ struct SavedMealDetailView: View {
         }
         .sheet(isPresented: $showEdit) {
             NavigationView { SavedMealEditView(meal: meal) }
+        }
+        .sheet(isPresented: $showBackfill) {
+            SavedMealBackfillPickerView(savedMeal: meal) { _ in
+                // No further action needed — @FetchRequest will refresh the
+                // history list when the new SavedMealInstance lands.
+            }
         }
         .confirmationDialog(
             "Delete \(meal.name ?? "this meal") and all its history?",
@@ -329,9 +388,17 @@ private struct InstanceRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 6) {
                 if let started = instance.startedAt {
                     Text(started, style: .date).font(.subheadline)
+                }
+                if instance.backfilled {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                if instance.windowHadOverride || instance.windowHadTempTarget {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
                 }
                 Spacer()
                 if let cls = instance.finalClassification {

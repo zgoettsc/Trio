@@ -502,6 +502,8 @@
 		F2B0C3D4002B000000000001 /* SavedMealAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4002A000000000001 /* SavedMealAnalytics.swift */; };
 		F2B0C3D4002D000000000001 /* SavedMealTelemetryRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4002C000000000001 /* SavedMealTelemetryRow.swift */; };
 		F2B0C3D4002F000000000001 /* SavedMealPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4002E000000000001 /* SavedMealPickerView.swift */; };
+		F2B0C3D40031000000000001 /* SavedMealBackfillService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40030000000000001 /* SavedMealBackfillService.swift */; };
+		F2B0C3D40033000000000001 /* SavedMealBackfillPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40032000000000001 /* SavedMealBackfillPickerView.swift */; };
 		BDC2EA452C3043B000E5BBD0 /* OverrideStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC2EA442C3043B000E5BBD0 /* OverrideStorage.swift */; };
 		BDC2EA472C3045AD00E5BBD0 /* Override.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC2EA462C3045AD00E5BBD0 /* Override.swift */; };
 		BDC530FF2D0F6BE300088832 /* ContactImageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC530FE2D0F6BE300088832 /* ContactImageManager.swift */; };
@@ -1449,6 +1451,8 @@
 		F2B0C3D4002A000000000001 /* SavedMealAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealAnalytics.swift; sourceTree = "<group>"; };
 		F2B0C3D4002C000000000001 /* SavedMealTelemetryRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealTelemetryRow.swift; sourceTree = "<group>"; };
 		F2B0C3D4002E000000000001 /* SavedMealPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealPickerView.swift; sourceTree = "<group>"; };
+		F2B0C3D40030000000000001 /* SavedMealBackfillService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealBackfillService.swift; sourceTree = "<group>"; };
+		F2B0C3D40032000000000001 /* SavedMealBackfillPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealBackfillPickerView.swift; sourceTree = "<group>"; };
 		BDC2EA442C3043B000E5BBD0 /* OverrideStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverrideStorage.swift; sourceTree = "<group>"; };
 		BDC2EA462C3045AD00E5BBD0 /* Override.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Override.swift; sourceTree = "<group>"; };
 		BDC530FE2D0F6BE300088832 /* ContactImageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactImageManager.swift; sourceTree = "<group>"; };
@@ -2505,6 +2509,7 @@
 				3811DF0F25CAAAE200A708ED /* APSManager.swift */,
 				F2B0C3D40016000000000001 /* MealClassifier.swift */,
 				F2B0C3D40028000000000001 /* SavedMealOutcomeCalculator.swift */,
+				F2B0C3D40030000000000001 /* SavedMealBackfillService.swift */,
 				38BF021E25E7F0DE00579895 /* DeviceDataManager.swift */,
 				38DAB289260D349500F74C1A /* FetchGlucoseManager.swift */,
 				38192E06261BA9960094D973 /* FetchTreatmentsManager.swift */,
@@ -3296,6 +3301,7 @@
 				F2B0C3D40026000000000001 /* SavedMealDetailView.swift */,
 				F2B0C3D4002A000000000001 /* SavedMealAnalytics.swift */,
 				F2B0C3D4002E000000000001 /* SavedMealPickerView.swift */,
+				F2B0C3D40032000000000001 /* SavedMealBackfillPickerView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -4760,6 +4766,8 @@
 				F2B0C3D4002B000000000001 /* SavedMealAnalytics.swift in Sources */,
 				F2B0C3D4002D000000000001 /* SavedMealTelemetryRow.swift in Sources */,
 				F2B0C3D4002F000000000001 /* SavedMealPickerView.swift in Sources */,
+				F2B0C3D40031000000000001 /* SavedMealBackfillService.swift in Sources */,
+				F2B0C3D40033000000000001 /* SavedMealBackfillPickerView.swift in Sources */,
 				A1B1C1D1E1F101010101A1B5 /* ClaudeAPIService.swift in Sources */,
 				A1B1C1D1E1F101010101A1B6 /* HealthDataExporter.swift in Sources */,
 				A1B1C1D1E1F101010101A1B8 /* MarkdownParser.swift in Sources */,

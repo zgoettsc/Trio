@@ -342,6 +342,12 @@
         <attribute name="timeToBaselineMinutes" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="totalInsulinDeliveredU" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="windowId" optional="YES" attributeType="String"/>
+        <attribute name="backfilled" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="windowHadOverride" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="overrideMinutesDuringWindow" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="overrideSuppressedSMB" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="windowHadTempTarget" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="sensorGapMinutes" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
         <relationship name="savedMeal" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="SavedMeal" inverseName="instances" inverseEntity="SavedMeal"/>
         <fetchIndex name="byStartedAt">
             <fetchIndexElement property="startedAt" type="Binary" order="descending"/>
