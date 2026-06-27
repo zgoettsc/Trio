@@ -13,6 +13,9 @@ protocol SavedMealStorage {
     func allMeals() -> [SavedMeal]
     func meal(id: UUID) -> SavedMeal?
     func instance(forWindowId windowId: String) -> SavedMealInstance?
+    /// Permanently delete one instance row. Refreshes the parent meal's
+    /// cachedInstanceCount and pushes a fresh definitions snapshot.
+    func deleteInstance(id: UUID)
     @discardableResult
     func createMeal(name: String, icon: String) -> SavedMeal
     func updateMeal(_ meal: SavedMeal, applying changes: (SavedMeal) -> Void)
@@ -114,6 +117,27 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             found = (try? viewContext.fetch(req))?.first
         }
         return found
+    }
+
+    func deleteInstance(id: UUID) {
+        context.performAndWait {
+            let req = SavedMealInstance.fetchRequest()
+            req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            req.fetchLimit = 1
+            guard let inst = (try? context.fetch(req))?.first else { return }
+            let parent = inst.savedMeal
+            context.delete(inst)
+            // Refresh parent's cached count.
+            if let parent {
+                let remaining = (parent.instances?.allObjects as? [SavedMealInstance]) ?? []
+                parent.cachedInstanceCount = Int32(
+                    remaining.filter { $0 != inst && $0.closedAt != nil }.count
+                )
+                parent.updatedAt = Date()
+            }
+            try? context.save()
+        }
+        notifyDefinitionsChanged()
     }
 
     // MARK: - Meal CRUD

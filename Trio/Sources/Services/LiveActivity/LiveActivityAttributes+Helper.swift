@@ -123,6 +123,8 @@ extension LiveActivityAttributes.ContentState {
             mealWindowExpiresAt: mealWindow?.expiresAt ?? Date(),
             mealWindowEstimatedCarbs: mealWindow?.estimatedCarbs ?? 0,
             mealWindowCarbsConfirmed: mealWindow?.carbsConfirmed ?? false,
+            mealWindowSavedMealName: mealWindow?.savedMealName ?? "",
+            mealWindowClassification: mealWindow?.classification ?? "simple",
             widgetItems: widgetItems ?? [] // set empty array here to silence compiler; this can never be nil
         )
 

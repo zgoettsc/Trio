@@ -94,7 +94,9 @@ struct LiveActivityView: View {
                                 expiresAt: context.state.detailedViewState.mealWindowExpiresAt,
                                 estimatedCarbs: context.state.detailedViewState.mealWindowEstimatedCarbs,
                                 carbsConfirmed: context.state.detailedViewState.mealWindowCarbsConfirmed,
-                                colorScheme: colorScheme
+                                colorScheme: colorScheme,
+                                savedMealName: context.state.detailedViewState.mealWindowSavedMealName,
+                                classification: context.state.detailedViewState.mealWindowClassification
                             )
                         }
                     }
@@ -261,9 +263,21 @@ struct MealWindowPill: View {
     let estimatedCarbs: Decimal
     let carbsConfirmed: Bool
     let colorScheme: ColorScheme
+    let savedMealName: String
+    let classification: String
 
+    /// Pill color signals classification — orange (default), red for Complex.
+    /// Green/yellow could indicate Simple/Medium too but we want low visual
+    /// noise on the lock screen; reserve red only for "this needs aggression."
     private var pillColor: Color {
-        Color.orange.opacity(colorScheme == .dark ? 0.65 : 0.85)
+        switch classification.lowercased() {
+        case "complex":
+            return Color.red.opacity(colorScheme == .dark ? 0.65 : 0.85)
+        case "medium":
+            return Color.orange.opacity(colorScheme == .dark ? 0.65 : 0.85)
+        default:
+            return Color.orange.opacity(colorScheme == .dark ? 0.55 : 0.75)
+        }
     }
 
     var body: some View {
@@ -271,6 +285,15 @@ struct MealWindowPill: View {
             Image(systemName: "fork.knife")
                 .font(.caption2)
                 .foregroundStyle(.white)
+            // Saved-meal name (e.g. "Indian") when one was picked, short
+            // enough to keep the pill readable on the lock screen.
+            if !savedMealName.isEmpty {
+                Text(savedMealName)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
             // Live countdown: Text(timerInterval:) re-renders on its own so the LA
             // doesn't need to be re-pushed every minute just to keep this fresh.
             Text(timerInterval: Date()...expiresAt, countsDown: true)

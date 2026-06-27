@@ -434,6 +434,63 @@ struct SavedMealBackfillService {
 
     // MARK: - CoreData lookups
 
+    /// Scans the local telemetry events.jsonl files for `mealWindowActivated`
+    /// rows from the last `hours` that don't already have a SavedMealInstance
+    /// attached. Lets the backfill picker offer "past Action Button taps that
+    /// you never logged carbs for" as a 3rd attachment source.
+    func fetchAttachableActivations(within hours: Int) -> [(windowId: String, at: Date)] {
+        let cutoff = Date().addingTimeInterval(-Double(hours) * 3600)
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let root = docs.appendingPathComponent("telemetry", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+
+        var results: [(String, Date)] = []
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        // Walk recent date folders. Local-date partitioning means at most 2-3
+        // folders need to be touched for a 48h lookback.
+        let monthDirs = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        for monthDir in monthDirs where monthDir != "meals" {
+            let monthURL = root.appendingPathComponent(monthDir)
+            let dayDirs = (try? FileManager.default.contentsOfDirectory(atPath: monthURL.path)) ?? []
+            for dayDir in dayDirs {
+                let eventsURL = monthURL.appendingPathComponent(dayDir).appendingPathComponent("events.jsonl")
+                guard let data = try? String(contentsOf: eventsURL, encoding: .utf8) else { continue }
+                for line in data.split(separator: "\n") {
+                    guard let lineData = line.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                          (obj["kind"] as? String) == "mealWindowActivated",
+                          let windowId = obj["windowId"] as? String,
+                          let tsString = obj["timestamp"] as? String,
+                          let ts = formatter.date(from: tsString),
+                          ts >= cutoff
+                    else { continue }
+                    results.append((windowId, ts))
+                }
+            }
+        }
+
+        // Filter out any windowIds already attached to a SavedMealInstance.
+        let existingWindowIds = fetchExistingWindowIds()
+        let unattached = results.filter { !existingWindowIds.contains($0.0) }
+        // Sort newest first, dedupe by windowId.
+        var seen = Set<String>()
+        return unattached
+            .sorted { $0.1 > $1.1 }
+            .filter { seen.insert($0.0).inserted }
+    }
+
+    private func fetchExistingWindowIds() -> Set<String> {
+        var ids = Set<String>()
+        viewContext.performAndWait {
+            let req = SavedMealInstance.fetchRequest()
+            let all = (try? viewContext.fetch(req)) ?? []
+            ids = Set(all.compactMap { $0.windowId })
+        }
+        return ids
+    }
+
     func fetchAttachableCarbEntries(within hours: Int) -> [CarbEntryStored] {
         let cutoff = Date().addingTimeInterval(-Double(hours) * 3600)
         var results: [CarbEntryStored] = []

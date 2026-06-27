@@ -21,13 +21,14 @@ struct SavedMealDetailView: View {
     @State private var conditionFilter: ConditionFilter = .normalOnly
 
     enum ConditionFilter: String, CaseIterable, Identifiable {
-        case all, normalOnly, overrideAffected
+        case all, normalOnly, overrideAffected, liveOnly
         var id: String { rawValue }
         var label: String {
             switch self {
             case .all: return "All"
-            case .normalOnly: return "Normal only"
+            case .normalOnly: return "Normal"
             case .overrideAffected: return "⚠ Override"
+            case .liveOnly: return "Live only"
             }
         }
     }
@@ -75,6 +76,12 @@ struct SavedMealDetailView: View {
             return normal.isEmpty ? bucketed : normal
         case .overrideAffected:
             return bucketed.filter { $0.windowHadOverride || $0.windowHadTempTarget }
+        case .liveOnly:
+            // Live-tracked instances only — excludes backfilled rows from
+            // the composite curve + all medians. Useful when the user wants
+            // a "pure" view of how the meal has performed under live tracking.
+            let live = bucketed.filter { !$0.backfilled }
+            return live.isEmpty ? bucketed : live
         }
     }
 
@@ -170,9 +177,19 @@ struct SavedMealDetailView: View {
                     analyticsSection
                 }
 
-                Section(header: Text("History (\(filteredInstances.count))")) {
+                Section(
+                    header: Text("History (\(filteredInstances.count))"),
+                    footer: Text("Swipe a row to delete a single instance.")
+                ) {
                     ForEach(filteredInstances, id: \.objectID) { instance in
                         InstanceRow(instance: instance)
+                    }
+                    .onDelete { offsets in
+                        for index in offsets {
+                            if let id = filteredInstances[index].id {
+                                storage?.deleteInstance(id: id)
+                            }
+                        }
                     }
                 }
                 .listRowBackground(Color.chart)

@@ -340,6 +340,8 @@ final class LiveActivityData: ObservableObject {
                                 mealWindowExpiresAt: Date.now,
                                 mealWindowEstimatedCarbs: 0,
                                 mealWindowCarbsConfirmed: false,
+                                mealWindowSavedMealName: "",
+                                mealWindowClassification: "simple",
                                 widgetItems: []
                             ),
                             isInitialState: true
@@ -433,11 +435,26 @@ final class LiveActivityData: ObservableObject {
         let expiresAt = activatedAt.addingTimeInterval(
             TimeInterval(truncating: cappedDuration as NSDecimalNumber) * 60
         )
+        // Look up the saved-meal name for the linked instance (if any) so the
+        // Live Activity can display "Indian • Complex • 3h left" instead of
+        // a generic "Eating mode" badge.
+        var savedMealName: String?
+        if let mealId = s.mealWindowSavedMealId, let uuid = UUID(uuidString: mealId) {
+            let ctx = CoreDataStack.shared.persistentContainer.viewContext
+            ctx.performAndWait {
+                let req = SavedMeal.fetchRequest()
+                req.predicate = NSPredicate(format: "id == %@", uuid as CVarArg)
+                req.fetchLimit = 1
+                savedMealName = (try? ctx.fetch(req))?.first?.name
+            }
+        }
         return MealWindowData(
             isActive: expiresAt > Date(),
             expiresAt: expiresAt,
             estimatedCarbs: s.mealWindowEstimatedCarbs,
-            carbsConfirmed: s.mealWindowCarbsConfirmed
+            carbsConfirmed: s.mealWindowCarbsConfirmed,
+            savedMealName: savedMealName,
+            classification: s.mealCurrentClassification.rawValue
         )
     }
 

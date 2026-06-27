@@ -113,14 +113,42 @@ import Foundation
         // Force a loop pass so coverage starts immediately rather than on the next 5-min tick.
         try await apsManager.determineBasalSync()
 
+        // Check whether an active override is suppressing SMB delivery — meal
+        // window aggression can't fire if microBolusAllowed is false. Surface
+        // a one-line warning so the user knows what they're getting.
+        let overrideWarning = detectActiveSMBSuppression()
+
         let durationMin = Int(truncating: settingsManager.settings.mealWindowDurationMinutes as NSDecimalNumber)
+        let base: String
         if let c = estimatedCarbs, c > 0 {
-            return String(
-                localized: "Eating mode on for \(durationMin) min (~\(c.description) g hint)."
-            )
+            base = String(localized: "Eating mode on for \(durationMin) min (~\(c.description) g hint).")
         } else {
-            return String(localized: "Eating mode on for \(durationMin) min.")
+            base = String(localized: "Eating mode on for \(durationMin) min.")
         }
+        if let warning = overrideWarning {
+            return base + " " + warning
+        }
+        return base
+    }
+
+    /// Returns a user-facing warning string when an active override is
+    /// suppressing SMBs (its smbIsOff flag is true). Nil when no override is
+    /// active or none suppress SMB. See Round-9 case study — Running override
+    /// silently disabled SMBs during a meal window and no aggression fired.
+    private func detectActiveSMBSuppression() -> String? {
+        var warning: String?
+        viewContext.performAndWait {
+            let req = OverrideStored.fetchRequest()
+            req.predicate = NSPredicate(format: "enabled == YES AND smbIsOff == YES")
+            req.fetchLimit = 1
+            if let active = (try? viewContext.fetch(req))?.first {
+                let name = active.name ?? "Active override"
+                warning = String(
+                    localized: "⚠ \(name) is suppressing SMBs — eating mode boost won't fire."
+                )
+            }
+        }
+        return warning
     }
 
     /// Cancel an active meal window immediately. Safe to call when no window is active.

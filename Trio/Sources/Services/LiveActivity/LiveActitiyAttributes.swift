@@ -52,6 +52,12 @@ struct LiveActivityAttributes: ActivityAttributes {
         let mealWindowExpiresAt: Date
         let mealWindowEstimatedCarbs: Decimal
         let mealWindowCarbsConfirmed: Bool
+        /// Saved meal name (e.g. "Indian") when the window was started from
+        /// the picker. Empty string for plain Quick Action activations.
+        let mealWindowSavedMealName: String
+        /// Live classifier state — "simple" / "medium" / "complex". Drives
+        /// the colored badge on the LA pill so user sees upgrades happen.
+        let mealWindowClassification: String
         let widgetItems: [LiveActivityItem]
     }
 

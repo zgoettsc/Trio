@@ -15,6 +15,7 @@ struct SavedMealBackfillPickerView: View {
 
     @State private var lookbackHours: Int = 48
     @State private var carbEntries: [CarbEntryStored] = []
+    @State private var activations: [(windowId: String, at: Date)] = []
     @State private var pickedAnchor: SavedMealBackfillService.AnchorType?
     @State private var preview: SavedMealBackfillService.Preview?
     @State private var showPreviewSheet = false
@@ -44,6 +45,7 @@ struct SavedMealBackfillPickerView: View {
                 lookbackSection
                 customTimeSection
                 carbEntriesSection
+                activationsSection
             }
             .scrollContentBackground(.hidden)
             .background(appState.trioBackgroundColor(for: colorScheme))
@@ -113,6 +115,42 @@ struct SavedMealBackfillPickerView: View {
                         }
                     } label: {
                         entryRow(entry)
+                    }
+                }
+            }
+        }
+        .listRowBackground(Color.chart)
+    }
+
+    private var activationsSection: some View {
+        Section(
+            header: Text("From a past Action Button tap"),
+            footer: Text(activations.isEmpty
+                ? "No unattached eating-mode activations in this window."
+                : "Quick Action activations that didn't get logged with a saved meal.")
+        ) {
+            if activations.isEmpty {
+                Text("No unattached activations").foregroundStyle(.secondary)
+            } else {
+                ForEach(activations, id: \.windowId) { act in
+                    Button {
+                        let anchor = SavedMealBackfillService.AnchorType.mealWindowActivation(
+                            windowId: act.windowId, at: act.at
+                        )
+                        pickedAnchor = anchor
+                        preview = backfillService?.preview(anchor: anchor)
+                        showPreviewSheet = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "fork.knife.circle")
+                                .foregroundStyle(.tint)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(act.at, style: .date).font(.caption2).foregroundStyle(.secondary)
+                                Text(act.at, style: .time).font(.subheadline)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
                     }
                 }
             }
@@ -340,6 +378,7 @@ struct SavedMealBackfillPickerView: View {
 
     private func loadEntries() {
         carbEntries = backfillService?.fetchAttachableCarbEntries(within: lookbackHours) ?? []
+        activations = backfillService?.fetchAttachableActivations(within: lookbackHours) ?? []
     }
 
     private func attach() {

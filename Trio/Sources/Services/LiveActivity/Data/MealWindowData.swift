@@ -13,4 +13,9 @@ struct MealWindowData {
     /// True once a real carb entry was recorded during the window — the window's expiry
     /// is recomputed against the extended duration in that case.
     let carbsConfirmed: Bool
+    /// Optional saved-meal name (e.g. "Indian"). Nil for plain Quick Action activations.
+    let savedMealName: String?
+    /// Current live classifier classification — "simple", "medium", or "complex".
+    /// Updates when the classifier upgrades during the window.
+    let classification: String
 }
