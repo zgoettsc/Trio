@@ -831,6 +831,26 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
         , 'threshold': convert_bg(threshold, profile)
     };
 
+    // Meal-window telemetry baseline: emit effective tuning values on EVERY pass
+    // while the window is active, regardless of whether SMB ends up firing.
+    // The late-stage assignment near the SMB block will overwrite this row with
+    // the actual floor state and any post-boost smb_ratio when it runs.
+    if (mealWindowActive && mealWindowMinutesRemaining > 0) {
+        var baselineSmbRatio = mwBoostSMBRatio
+            ? Math.max(profile.smb_delivery_ratio || 0.5, Math.min(mwSMBRatioValue, 1))
+            : (profile.smb_delivery_ratio || 0.5);
+        rT.mealWindowApplied = {
+            smbDeliveryRatio: baselineSmbRatio,
+            maxSMBBasalMinutes: Math.round((profile.maxSMBBasalMinutes || 30) * mwSMBMinutesMultiplier),
+            maxUAMSMBBasalMinutes: Math.round((profile.maxUAMSMBBasalMinutes || 30) * mwSMBMinutesMultiplier),
+            toughMealCapPercent: mwToughMealCapPercent,
+            floorBehavior: "off",
+            forcedUAM: mwForceUAM && !profile.enableUAM,
+            phantomCOBGrams: mwPhantomApplied,
+            relaxedRisingGuard: mwRelaxRisingGuard
+        };
+    }
+
 // Generate predicted future BGs based on IOB, COB, and current absorption rate
 
 // Initialize and calculate variables used for predicting BGs
