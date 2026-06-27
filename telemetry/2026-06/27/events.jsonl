@@ -22,3 +22,6 @@
 {"kind":"mealWindowActivated","payload":{"bg":113,"cob":37,"delta5m":-7,"durationMinutes":90,"estimatedCarbs":null,"iob":3.793,"source":"shortcut"},"timestamp":"2026-06-27T02:13:50.933Z","windowId":"678778CE-5D37-4C5E-9F88-A048BF120F0F"}
 {"kind":"mealWindowActivated","payload":{"bg":116,"cob":35,"delta5m":3,"durationMinutes":90,"estimatedCarbs":null,"iob":3.5739999999999994,"source":"shortcut"},"timestamp":"2026-06-27T02:19:20.290Z","windowId":"BAE8DA63-F4BD-4A4A-BD2F-C57EFB5FFE2B"}
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowToughMealCapPercent","newValue":"85","oldValue":"80"},"timestamp":"2026-06-27T02:24:01.068Z","windowId":"BAE8DA63-F4BD-4A4A-BD2F-C57EFB5FFE2B"}
+{"kind":"mealWindowActivated","payload":{"bg":87,"cob":44,"delta5m":-5,"durationMinutes":90,"estimatedCarbs":null,"iob":2.011,"source":"shortcut"},"timestamp":"2026-06-27T02:55:57.874Z","windowId":"B986E92A-97F4-4875-8F01-B931995F1637"}
+{"kind":"mealWindowCancelled","payload":{"minutesSinceActivation":0.0850290834903717,"source":"homeBanner"},"timestamp":"2026-06-27T02:56:02.976Z","windowId":"B986E92A-97F4-4875-8F01-B931995F1637"}
+{"kind":"smbDelivered","payload":{"bg":91,"floorActivated":false,"insulinReq":0.4,"iob":1.8039999999999998,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-06-27T02:56:04.506Z"}
