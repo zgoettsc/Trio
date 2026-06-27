@@ -95,8 +95,13 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     private var floorActivationsThisWindow: Int = 0
     private var lastWindowIdForFloorTracking: String?
 
-    /// Pushes are debounced: if multiple triggers fire within a short window, only one push runs.
-    private let pushDebounceInterval: TimeInterval = 30
+    /// Pushes are debounced. Two windows so background-only triggers (loop ticks)
+    /// don't drain battery while user-meaningful events still upload promptly.
+    /// - eager (30s): events, settings changes, summaries — user-initiated activity.
+    /// - lazy (15 min): per-loop samples in the background.
+    /// A push is allowed when `now - lastPushDate >= minIntervalForThisTrigger`.
+    private let pushDebounceEager: TimeInterval = 30
+    private let pushDebounceLazy: TimeInterval = 900
     private var lastPushTriggerDate: Date = .distantPast
     private var pushTask: Task<Void, Never>?
     private let pushQueue = DispatchQueue(label: "AlgorithmTelemetryManager.push.serial")
@@ -156,11 +161,10 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
     func logLoopSample(_ sample: AlgorithmTelemetryLoopSample) {
         guard settingsManager.settings.telemetryEnabled else { return }
         logger.appendLoopSample(sample)
-        // Push after each loop sample so backgrounded apps still ship data.
-        // pushNow() debounces internally (30s window), so a 5-minute loop cadence
-        // means at most one upload per pass — but it also means data lands within
-        // a minute of being written instead of waiting for the next foreground.
-        Task { await self.pushNow() }
+        // Lazy push — coalesces ~3 consecutive loop samples (15 min) into one
+        // upload to save battery / background-network budget. Events still push
+        // eagerly so floor activations / quick-actions don't get delayed.
+        Task { await self.pushNow(priority: .lazy) }
     }
 
     func logSummary(_ summary: AlgorithmTelemetryWindowSummary) {
@@ -175,12 +179,25 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         Task { await self.pushNow() }
     }
 
+    /// Trigger a push. `priority: .eager` (default) bypasses the lazy debounce —
+    /// use for user-meaningful events (quick-action, settings change, summary).
+    /// `priority: .lazy` for high-frequency background triggers (per-loop samples).
+    enum PushPriority { case eager, lazy }
+
+    /// Protocol-satisfying zero-arg entrypoint. UI "Push Now" button and app
+    /// foreground both use this — both should bypass the lazy debounce, so
+    /// .eager is the right default.
     func pushNow() async {
-        // Debounce: if a push triggered within the last `pushDebounceInterval` seconds,
-        // skip this one. The last-running task will sweep up whatever's queued.
+        await pushNow(priority: .eager)
+    }
+
+    func pushNow(priority: PushPriority) async {
+        // Debounce: skip if the last push trigger was within the appropriate window.
+        // The last-running task sweeps up whatever's queued.
         let now = Date()
+        let minInterval: TimeInterval = (priority == .lazy) ? pushDebounceLazy : pushDebounceEager
         let shouldRun: Bool = pushQueue.sync {
-            if now.timeIntervalSince(self.lastPushTriggerDate) < self.pushDebounceInterval {
+            if now.timeIntervalSince(self.lastPushTriggerDate) < minInterval {
                 return false
             }
             self.lastPushTriggerDate = now
@@ -454,7 +471,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             )
             let cutoff = now.addingTimeInterval(-Double(daysToKeep) * 86_400)
             var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+            calendar.timeZone = .current  // folder partitioning is local-time; cutoff math must match
 
             var pathsToDelete: [String] = []
             for path in allPaths {
@@ -469,7 +486,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                       let day = Int(path[dayRange]) else { continue }
                 var dc = DateComponents()
                 dc.year = year; dc.month = month; dc.day = day
-                dc.timeZone = TimeZone(identifier: "UTC")
+                dc.timeZone = .current
                 guard let fileDate = calendar.date(from: dc), fileDate < cutoff else { continue }
                 // Preserve summary.jsonl rows forever (small + tuning-relevant).
                 if path.hasSuffix("/summary.jsonl") { continue }
@@ -603,7 +620,8 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             mealWindowPhantomCOB: s.mealWindowPhantomCOB,
             mealWindowPhantomCOBGrams: Double(truncating: s.mealWindowPhantomCOBGrams as NSDecimalNumber),
             mealWindowSMBMinutesMultiplier: Double(truncating: s.mealWindowSMBMinutesMultiplier as NSDecimalNumber),
-            mealWindowToughMealCapPercent: Double(truncating: s.mealWindowToughMealCapPercent as NSDecimalNumber)
+            mealWindowToughMealCapPercent: Double(truncating: s.mealWindowToughMealCapPercent as NSDecimalNumber),
+            deviceTimeZone: TimeZone.current.identifier
         )
         logger.writeSettingsSnapshot(snapshot)
         detectAndEmitTuningTransitions()

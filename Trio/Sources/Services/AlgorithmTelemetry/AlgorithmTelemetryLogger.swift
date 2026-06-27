@@ -17,9 +17,12 @@ final class AlgorithmTelemetryLogger {
 
     private let queue = DispatchQueue(label: "AlgorithmTelemetryLogger.queue", qos: .utility)
     private let fileManager = FileManager.default
+    /// Folder partitioning uses LOCAL date so each calendar day maps to one folder
+    /// from the user's perspective (matches the wall clock + pump). Row-level
+    /// timestamps remain UTC ISO-8601 for unambiguous sorting/analysis.
     private let calendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
-        c.timeZone = TimeZone(identifier: "UTC") ?? .current
+        c.timeZone = .current
         return c
     }()
 
@@ -165,7 +168,7 @@ final class AlgorithmTelemetryLogger {
         dc.year = year
         dc.month = mo
         dc.day = d
-        dc.timeZone = TimeZone(identifier: "UTC")
+        dc.timeZone = .current
         return calendar.date(from: dc)
     }
 }

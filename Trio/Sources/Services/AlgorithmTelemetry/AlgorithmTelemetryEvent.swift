@@ -223,6 +223,11 @@ struct AlgorithmTelemetrySettingsSnapshot: Codable {
     let mealWindowPhantomCOBGrams: Double
     let mealWindowSMBMinutesMultiplier: Double
     let mealWindowToughMealCapPercent: Double
+
+    /// IANA time zone identifier of the device that produced this snapshot
+    /// (e.g. "America/Chicago"). Row timestamps are UTC ISO-8601; this field
+    /// lets analysis pipelines map UTC → local correctly across DST shifts.
+    let deviceTimeZone: String?
 }
 
 struct ScheduledRate: Codable {
