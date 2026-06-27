@@ -85,6 +85,13 @@ final class BaseAPSManager: APSManager, Injectable {
     @Injected() private var profileManager: ProfileManager!
     @Injected() private var signalPipeline: OrefSignalPipeline!
     @Injected() private var algorithmTelemetryManager: AlgorithmTelemetryManager!
+    private lazy var mealClassifier: MealClassifier = {
+        MealClassifier(
+            settingsManager: settingsManager,
+            telemetry: algorithmTelemetryManager,
+            viewContext: CoreDataStack.shared.persistentContainer.viewContext
+        )
+    }()
     @Persisted(key: "lastLoopStartDate") private var lastLoopStartDate: Date = .distantPast
     @Persisted(key: "lastLoopDate") var lastLoopDate: Date = .distantPast {
         didSet {
@@ -672,7 +679,13 @@ final class BaseAPSManager: APSManager, Injectable {
                 openAPS.lastRawMealWindowAppliedSnippet,
                 as: MealWindowAppliedData.self
             ).1 : nil,
-            buildSchema: 5,
+            buildSchema: 6,
+            classification: mealWindowActive ? s.mealCurrentClassification.rawValue : nil,
+            classifierPhase1Confirmed: mealWindowActive ? (s.mealClassifierPhase1ConfirmedAt != nil) : nil,
+            classifierPhase2Confirmed: mealWindowActive ? (s.mealClassifierPhase2ConfirmedAt != nil) : nil,
+            classifierUpgradedAtMinutes: (s.mealClassifierUpgradedAt.flatMap { up in
+                s.mealWindowActivationDate.map { up.timeIntervalSince($0) / 60 }
+            }),
             target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
             // ↑ Trio's Determination uses `current_target` (snake_case from oref JS)
             isf: determination?.isf.map { Double(truncating: $0 as NSNumber) },
@@ -690,6 +703,12 @@ final class BaseAPSManager: APSManager, Injectable {
             reason: reason
         )
         algorithmTelemetryManager?.logLoopSample(sample)
+
+        // Run the live meal classifier — may upgrade the window to Complex and
+        // trigger window-extension + phantom-COB on the next pass.
+        if mealWindowActive {
+            mealClassifier.evaluate()
+        }
 
         // Floor activation gets its own event so we can find them quickly without
         // scanning every loop row.

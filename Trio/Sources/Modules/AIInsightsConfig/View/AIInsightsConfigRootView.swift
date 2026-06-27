@@ -186,6 +186,14 @@ extension AIInsightsConfig {
                             Text("Eating Mode Tuning")
                         }
                     }
+
+                    NavigationLink(destination: MealClassifierRulesView()) {
+                        HStack {
+                            Image(systemName: "fork.knife.circle")
+                                .foregroundColor(.pink)
+                            Text("Classification Rules")
+                        }
+                    }
                 }
                 .listRowBackground(Color.chart)
             }

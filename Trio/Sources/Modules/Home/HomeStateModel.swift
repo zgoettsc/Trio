@@ -814,6 +814,13 @@ extension Home.StateModel {
         s.mealWindowEstimatedCarbs = 0
         s.mealWindowCarbsConfirmed = false
         s.mealWindowId = nil
+        // Wipe live-classifier state with the window.
+        s.mealCurrentClassification = .simple
+        s.mealClassifierActivationBG = nil
+        s.mealClassifierPhase1ConfirmedAt = nil
+        s.mealClassifierPhase1Trough = nil
+        s.mealClassifierPhase2ConfirmedAt = nil
+        s.mealClassifierUpgradedAt = nil
         settingsManager.settings = s
         refreshMealWindowState()
 

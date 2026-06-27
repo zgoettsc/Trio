@@ -24,6 +24,8 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case tempTargetStarted
     case tempTargetCancelled
     case mealWindowTuningChanged // any of the 9 PLAN.md tuning settings flipped
+    case mealWindowClassifierUpgraded // 3-phase classifier upgraded current window (e.g. medium → complex)
+    case mealWindowClassifierPhase // phase confirmation (phase1, phase2 — informational, not a classification change)
 }
 
 struct AlgorithmTelemetryEvent: Codable {
@@ -105,6 +107,16 @@ struct AlgorithmTelemetryLoopSample: Codable {
     let mealWindowAppliedDecodeError: String?
     /// Diagnostic — schema marker so we can prove which build produced this row.
     let buildSchema: Int?
+
+    /// Live classifier state at this loop pass — string form of MealClassification.
+    /// Nil when window inactive or classifier disabled. Set even when no upgrade
+    /// has occurred (carries the current value of mealCurrentClassification).
+    let classification: String?
+    /// Phase confirmations so far this window — useful for retrospective rule tuning.
+    let classifierPhase1Confirmed: Bool?
+    let classifierPhase2Confirmed: Bool?
+    /// Minutes since window activation when the classifier last upgraded (if ever).
+    let classifierUpgradedAtMinutes: Double?
 
     // Context — effective values (already include override math). Pair with
     // the override/temp-target fields below to distinguish "loop math used X

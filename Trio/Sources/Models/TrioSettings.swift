@@ -101,6 +101,33 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var mealWindowSMBMinutesMultiplier: Decimal = 2.0      // item 6: multiply maxSMBBasalMinutes
     var mealWindowToughMealCapPercent: Decimal = 75        // configurable tough-meal cap (50-100)
 
+    // Meal classifier (Phase A of MEAL_INTELLIGENCE_DESIGN.md) — three-phase rule
+    // upgrades the window classification mid-flight when a late-fat-onset pattern
+    // is detected. Upgrade-only, never downgrades. All knobs exposed in the new
+    // Settings → Meals → Classification Rules screen.
+    var mealClassifierEnabled: Bool = true
+    var mealCurrentClassification: MealClassification = .simple
+    var mealClassifierUpgradedAt: Date? = nil
+    /// Activation BG captured at window open, used as the Phase 2 baseline reference
+    /// alongside the post-Phase-1 trough.
+    var mealClassifierActivationBG: Double? = nil
+    var mealClassifierPhase1ConfirmedAt: Date? = nil
+    var mealClassifierPhase1Trough: Double? = nil
+    var mealClassifierPhase2ConfirmedAt: Date? = nil
+    /// Maximum total window duration the classifier is allowed to extend to,
+    /// from activation (not from upgrade trigger). Per design Q1 recommendation:
+    /// on Complex upgrade we push to this max for full overnight coverage.
+    var mealClassifierMaxTotalDurationMinutes: Decimal = 600
+    var mealClassifierPhase1DeltaThreshold: Decimal = 2          // mg/dL/5min
+    var mealClassifierPhase1SustainedReadings: Decimal = 3       // count
+    var mealClassifierPhase1AbsoluteRiseMgdL: Decimal = 15
+    var mealClassifierPhase2RangeMgdL: Decimal = 20              // ±N from baseline
+    var mealClassifierPhase2MinDurationMinutes: Decimal = 30
+    var mealClassifierPhase3DeltaThreshold: Decimal = 2
+    var mealClassifierPhase3SustainedDurationMinutes: Decimal = 15
+    var mealClassifierPhase3CarbExclusionMinutes: Decimal = 30
+    var mealClassifierPhantomCOBGramsOnUpgrade: Decimal = 20
+
     // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
     // on the trio repo for tuning analysis. PAT is in Keychain, not here.
     var telemetryEnabled: Bool = false
@@ -333,6 +360,57 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Decimal.self, forKey: .mealWindowToughMealCapPercent) {
             settings.mealWindowToughMealCapPercent = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .mealClassifierEnabled) {
+            settings.mealClassifierEnabled = v
+        }
+        if let v = try? container.decode(MealClassification.self, forKey: .mealCurrentClassification) {
+            settings.mealCurrentClassification = v
+        }
+        if let v = try? container.decode(Date.self, forKey: .mealClassifierUpgradedAt) {
+            settings.mealClassifierUpgradedAt = v
+        }
+        if let v = try? container.decode(Double.self, forKey: .mealClassifierActivationBG) {
+            settings.mealClassifierActivationBG = v
+        }
+        if let v = try? container.decode(Date.self, forKey: .mealClassifierPhase1ConfirmedAt) {
+            settings.mealClassifierPhase1ConfirmedAt = v
+        }
+        if let v = try? container.decode(Double.self, forKey: .mealClassifierPhase1Trough) {
+            settings.mealClassifierPhase1Trough = v
+        }
+        if let v = try? container.decode(Date.self, forKey: .mealClassifierPhase2ConfirmedAt) {
+            settings.mealClassifierPhase2ConfirmedAt = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierMaxTotalDurationMinutes) {
+            settings.mealClassifierMaxTotalDurationMinutes = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhase1DeltaThreshold) {
+            settings.mealClassifierPhase1DeltaThreshold = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhase1SustainedReadings) {
+            settings.mealClassifierPhase1SustainedReadings = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhase1AbsoluteRiseMgdL) {
+            settings.mealClassifierPhase1AbsoluteRiseMgdL = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhase2RangeMgdL) {
+            settings.mealClassifierPhase2RangeMgdL = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhase2MinDurationMinutes) {
+            settings.mealClassifierPhase2MinDurationMinutes = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhase3DeltaThreshold) {
+            settings.mealClassifierPhase3DeltaThreshold = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhase3SustainedDurationMinutes) {
+            settings.mealClassifierPhase3SustainedDurationMinutes = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhase3CarbExclusionMinutes) {
+            settings.mealClassifierPhase3CarbExclusionMinutes = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealClassifierPhantomCOBGramsOnUpgrade) {
+            settings.mealClassifierPhantomCOBGramsOnUpgrade = v
         }
 
         if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {

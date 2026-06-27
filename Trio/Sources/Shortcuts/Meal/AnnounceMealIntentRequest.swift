@@ -19,11 +19,26 @@ import Foundation
             s.mealWindowEstimatedCarbs = 0
             s.mealWindowCarbsConfirmed = false
         }
+        // Reset live classifier state for the new window. Activation BG is set
+        // below after we capture the snapshot.
+        s.mealCurrentClassification = .simple
+        s.mealClassifierActivationBG = nil
+        s.mealClassifierPhase1ConfirmedAt = nil
+        s.mealClassifierPhase1Trough = nil
+        s.mealClassifierPhase2ConfirmedAt = nil
+        s.mealClassifierUpgradedAt = nil
         settingsManager.settings = s
 
         // Telemetry: log activation with whatever context we have on-hand. Loop samples
         // (Phase 2 hook in OpenAPS) will fill in signal/velocity data on the next pass.
         let snapshot = await currentSnapshot()
+        // Now we have the activation BG — write it for the classifier's
+        // Phase 2 baseline reference.
+        if let bg = snapshot.bg {
+            var s2 = settingsManager.settings
+            s2.mealClassifierActivationBG = bg
+            settingsManager.settings = s2
+        }
         algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
             kind: .mealWindowActivated,
             timestamp: now,
@@ -64,6 +79,13 @@ import Foundation
         s.mealWindowEstimatedCarbs = 0
         s.mealWindowCarbsConfirmed = false
         s.mealWindowId = nil
+        // Wipe classifier state so the next window starts clean.
+        s.mealCurrentClassification = .simple
+        s.mealClassifierActivationBG = nil
+        s.mealClassifierPhase1ConfirmedAt = nil
+        s.mealClassifierPhase1Trough = nil
+        s.mealClassifierPhase2ConfirmedAt = nil
+        s.mealClassifierUpgradedAt = nil
         settingsManager.settings = s
 
         let snapshot = await currentSnapshot()
