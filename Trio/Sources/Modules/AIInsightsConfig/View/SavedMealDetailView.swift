@@ -482,10 +482,16 @@ struct SavedMealDetailView: View {
         }
 
         // Insulin burden
-        Section(header: Text("Insulin burden (median per instance)")) {
-            statRow("Total delivered", value: String(format: "%.1f U", burden.medianTotalU))
+        let hasBackfilled = filteredInstances.contains { $0.backfilled }
+        Section(
+            header: Text("Insulin burden (median per instance)"),
+            footer: hasBackfilled
+                ? Text("Total = SMBs only (not basal). Floor activations are from live-tracked instances only — backfilled rows can't reconstruct floor events from history.")
+                : Text("Total = SMBs only (not basal).")
+        ) {
+            statRow("SMB total delivered", value: String(format: "%.1f U", burden.medianTotalU))
             statRow("SMBs fired", value: "\(burden.medianSMBCount)")
-            statRow("Floor activations", value: "\(burden.medianFloorCount)")
+            statRow("Floor activations", value: burden.medianFloorCount < 0 ? "— (no live data)" : "\(burden.medianFloorCount)")
         }
         .listRowBackground(Color.chart)
 

@@ -190,11 +190,18 @@ enum SavedMealAnalytics {
     static func insulinBurden(instances: [SavedMealInstance]) -> InsulinBurden {
         let totals = instances.map { $0.totalInsulinDeliveredU }.sorted()
         let smbs = instances.map { Int($0.smbCount) }.sorted()
-        let floors = instances.map { Int($0.floorActivationCount) }.sorted()
+        // Floor counts are only reliable on live-tracked instances. Backfill
+        // can't reconstruct floor activations from history (oref logs them
+        // only as reason-string text), so backfilled rows always report 0.
+        // Including them in the median would understate true floor activity.
+        let liveOnly = instances.filter { !$0.backfilled }
+        let floors = liveOnly.map { Int($0.floorActivationCount) }.sorted()
         return InsulinBurden(
             medianTotalU: percentile(0.5, sortedValues: totals),
             medianSMBCount: Int(percentile(0.5, sortedValues: smbs.map(Double.init))),
-            medianFloorCount: Int(percentile(0.5, sortedValues: floors.map(Double.init)))
+            medianFloorCount: liveOnly.isEmpty
+                ? -1  // sentinel: no live-tracked instances yet
+                : Int(percentile(0.5, sortedValues: floors.map(Double.init)))
         )
     }
 
