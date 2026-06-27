@@ -92,19 +92,35 @@ struct SavedMealsListView: View {
 
     private func startConfirmationText(for meal: SavedMeal) -> String {
         var lines: [String] = []
+
+        // Lead with the macros that will be logged as a carb entry — this is
+        // the thing the user most needs to confirm before tapping Start.
+        var macroParts: [String] = []
+        if let c = meal.defaultCarbs, c.doubleValue > 0 {
+            macroParts.append("\(c.intValue)g carbs")
+        }
+        if let f = meal.defaultFat, f.doubleValue > 0 {
+            macroParts.append("\(f.intValue)g fat")
+        }
+        if let p = meal.defaultProtein, p.doubleValue > 0 {
+            macroParts.append("\(p.intValue)g protein")
+        }
+        if macroParts.isEmpty {
+            lines.append("No carbs will be logged (meal has no defaults).")
+        } else {
+            lines.append("Will log: " + macroParts.joined(separator: ", ") + ".")
+        }
+
         if let cls = meal.defaultClassification {
-            lines.append("Will seed classification: \(cls.capitalized).")
+            lines.append("Classification: \(cls.capitalized).")
         }
         if meal.defaultPhantomCOBEnabled {
             let g = meal.defaultPhantomCOBGrams.map { "\($0.intValue)g" } ?? "(default dose)"
-            lines.append("Phantom COB will be on at \(g).")
+            lines.append("Phantom COB: \(g).")
         }
         if meal.defaultExtendedDurationMinutes > 0 {
             let h = Double(meal.defaultExtendedDurationMinutes) / 60.0
             lines.append("Extended duration: \(String(format: "%.1f", h)) h.")
-        }
-        if lines.isEmpty {
-            lines.append("Uses default eating-mode behavior.")
         }
         return lines.joined(separator: " ")
     }
