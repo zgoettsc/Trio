@@ -158,21 +158,10 @@ import Foundation
         }
         let windowId = settingsManager.settings.mealWindowId
         let activatedAt = settingsManager.settings.mealWindowActivationDate
-        var s = settingsManager.settings
-        s.mealWindowActivationDate = nil
-        s.mealWindowEstimatedCarbs = 0
-        s.mealWindowCarbsConfirmed = false
-        s.mealWindowId = nil
-        // Wipe classifier state so the next window starts clean.
-        s.mealCurrentClassification = .simple
-        s.mealClassifierActivationBG = nil
-        s.mealClassifierPhase1ConfirmedAt = nil
-        s.mealClassifierPhase1Trough = nil
-        s.mealClassifierPhase2ConfirmedAt = nil
-        s.mealClassifierUpgradedAt = nil
-        s.mealWindowSavedMealId = nil
-        s.mealWindowSavedMealInstanceId = nil
-        settingsManager.settings = s
+        // Capture the carbs-confirmed + estimated values BEFORE wiping settings
+        // so the recordWindowClose call below has accurate context.
+        let estimatedCarbs = settingsManager.settings.mealWindowEstimatedCarbs
+        let carbsConfirmed = settingsManager.settings.mealWindowCarbsConfirmed
 
         let snapshot = await currentSnapshot()
         let now = Date()
@@ -187,21 +176,42 @@ import Foundation
                 "iob": .from(snapshot.iob)
             ]
         ))
+        // IMPORTANT: recordWindowClose reads mealWindowSavedMealInstanceId
+        // from settings to find the linked SavedMealInstance and close it
+        // with computed outcome metrics. We MUST call it BEFORE wiping
+        // those settings fields below — otherwise the instance is orphaned
+        // (left with closedAt=nil in CoreData and no telemetry emit).
         if let activatedAt {
             algorithmTelemetryManager?.recordWindowClose(
                 windowId: windowId,
                 activatedAt: activatedAt,
                 closedAt: now,
                 closeReason: "userCancelledShortcut",
-                estimatedCarbs: settingsManager.settings.mealWindowEstimatedCarbs > 0
-                    ? Double(truncating: settingsManager.settings.mealWindowEstimatedCarbs as NSDecimalNumber)
+                estimatedCarbs: estimatedCarbs > 0
+                    ? Double(truncating: estimatedCarbs as NSDecimalNumber)
                     : nil,
-                carbsConfirmed: settingsManager.settings.mealWindowCarbsConfirmed,
+                carbsConfirmed: carbsConfirmed,
                 bgAtActivation: snapshot.bg,
                 iobAtActivation: snapshot.iob,
                 cobAtActivation: snapshot.cob.map { Double($0) }
             )
         }
+
+        // Now wipe all the meal-window + classifier state.
+        var s = settingsManager.settings
+        s.mealWindowActivationDate = nil
+        s.mealWindowEstimatedCarbs = 0
+        s.mealWindowCarbsConfirmed = false
+        s.mealWindowId = nil
+        s.mealCurrentClassification = .simple
+        s.mealClassifierActivationBG = nil
+        s.mealClassifierPhase1ConfirmedAt = nil
+        s.mealClassifierPhase1Trough = nil
+        s.mealClassifierPhase2ConfirmedAt = nil
+        s.mealClassifierUpgradedAt = nil
+        s.mealWindowSavedMealId = nil
+        s.mealWindowSavedMealInstanceId = nil
+        settingsManager.settings = s
 
         try await apsManager.determineBasalSync()
         return String(localized: "Eating mode cancelled.")

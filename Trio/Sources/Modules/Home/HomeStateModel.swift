@@ -809,23 +809,10 @@ extension Home.StateModel {
         let preWindowId = settingsManager.settings.mealWindowId
         let preCarbsConfirmed = settingsManager.settings.mealWindowCarbsConfirmed
         let preEstimatedCarbs = settingsManager.settings.mealWindowEstimatedCarbs
-        var s = settingsManager.settings
-        s.mealWindowActivationDate = nil
-        s.mealWindowEstimatedCarbs = 0
-        s.mealWindowCarbsConfirmed = false
-        s.mealWindowId = nil
-        // Wipe live-classifier state with the window.
-        s.mealCurrentClassification = .simple
-        s.mealClassifierActivationBG = nil
-        s.mealClassifierPhase1ConfirmedAt = nil
-        s.mealClassifierPhase1Trough = nil
-        s.mealClassifierPhase2ConfirmedAt = nil
-        s.mealClassifierUpgradedAt = nil
-        s.mealWindowSavedMealId = nil
-        s.mealWindowSavedMealInstanceId = nil
-        settingsManager.settings = s
-        refreshMealWindowState()
 
+        // IMPORTANT: recordWindowClose reads mealWindowSavedMealInstanceId
+        // from settings to find the linked SavedMealInstance and close it
+        // with computed outcome metrics. Must run BEFORE wiping settings.
         if let telemetry = resolver?.resolve(AlgorithmTelemetryManager.self) {
             let now = Date()
             telemetry.logEvent(AlgorithmTelemetryEvent(
@@ -851,6 +838,23 @@ extension Home.StateModel {
                 cobAtActivation: nil as Double?
             )
         }
+
+        var s = settingsManager.settings
+        s.mealWindowActivationDate = nil
+        s.mealWindowEstimatedCarbs = 0
+        s.mealWindowCarbsConfirmed = false
+        s.mealWindowId = nil
+        // Wipe live-classifier state with the window.
+        s.mealCurrentClassification = .simple
+        s.mealClassifierActivationBG = nil
+        s.mealClassifierPhase1ConfirmedAt = nil
+        s.mealClassifierPhase1Trough = nil
+        s.mealClassifierPhase2ConfirmedAt = nil
+        s.mealClassifierUpgradedAt = nil
+        s.mealWindowSavedMealId = nil
+        s.mealWindowSavedMealInstanceId = nil
+        settingsManager.settings = s
+        refreshMealWindowState()
 
         try? await apsManager.determineBasalSync()
     }
