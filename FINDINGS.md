@@ -12,6 +12,93 @@ findings` at the bottom.
 
 ---
 
+## 2026-06-27 round 5 (first post-fix data + telemetry gate bug)
+
+**Bundle now correct (`var trio_determineBasal`).** No more "Invalid Algorithm
+Response" errors after commit `07d1a10b7`. Loop ran 6+ passes during an
+active meal window with COB 31–33g — algorithm produced valid output every
+pass. Foundation is solid.
+
+### Findings
+
+#### F-8 — `mealWindowApplied` was emitted only inside the SMB delivery branch
+
+**Observation:** Even with the rebuilt bundle, every loop sample on
+2026-06-26T23:46–2026-06-27T00:01 is missing the new `effective*` fields
+(`effectiveSmbDeliveryRatio`, `floorBehavior`, `forcedUAM`, etc.).
+
+**Root cause:** The JS-side `rT.mealWindowApplied = {...}` assignment was
+placed inside the SMB delivery path (around line 1766 of source). The reason
+strings show `minGuardBG 27<70 … no temp required` on every pass — meaning
+oref tripped the SMB safety guard on line 1298 (BG dropping fast / large IOB
+overhang) and *disabled* SMB. With SMB disabled, the assignment block was
+never reached, so the telemetry field stayed null.
+
+**Fix:** Added a baseline assignment right after `rT` is initialized so
+`mealWindowApplied` populates on EVERY pass while the window is active. The
+late-stage assignment inside the SMB branch still runs when applicable and
+overwrites with the actual `floorBehavior` + post-boost `smb_ratio`. Bundle
+rebuilt and shipped as commit `6fcbb8f0f` on
+`claude/iphone-quick-action-meals-on-zack-copy`.
+
+**Validation criterion for round 6:** every loop row with
+`mealWindowActive: true` should contain populated `effectiveSmbDeliveryRatio`
+(0.8 when boost on), `effectiveMaxSMBBasalMinutes` (90 when multiplier 2×
+against profile's 45), `effectiveToughMealCapPercent` (80 per current
+settings), `floorBehavior` ("off"/"replacement"/"additive"), `forcedUAM`,
+`relaxedRisingGuard`, `phantomCOBGrams`.
+
+#### F-9 — Loop is in zero-temp throughout meal window (BG dropping fast under high IOB)
+
+**Observation:** During the 30-minute window of round-5 data, every pass had
+`tempBasalRate: 0` with reasons like:
+
+> `minGuardBG 28<70 75m left and 0 ~ req 0U/hr: no temp required`
+
+BG trajectory: 150 → 140, delta5m −9 mg/dL on the final sample, COB 31–33g,
+IOB 1.84–2.5U, eventualBG 143–171 (oscillating). The algorithm correctly
+recognized that IOB is more than enough to cover residual COB and that BG is
+actively falling.
+
+**Implications for the tuning items:**
+- Items 1 (SMB ratio boost), 2 (relax rising guard), 3 (additive floor),
+  6 (SMB minutes ×2) can't possibly fire on these passes because SMB itself
+  was gated off. They only matter when the algorithm DECIDES to bolus.
+- Item 4 (force enableUAM) is upstream — should still fire (and forcedUAM
+  telemetry will confirm once F-8 fix lands).
+- Item 5 (phantom COB) gate requires `delta > 0` and `short_avgdelta > 0` —
+  doesn't fire on dropping BG by design. Correct behavior.
+
+**Not a bug in the tuning.** This was a well-bolused meal whose absorption
+ended faster than the loop's COB-decay model expected. The pattern we WANT
+to catch with the floor (BG rising while loop refuses to bolus) didn't
+happen here. Need data from an *under-bolused* meal — H-1 remains open and
+needs a deliberate test.
+
+#### F-10 — `toughMealCapPercent` raised from 75 → 80 in the settings export
+
+**Observation:** Settings snapshot at `2026-06-27T00:05:18Z` shows
+`mealWindowToughMealCapPercent: 80` (default is 75). User has been tuning.
+Confirms the settings UI is plumbed end-to-end. Once F-8 fix ships, the
+`effectiveToughMealCapPercent` field on each loop row should match this
+value (80) for all in-window samples.
+
+### Status of prior findings
+
+- **F-1, F-2, F-3, F-4 (round 1):** no new data points this round.
+- **F-5, F-6, F-7 (round 2):** no rising-meal data this round — couldn't
+  re-evaluate.
+- **H-1 (will floor fire on under-bolused meal?):** still no positive
+  example. The meal in this round was well-bolused and absorption finished
+  early — wrong shape to exercise the floor.
+- **H-2 (relax rising guard to `delta > -2`):** still no data — needs a
+  rising-BG-during-window event.
+- **H-3 (smbDeliveryRatio bump):** Item 1 SHOULD have applied
+  (`mealWindowBoostSMBRatio: true`, `mealWindowSMBRatioValue: 0.8` in
+  settings) — but no SMB fired so we can't measure it yet.
+
+---
+
 ## 2026-06-26 round 4 (CRITICAL retrospective — JS never shipped before now)
 
 **Discovery while reviewing round 3 data:** the `effectiveSmbDeliveryRatio`,
@@ -373,7 +460,9 @@ something to know for filtering later.
 
 ## Findings index by feature area
 
-- **Floor activation rules:** F-1, F-2, H-1, H-2
-- **SMB delivery ratio:** H-3
+- **Floor activation rules:** F-1, F-2, H-1, H-2, F-9
+- **SMB delivery ratio:** H-3, F-10
 - **Carb entry attribution:** F-4
 - **Meal-window UX:** F-3
+- **Telemetry plumbing:** F-8, F-10
+- **Algorithm gating on dropping BG:** F-9
