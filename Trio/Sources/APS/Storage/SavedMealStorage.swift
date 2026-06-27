@@ -52,7 +52,11 @@ struct SavedMealInstanceMetrics {
 }
 
 final class BaseSavedMealStorage: SavedMealStorage, Injectable {
-    @Injected() private var algorithmTelemetryManager: AlgorithmTelemetryManager!
+    /// Holds the resolver so we can lazily look up the telemetry manager when
+    /// it's actually needed. We can't `@Injected` it directly because
+    /// AlgorithmTelemetryManager also injects SavedMealStorage — eager
+    /// resolution at init() time recurses and crashes the app at launch.
+    private let resolver: Resolver
 
     private let context: NSManagedObjectContext
     private let viewContext = CoreDataStack.shared.persistentContainer.viewContext
@@ -63,14 +67,16 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
     private let perMealHistoryCap = 20
 
     init(resolver: Resolver, context: NSManagedObjectContext? = nil) {
+        self.resolver = resolver
         self.context = context ?? CoreDataStack.shared.newTaskContext()
         injectServices(resolver)
     }
 
     /// Forwards a definitions snapshot to telemetry so meals/definitions.json
     /// stays in sync with local CoreData. Called after every CRUD action.
+    /// Resolved lazily — see init comment for why we can't @Injected this.
     private func notifyDefinitionsChanged() {
-        algorithmTelemetryManager?.emitMealDefinitionsSnapshot()
+        resolver.resolve(AlgorithmTelemetryManager.self)?.emitMealDefinitionsSnapshot()
     }
 
     // MARK: - Read
