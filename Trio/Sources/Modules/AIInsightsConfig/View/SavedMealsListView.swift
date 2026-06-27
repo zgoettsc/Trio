@@ -138,6 +138,9 @@ private struct StartSavedMealConfirmSheet: View {
     @State private var fatText: String
     @State private var proteinText: String
 
+    private enum MacroField: Hashable { case carbs, fat, protein }
+    @FocusState private var focusedField: MacroField?
+
     init(
         meal: SavedMeal,
         onStart: @escaping (Decimal?, Decimal?, Decimal?) -> Void,
@@ -210,10 +213,13 @@ private struct StartSavedMealConfirmSheet: View {
             }
             .listRowBackground(Color.chart)
 
-            Section(header: Text("Macros to log")) {
-                macroField("Carbs", text: $carbsText)
-                macroField("Fat", text: $fatText)
-                macroField("Protein", text: $proteinText)
+            Section(
+                header: Text("Macros to log"),
+                footer: Text("Tap a box to type a different amount. These values will be logged as a carb entry when you tap Start.")
+            ) {
+                macroField("Carbs", text: $carbsText, field: .carbs)
+                macroField("Fat", text: $fatText, field: .fat)
+                macroField("Protein", text: $proteinText, field: .protein)
             }
             .listRowBackground(Color.chart)
 
@@ -255,20 +261,39 @@ private struct StartSavedMealConfirmSheet: View {
                     onStart(c, f, p)
                 }
             }
+            // decimalPad has no return key — give the user a way out.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focusedField = nil }
+            }
         }
     }
 
     @ViewBuilder
-    private func macroField(_ label: String, text: Binding<String>) -> some View {
+    private func macroField(_ label: String, text: Binding<String>, field: MacroField) -> some View {
         HStack {
             Text(label)
             Spacer()
             TextField("0", text: text)
                 .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 80)
+                .multilineTextAlignment(.center)
+                .focused($focusedField, equals: field)
+                .frame(width: 70, height: 32)
+                .padding(.horizontal, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(uiColor: .secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(focusedField == field ? Color.accentColor : Color.secondary.opacity(0.35), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = field }
             Text("g").foregroundStyle(.secondary)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { focusedField = field }
     }
 
     private func label(for factor: Double) -> String {
