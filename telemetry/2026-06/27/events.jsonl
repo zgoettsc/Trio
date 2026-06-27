@@ -146,3 +146,4 @@
 {"kind":"smbDelivered","payload":{"bg":105,"floorActivated":false,"insulinReq":0.52,"iob":0.6779999999999999,"minutesSinceWindowOpen":268.60547818342843,"units":0.4},"timestamp":"2026-06-27T21:22:32.695Z","windowId":"E5772BD5-996C-4E80-BD47-9E059DECF12E"}
 {"kind":"mealWindowCancelled","payload":{"minutesSinceActivation":273.54851300120356,"source":"homeBanner"},"timestamp":"2026-06-27T21:27:29.277Z","windowId":"E5772BD5-996C-4E80-BD47-9E059DECF12E"}
 {"kind":"smbDelivered","payload":{"bg":105,"floorActivated":false,"insulinReq":0.26,"iob":0.9890000000000001,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-06-27T21:27:29.811Z"}
+{"kind":"smbDelivered","payload":{"bg":118,"floorActivated":false,"insulinReq":0.13999999999999999,"iob":0.5900000000000001,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-06-27T21:47:35.944Z"}
