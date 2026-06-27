@@ -64,6 +64,6 @@ extension SavedMealInstance {
     }
 
     var carbBucket: CarbBucket? {
-        CarbBucket.from(carbs: carbsAtActivation as Decimal?)
+        CarbBucket.from(carbs: carbsAtActivation?.decimalValue)
     }
 }

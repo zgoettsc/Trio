@@ -201,7 +201,8 @@ struct SavedMealDetailView: View {
             } else {
                 Chart {
                     // Per-instance light overlays
-                    ForEach(Array(agg.perInstance.enumerated()), id: \.offset) { _, series in
+                    ForEach(agg.perInstance.indices, id: \.self) { idx in
+                        let series = agg.perInstance[idx]
                         ForEach(series) { p in
                             LineMark(
                                 x: .value("Hours", p.t / 60),
@@ -212,19 +213,20 @@ struct SavedMealDetailView: View {
                         }
                     }
                     // 25-75 percentile band
-                    ForEach(Array(agg.timeBuckets.enumerated()), id: \.offset) { i, t in
+                    ForEach(agg.timeBuckets.indices, id: \.self) { i in
                         AreaMark(
-                            x: .value("Hours", t / 60),
+                            x: .value("Hours", agg.timeBuckets[i] / 60),
                             yStart: .value("p25", agg.p25[i]),
                             yEnd: .value("p75", agg.p75[i])
                         )
                         .foregroundStyle(.blue.opacity(0.18))
                     }
                     // Median line bold
-                    ForEach(Array(agg.timeBuckets.enumerated()), id: \.offset) { i, t in
+                    ForEach(agg.timeBuckets.indices, id: \.self) { i in
                         LineMark(
-                            x: .value("Hours", t / 60),
-                            y: .value("Median", agg.median[i])
+                            x: .value("Hours", agg.timeBuckets[i] / 60),
+                            y: .value("Median", agg.median[i]),
+                            series: .value("MedianSeries", "median")
                         )
                         .foregroundStyle(.blue)
                         .lineStyle(StrokeStyle(lineWidth: 2.5))

@@ -191,9 +191,8 @@ struct SavedMealOutcomeCalculator {
             req.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: true)]
             let events = (try? viewContext.fetch(req)) ?? []
             for evt in events {
-                if let ts = evt.timestamp, let bolus = evt.bolus {
-                    let amount = Double(truncating: bolus.amount ?? 0)
-                    results.append((ts, amount))
+                if let ts = evt.timestamp, let bolus = evt.bolus, let amt = bolus.amount {
+                    results.append((ts, Double(truncating: amt)))
                 }
             }
         }
