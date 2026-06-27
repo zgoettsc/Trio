@@ -585,12 +585,10 @@ final class BaseAPSManager: APSManager, Injectable {
         // parsing the reason string if the structured field is missing (older oref).
         let reason = determination?.reason ?? ""
         let floor = determination?.mealWindowFloor
-        let floorActivated = floor?.activated ?? reason.contains("Meal-window floor:")
-        // Map on the optional itself — `floor?.prior.map { ... }` parses as
-        // `floor?.(prior.map { ... })` and `.map` doesn't exist on `Decimal`.
-        let floorPriorInsulinReq: Double? = floor.map { Double(truncating: $0.prior as NSNumber) }
-        let floorMagnitude: Double? = floor.map { Double(truncating: $0.floored as NSNumber) }
-        let floorVelocityFactor: Double? = floor.map { Double(truncating: $0.factor as NSNumber) }
+        let floorActivated = (floor?.activated ?? false) || reason.contains("Meal-window floor:")
+        let floorPriorInsulinReq: Double? = floor?.prior.map { Double(truncating: $0 as NSNumber) }
+        let floorMagnitude: Double? = floor?.floored.map { Double(truncating: $0 as NSNumber) }
+        let floorVelocityFactor: Double? = floor?.factor.map { Double(truncating: $0 as NSNumber) }
 
         let sig = signalPipeline.latestOutput
         let adj = algorithmTelemetryManager?.currentAdjustments()
@@ -632,13 +630,13 @@ final class BaseAPSManager: APSManager, Injectable {
             floorPriorInsulinReq: floorPriorInsulinReq,
             floorMagnitude: floorMagnitude,
             floorVelocityFactor: floorVelocityFactor,
-            effectiveSmbDeliveryRatio: applied.map { Double(truncating: $0.smbDeliveryRatio as NSNumber) },
-            effectiveMaxSMBBasalMinutes: applied.map { Double(truncating: $0.maxSMBBasalMinutes as NSNumber) },
-            effectiveMaxUAMSMBBasalMinutes: applied.map { Double(truncating: $0.maxUAMSMBBasalMinutes as NSNumber) },
-            effectiveToughMealCapPercent: applied.map { Double(truncating: $0.toughMealCapPercent as NSNumber) },
+            effectiveSmbDeliveryRatio: applied?.smbDeliveryRatio.map { Double(truncating: $0 as NSNumber) },
+            effectiveMaxSMBBasalMinutes: applied?.maxSMBBasalMinutes.map { Double(truncating: $0 as NSNumber) },
+            effectiveMaxUAMSMBBasalMinutes: applied?.maxUAMSMBBasalMinutes.map { Double(truncating: $0 as NSNumber) },
+            effectiveToughMealCapPercent: applied?.toughMealCapPercent.map { Double(truncating: $0 as NSNumber) },
             floorBehavior: applied?.floorBehavior,
             forcedUAM: applied?.forcedUAM,
-            phantomCOBGrams: applied.map { Double(truncating: $0.phantomCOBGrams as NSNumber) },
+            phantomCOBGrams: applied?.phantomCOBGrams.map { Double(truncating: $0 as NSNumber) },
             relaxedRisingGuard: applied?.relaxedRisingGuard,
             target: determination?.current_target.map { Double(truncating: $0 as NSNumber) },
             // ↑ Trio's Determination uses `current_target` (snake_case from oref JS)

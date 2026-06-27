@@ -46,24 +46,27 @@ struct Determination: JSON, Equatable {
 }
 
 struct MealWindowFloorData: JSON, Equatable {
-    let activated: Bool
-    let prior: Decimal
-    let floored: Decimal
-    let factor: Decimal
-    let risingDelta: Decimal
-    let bg: Decimal
-    let target: Decimal
+    // All optional so a single malformed value in JS (e.g. a NaN that
+    // JSON.stringify renders as null) doesn't cause the whole nested
+    // object to fail to decode and silently disappear.
+    let activated: Bool?
+    let prior: Decimal?
+    let floored: Decimal?
+    let factor: Decimal?
+    let risingDelta: Decimal?
+    let bg: Decimal?
+    let target: Decimal?
 }
 
 struct MealWindowAppliedData: JSON, Equatable {
-    let smbDeliveryRatio: Decimal
-    let maxSMBBasalMinutes: Decimal
-    let maxUAMSMBBasalMinutes: Decimal
-    let toughMealCapPercent: Decimal
-    let floorBehavior: String          // "off" / "replacement" / "additive"
-    let forcedUAM: Bool
-    let phantomCOBGrams: Decimal       // 0 if none injected this pass
-    let relaxedRisingGuard: Bool
+    let smbDeliveryRatio: Decimal?
+    let maxSMBBasalMinutes: Decimal?
+    let maxUAMSMBBasalMinutes: Decimal?
+    let toughMealCapPercent: Decimal?
+    let floorBehavior: String?          // "off" / "replacement" / "additive"
+    let forcedUAM: Bool?
+    let phantomCOBGrams: Decimal?       // 0 if none injected this pass
+    let relaxedRisingGuard: Bool?
 }
 
 struct Predictions: JSON, Equatable {
