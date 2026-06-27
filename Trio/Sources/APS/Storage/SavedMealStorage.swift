@@ -52,6 +52,8 @@ struct SavedMealInstanceMetrics {
 }
 
 final class BaseSavedMealStorage: SavedMealStorage, Injectable {
+    @Injected() private var algorithmTelemetryManager: AlgorithmTelemetryManager!
+
     private let context: NSManagedObjectContext
     private let viewContext = CoreDataStack.shared.persistentContainer.viewContext
 
@@ -63,6 +65,12 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
     init(resolver: Resolver, context: NSManagedObjectContext? = nil) {
         self.context = context ?? CoreDataStack.shared.newTaskContext()
         injectServices(resolver)
+    }
+
+    /// Forwards a definitions snapshot to telemetry so meals/definitions.json
+    /// stays in sync with local CoreData. Called after every CRUD action.
+    private func notifyDefinitionsChanged() {
+        algorithmTelemetryManager?.emitMealDefinitionsSnapshot()
     }
 
     // MARK: - Read
@@ -119,6 +127,7 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             try? context.save()
             created = meal
         }
+        notifyDefinitionsChanged()
         return forwardToView(created)
     }
 
@@ -131,6 +140,7 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             writable.updatedAt = Date()
             try? context.save()
         }
+        notifyDefinitionsChanged()
     }
 
     func deleteMeal(_ meal: SavedMeal) {
@@ -140,6 +150,7 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             context.delete(writable)
             try? context.save()
         }
+        notifyDefinitionsChanged()
     }
 
     func duplicateMeal(_ meal: SavedMeal) -> SavedMeal {
@@ -168,6 +179,7 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             try? context.save()
             created = copy
         }
+        notifyDefinitionsChanged()
         return forwardToView(created)
     }
 

@@ -134,6 +134,11 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var mealWindowSavedMealId: String? = nil
     var mealWindowSavedMealInstanceId: String? = nil
 
+    /// When true, saved-meal names are stripped from telemetry uploads
+    /// (replaced with `null`; the UUID still uniquely identifies the meal).
+    /// See MEAL_INTELLIGENCE_DESIGN.md §7.5.
+    var telemetryAnonymizeMealNames: Bool = false
+
     // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
     // on the trio repo for tuning analysis. PAT is in Keychain, not here.
     var telemetryEnabled: Bool = false
@@ -423,6 +428,9 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(String.self, forKey: .mealWindowSavedMealInstanceId) {
             settings.mealWindowSavedMealInstanceId = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .telemetryAnonymizeMealNames) {
+            settings.telemetryAnonymizeMealNames = v
         }
 
         if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {

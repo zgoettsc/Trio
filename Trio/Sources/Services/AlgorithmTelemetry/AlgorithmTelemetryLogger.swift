@@ -13,6 +13,7 @@ final class AlgorithmTelemetryLogger {
         case loop
         case summary
         case settings // not JSONL — daily JSON snapshot, one object per file
+        case meals    // daily meals.jsonl, one row per closed SavedMealInstance
     }
 
     private let queue = DispatchQueue(label: "AlgorithmTelemetryLogger.queue", qos: .utility)
@@ -44,6 +45,58 @@ final class AlgorithmTelemetryLogger {
         write(line: summary, kind: .summary, on: summary.closedAt)
     }
 
+    /// Append one closed-instance row to the daily meals.jsonl.
+    func appendMealInstance<T: Encodable>(_ row: T, on date: Date) {
+        write(line: row, kind: .meals, on: date)
+    }
+
+    /// Append one closed-instance row to the per-meal history file at
+    /// telemetry/meals/history/<mealId>.jsonl. The remote upload pass picks
+    /// this up alongside the daily folder via enumerateFiles().
+    func appendPerMealHistory<T: Encodable>(_ row: T, mealId: UUID) {
+        queue.async {
+            let url = self.rootDir
+                .appendingPathComponent("meals", isDirectory: true)
+                .appendingPathComponent("history", isDirectory: true)
+                .appendingPathComponent("\(mealId.uuidString).jsonl")
+            do {
+                try self.ensureDirectory(for: url)
+                let data = try AlgorithmTelemetryCoding.encoder.encode(row)
+                guard let lineString = String(data: data, encoding: .utf8) else { return }
+                let withNewline = lineString + "\n"
+                if self.fileManager.fileExists(atPath: url.path) {
+                    let handle = try FileHandle(forWritingTo: url)
+                    defer { try? handle.close() }
+                    try handle.seekToEnd()
+                    if let bytes = withNewline.data(using: .utf8) {
+                        try handle.write(contentsOf: bytes)
+                    }
+                } else {
+                    try withNewline.data(using: .utf8)?.write(to: url, options: .atomic)
+                }
+            } catch {
+                debug(.service, "[Telemetry] per-meal history append failed: \(error)")
+            }
+        }
+    }
+
+    /// Overwrite meals/definitions.json with a full snapshot. Called on every
+    /// SavedMeal CRUD action so the remote always has the canonical list.
+    func writeMealDefinitions<T: Encodable>(_ definitions: T) {
+        queue.sync {
+            do {
+                let url = self.rootDir
+                    .appendingPathComponent("meals", isDirectory: true)
+                    .appendingPathComponent("definitions.json")
+                try self.ensureDirectory(for: url)
+                let data = try AlgorithmTelemetryCoding.encoder.encode(definitions)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                debug(.service, "[Telemetry] meals/definitions.json write failed: \(error)")
+            }
+        }
+    }
+
     /// Daily settings snapshot is a single-object file (overwritten in place each push).
     func writeSettingsSnapshot(_ snapshot: AlgorithmTelemetrySettingsSnapshot) {
         queue.sync {
@@ -64,9 +117,35 @@ final class AlgorithmTelemetryLogger {
         queue.sync {
             guard fileManager.fileExists(atPath: rootDir.path) else { return [] }
             var results: [(URL, String)] = []
-            let monthDirs = (try? fileManager.contentsOfDirectory(atPath: rootDir.path)) ?? []
-            for month in monthDirs.sorted() {
-                let monthURL = rootDir.appendingPathComponent(month)
+            let topLevelEntries = (try? fileManager.contentsOfDirectory(atPath: rootDir.path)) ?? []
+
+            for entry in topLevelEntries.sorted() {
+                // Special-case the meals/ subtree — definitions.json at the root
+                // of meals/, history/<mealId>.jsonl files under meals/history/.
+                if entry == "meals" {
+                    let mealsURL = rootDir.appendingPathComponent("meals", isDirectory: true)
+                    let mealsContents = (try? fileManager.contentsOfDirectory(atPath: mealsURL.path)) ?? []
+                    for mealsEntry in mealsContents.sorted() {
+                        let entryURL = mealsURL.appendingPathComponent(mealsEntry)
+                        var isDir: ObjCBool = false
+                        fileManager.fileExists(atPath: entryURL.path, isDirectory: &isDir)
+                        if isDir.boolValue && mealsEntry == "history" {
+                            let historyFiles = (try? fileManager.contentsOfDirectory(atPath: entryURL.path)) ?? []
+                            for f in historyFiles.sorted() {
+                                results.append((entryURL.appendingPathComponent(f), "telemetry/meals/history/\(f)"))
+                            }
+                        } else if !isDir.boolValue {
+                            results.append((entryURL, "telemetry/meals/\(mealsEntry)"))
+                        }
+                    }
+                    continue
+                }
+
+                // Default: YYYY-MM directory under root.
+                let monthURL = rootDir.appendingPathComponent(entry)
+                var isDir: ObjCBool = false
+                fileManager.fileExists(atPath: monthURL.path, isDirectory: &isDir)
+                guard isDir.boolValue else { continue }
                 let dayDirs = (try? fileManager.contentsOfDirectory(atPath: monthURL.path)) ?? []
                 for day in dayDirs.sorted() {
                     let dayURL = monthURL.appendingPathComponent(day)
@@ -74,7 +153,7 @@ final class AlgorithmTelemetryLogger {
                     for file in files.sorted() {
                         let url = dayURL.appendingPathComponent(file)
                         // Repo path = "telemetry/YYYY-MM/DD/file" (matches local layout)
-                        let repoPath = "telemetry/\(month)/\(day)/\(file)"
+                        let repoPath = "telemetry/\(entry)/\(day)/\(file)"
                         results.append((url, repoPath))
                     }
                 }

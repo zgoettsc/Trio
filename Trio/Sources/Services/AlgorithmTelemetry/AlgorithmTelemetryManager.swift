@@ -435,6 +435,116 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         return windowId
     }
 
+    // MARK: - Saved Meal telemetry (Phase D)
+
+    /// Looks up the saved meal in the persistence layer to fetch macros + name,
+    /// builds a SavedMealTelemetryRow, and writes it to BOTH the daily
+    /// meals.jsonl AND the per-meal history file.
+    func emitSavedMealInstanceTelemetry(
+        instanceId: UUID,
+        windowId: String,
+        activatedAt: Date,
+        closedAt: Date,
+        finalClassification: MealClassification,
+        metrics: SavedMealInstanceMetrics,
+        score: Int,
+        bgCurveJSON: String?,
+        smbsJSON: String?,
+        classifierUpgradesJSON: String?
+    ) {
+        guard settingsManager.settings.telemetryEnabled else { return }
+        // Look up the linked meal via the instance.
+        guard let inst = savedMealStorage?.instance(forWindowId: windowId),
+              let meal = inst.savedMeal,
+              let mealId = meal.id
+        else { return }
+
+        let anonymize = settingsManager.settings.telemetryAnonymizeMealNames
+        let row = SavedMealTelemetryRow(
+            kind: "savedMealInstance",
+            instanceId: instanceId.uuidString,
+            savedMealId: mealId.uuidString,
+            savedMealName: anonymize ? nil : meal.name,
+            savedMealNamePrivate: anonymize,
+            windowId: windowId,
+            startedAt: activatedAt,
+            closedAt: closedAt,
+            deviceTimeZone: TimeZone.current.identifier,
+            macros: SavedMealTelemetryRow.Macros(
+                carbs: inst.carbsAtActivation.map { $0.doubleValue },
+                fat: inst.fatAtActivation.map { $0.doubleValue },
+                protein: inst.proteinAtActivation.map { $0.doubleValue }
+            ),
+            carbBucket: inst.carbBucket?.rawValue,
+            initialClassification: inst.initialClassification,
+            finalClassification: finalClassification.rawValue,
+            bgCurveJSON: bgCurveJSON,
+            smbsJSON: smbsJSON,
+            floorActivationsJSON: nil,
+            classifierUpgradesJSON: classifierUpgradesJSON,
+            outcomeScore: score,
+            metrics: SavedMealTelemetryRow.Metrics(
+                peakBG: metrics.peakBG,
+                timeInRangeMinutes: metrics.timeInRangeMinutes,
+                timeAboveRangeMinutes: metrics.timeAboveRangeMinutes,
+                timeBelowRangeMinutes: metrics.timeBelowRangeMinutes,
+                lowsCount: metrics.lowsCount,
+                timeToBaselineMinutes: metrics.timeToBaselineMinutes,
+                totalInsulinDeliveredU: metrics.totalInsulinDeliveredU,
+                smbCount: metrics.smbCount,
+                floorActivationCount: metrics.floorActivationCount
+            ),
+            buildSchema: 8
+        )
+        logger.appendMealInstance(row, on: closedAt)
+        logger.appendPerMealHistory(row, mealId: mealId)
+        Task { await self.pushNow() }  // eager push — meal-close is user-meaningful
+    }
+
+    /// Rewrites `telemetry/meals/definitions.json` with the current set of
+    /// SavedMeal definitions. Called on every SavedMeal CRUD action by the
+    /// storage layer (which forwards the snapshot to us).
+    func emitMealDefinitionsSnapshot() {
+        guard settingsManager.settings.telemetryEnabled else { return }
+        guard let storage = savedMealStorage else { return }
+        let anonymize = settingsManager.settings.telemetryAnonymizeMealNames
+        let meals = storage.allMeals()
+        var dict: [String: SavedMealDefinitionsSnapshot.MealDef] = [:]
+        for m in meals {
+            guard let id = m.id else { continue }
+            let defaults = SavedMealDefinitionsSnapshot.MealDef.Defaults(
+                carbs: m.defaultCarbs.map { $0.doubleValue },
+                fat: m.defaultFat.map { $0.doubleValue },
+                protein: m.defaultProtein.map { $0.doubleValue },
+                classification: m.defaultClassification,
+                extendedDurationMinutes: m.defaultExtendedDurationMinutes > 0
+                    ? Int(m.defaultExtendedDurationMinutes) : nil,
+                phantomCOBEnabled: m.defaultPhantomCOBEnabled ? true : nil,
+                phantomCOBGrams: m.defaultPhantomCOBGrams.map { $0.doubleValue }
+            )
+            let stats = SavedMealDefinitionsSnapshot.MealDef.Stats(
+                instanceCount: Int(m.cachedInstanceCount),
+                recommendedClassification: m.cachedRecommendedClassification
+            )
+            dict[id.uuidString] = SavedMealDefinitionsSnapshot.MealDef(
+                id: id.uuidString,
+                name: anonymize ? nil : m.name,
+                icon: m.icon,
+                createdAt: m.createdAt,
+                updatedAt: m.updatedAt,
+                defaults: defaults,
+                stats: stats
+            )
+        }
+        let snapshot = SavedMealDefinitionsSnapshot(
+            lastUpdated: Date(),
+            deviceTimeZone: TimeZone.current.identifier,
+            meals: dict
+        )
+        logger.writeMealDefinitions(snapshot)
+        Task { await self.pushNow() }
+    }
+
     // MARK: - Token + status persistence
 
     private func currentToken() -> String? {
@@ -744,35 +854,76 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         )
         logSummary(summary)
 
-        // If this window was linked to a SavedMealInstance, close it. We have
-        // the current classification on hand from settings; full outcome
-        // metrics (TIR, peak, etc.) are best computed by the +6h pass below —
-        // for now we record what's known immediately. Phase C will backfill
-        // the full metrics via processReadyOutcomes.
+        // If this window was linked to a SavedMealInstance, close it with
+        // computed outcome metrics + serialized BG curve / SMBs / classifier
+        // upgrades. See MEAL_INTELLIGENCE_DESIGN.md §6, §8.
         if let instIdStr = settingsManager.settings.mealWindowSavedMealInstanceId,
            let instId = UUID(uuidString: instIdStr)
         {
             let finalClassification = settingsManager.settings.mealCurrentClassification
+            // Phase 2 trough is the better baseline than activation BG (Round 9
+            // finding) — fall back to activation BG if the trough isn't set.
+            let baseline = settingsManager.settings.mealClassifierPhase1Trough
+                ?? settingsManager.settings.mealClassifierActivationBG
+                ?? bgAtActivation
+
+            // Build the classifier-upgrade history from settings. Phase A
+            // tracks only one upgrade per window (Simple → Medium → Complex
+            // is collapsed); we record at most one upgrade event.
+            var upgrades: [SavedMealOutcomeCalculator.ClassifierUpgradeSample] = []
+            if let upgradedAt = settingsManager.settings.mealClassifierUpgradedAt {
+                upgrades.append(SavedMealOutcomeCalculator.ClassifierUpgradeSample(
+                    t: upgradedAt.timeIntervalSince(activatedAt) / 60,
+                    from: MealClassification.medium.rawValue,
+                    to: finalClassification.rawValue
+                ))
+            }
+
+            let calc = SavedMealOutcomeCalculator(
+                viewContext: CoreDataStack.shared.persistentContainer.viewContext
+            )
+            let result = calc.compute(
+                activatedAt: activatedAt,
+                closedAt: closedAt,
+                baselineBG: baseline,
+                classifierUpgrades: upgrades
+            )
+            // Floor count came from our running tally during the window.
+            let finalMetrics = SavedMealInstanceMetrics(
+                peakBG: result.metrics.peakBG,
+                timeInRangeMinutes: result.metrics.timeInRangeMinutes,
+                timeAboveRangeMinutes: result.metrics.timeAboveRangeMinutes,
+                timeBelowRangeMinutes: result.metrics.timeBelowRangeMinutes,
+                lowsCount: result.metrics.lowsCount,
+                timeToBaselineMinutes: result.metrics.timeToBaselineMinutes,
+                totalInsulinDeliveredU: result.metrics.totalInsulinDeliveredU,
+                smbCount: result.metrics.smbCount,
+                floorActivationCount: floorActivationsThisWindow
+            )
             savedMealStorage?.closeInstance(
                 instanceId: instId,
                 closedAt: closedAt,
                 finalClassification: finalClassification,
-                bgCurveJSON: nil,            // Phase C: serialize from loop samples
-                smbsJSON: nil,
-                floorActivationsJSON: nil,
-                classifierUpgradesJSON: nil,
-                outcomeScore: 0,             // Phase C: compute properly from metrics
-                metrics: SavedMealInstanceMetrics(
-                    peakBG: 0,
-                    timeInRangeMinutes: 0,
-                    timeAboveRangeMinutes: 0,
-                    timeBelowRangeMinutes: 0,
-                    lowsCount: 0,
-                    timeToBaselineMinutes: 0,
-                    totalInsulinDeliveredU: 0,
-                    smbCount: 0,
-                    floorActivationCount: floorActivationsThisWindow
-                )
+                bgCurveJSON: result.bgCurveJSON,
+                smbsJSON: result.smbsJSON,
+                floorActivationsJSON: result.floorActivationsJSON,
+                classifierUpgradesJSON: result.classifierUpgradesJSON,
+                outcomeScore: result.score,
+                metrics: finalMetrics
+            )
+            // Phase D: also emit a meals.jsonl telemetry row + per-meal
+            // history append for retrospective analysis off-device.
+            emitSavedMealInstanceTelemetry(
+                instanceId: instId,
+                windowId: resolvedWindowId,
+                activatedAt: activatedAt,
+                closedAt: closedAt,
+                finalClassification: finalClassification,
+                metrics: finalMetrics,
+                score: result.score,
+                bgCurveJSON: result.bgCurveJSON,
+                smbsJSON: result.smbsJSON,
+                classifierUpgradesJSON: result.classifierUpgradesJSON
             )
         }
 
