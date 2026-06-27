@@ -679,7 +679,7 @@ final class BaseAPSManager: APSManager, Injectable {
                 openAPS.lastRawMealWindowAppliedSnippet,
                 as: MealWindowAppliedData.self
             ).1 : nil,
-            buildSchema: 13,
+            buildSchema: 14,
             classification: mealWindowActive ? s.mealCurrentClassification.rawValue : nil,
             classifierPhase1Confirmed: mealWindowActive ? (s.mealClassifierPhase1ConfirmedAt != nil) : nil,
             classifierPhase2Confirmed: mealWindowActive ? (s.mealClassifierPhase2ConfirmedAt != nil) : nil,

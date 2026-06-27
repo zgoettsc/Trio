@@ -11,6 +11,54 @@ import Foundation
         try await announce(estimatedCarbs: estimatedCarbs, savedMealId: nil)
     }
 
+    /// Used by the Saved Meals page's "Start eating mode with this meal"
+    /// button. Stores a CarbEntry with the meal's default macros (so COB
+    /// updates immediately and oref sees the meal on the next pass) AND
+    /// opens the eating-mode window. The user is expected to bolus
+    /// separately via the Treatments screen.
+    ///
+    /// If the meal has no default carbs/fat/protein set, this falls back
+    /// to opening the window only (same as plain announce).
+    func startMealAndLogCarbs(savedMealId: UUID) async throws -> String {
+        guard let meal = savedMealStorage.meal(id: savedMealId) else {
+            return try await announce(estimatedCarbs: nil, savedMealId: savedMealId)
+        }
+        let carbs = (meal.defaultCarbs as Decimal?) ?? 0
+        let fat = (meal.defaultFat as Decimal?) ?? 0
+        let protein = (meal.defaultProtein as Decimal?) ?? 0
+
+        // Only write a CarbEntry when the meal has macros configured.
+        // Without macros, this collapses to a plain "open window only" call.
+        if carbs > 0 || fat > 0 || protein > 0 {
+            let entry = CarbsEntry(
+                id: UUID().uuidString,
+                createdAt: Date(),
+                actualDate: Date(),
+                carbs: carbs,
+                fat: fat,
+                protein: protein,
+                note: meal.name,
+                enteredBy: CarbsEntry.local,
+                isFPU: false,
+                fpuID: (fat > 0 || protein > 0) ? UUID().uuidString : nil
+            )
+            try await carbsStorage.storeCarbs([entry], areFetchedFromRemote: false)
+        }
+
+        let result = try await announce(
+            estimatedCarbs: carbs > 0 ? carbs : nil,
+            savedMealId: savedMealId,
+            actualFat: fat > 0 ? fat : nil,
+            actualProtein: protein > 0 ? protein : nil
+        )
+        // Append a note reminding the user to bolus separately so they don't
+        // assume the carbs covered themselves.
+        if carbs > 0 || fat > 0 || protein > 0 {
+            return result + " " + String(localized: "Carbs logged — bolus separately.")
+        }
+        return result
+    }
+
     /// Convenience overload — saved meal, no explicit fat/protein.
     func announce(estimatedCarbs: Decimal?, savedMealId: UUID?) async throws -> String {
         try await announce(

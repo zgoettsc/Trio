@@ -114,9 +114,10 @@ struct SavedMealsListView: View {
         guard #available(iOS 16.0, *), let mealId = meal.id else { return }
         let req = AnnounceMealIntentRequest()
         do {
-            let carbs = meal.defaultCarbs.map { $0 as Decimal }
-            let msg = try await req.announce(estimatedCarbs: carbs, savedMealId: mealId)
-            startResult = msg
+            // Logs a CarbEntry with the meal's defaults AND opens the window —
+            // matches user expectation that "Start with this meal" means
+            // "log this meal." Bolus is still a separate step.
+            startResult = try await req.startMealAndLogCarbs(savedMealId: mealId)
         } catch {
             startResult = "Failed to start: \(error.localizedDescription)"
         }

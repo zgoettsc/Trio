@@ -258,8 +258,7 @@ struct SavedMealDetailView: View {
         guard #available(iOS 16.0, *), let mealId = meal.id else { return }
         let req = AnnounceMealIntentRequest()
         do {
-            let carbs = meal.defaultCarbs.map { $0 as Decimal }
-            startResult = try await req.announce(estimatedCarbs: carbs, savedMealId: mealId)
+            startResult = try await req.startMealAndLogCarbs(savedMealId: mealId)
         } catch {
             startResult = "Failed to start: \(error.localizedDescription)"
         }
