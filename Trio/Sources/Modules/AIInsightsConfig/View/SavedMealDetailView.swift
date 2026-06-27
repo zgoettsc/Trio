@@ -130,7 +130,7 @@ struct SavedMealDetailView: View {
 
             Section {
                 Button("Duplicate") {
-                    storage?.duplicateMeal(meal)
+                    _ = storage?.duplicateMeal(meal)
                     dismiss()
                 }
                 Button("Delete", role: .destructive) {

@@ -187,7 +187,7 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
 
     @discardableResult
     func startInstance(meal: SavedMeal, windowId: String, startedAt: Date) -> UUID {
-        var instanceId = UUID()
+        let instanceId = UUID()
         context.performAndWait {
             guard let mealId = meal.id,
                   let mealInCtx = fetchMealInWriteContext(id: mealId) else { return }

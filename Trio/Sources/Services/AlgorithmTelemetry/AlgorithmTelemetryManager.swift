@@ -35,6 +35,10 @@ protocol AlgorithmTelemetryManager: AnyObject {
     /// Run 30-day rolling local retention.
     func runRetentionCleanup()
 
+    /// Rewrite the saved-meal definitions snapshot to telemetry/meals/definitions.json
+    /// and push. Called by SavedMealStorage after every CRUD action.
+    func emitMealDefinitionsSnapshot()
+
     /// Append a per-window close summary. Called from every close path so each window
     /// has a discoverable row in summary.jsonl, independent of the event stream.
     func recordWindowClose(
