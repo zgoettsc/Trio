@@ -26,6 +26,7 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case mealWindowTuningChanged // any of the 9 PLAN.md tuning settings flipped
     case mealWindowClassifierUpgraded // 3-phase classifier upgraded current window (e.g. medium → complex)
     case mealWindowClassifierPhase // phase confirmation (phase1, phase2 — informational, not a classification change)
+    case podChanged // pump rewind+prime — pod swap on Omnipod, cartridge change on traditional pumps
 }
 
 struct AlgorithmTelemetryEvent: Codable {

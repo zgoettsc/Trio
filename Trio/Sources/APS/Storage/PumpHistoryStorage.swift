@@ -177,6 +177,19 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
                     newPumpEvent.isUploadedToHealth = false
                     newPumpEvent.isUploadedToTidepool = false
 
+                    // Telemetry: pod swap (Omnipod) / cartridge change (Medtronic
+                    // etc.) — useful for meal-analysis context (absorption can
+                    // differ at fresh vs end-of-pod-life sites). Rewind is the
+                    // canonical marker; prime follows but we only emit once.
+                    algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                        kind: .podChanged,
+                        timestamp: event.date,
+                        windowId: nil,
+                        payload: [
+                            "source": .string("pumpRewind")
+                        ]
+                    ))
+
                 case .prime:
                     guard existingEvents.isEmpty else {
                         // Duplicate found, do not store the event

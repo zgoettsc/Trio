@@ -127,6 +127,19 @@ extension Treatments {
         /// can seed classification + phantom-COB + extended duration from
         /// the meal's defaults. Nil for plain carb entries.
         var pendingSavedMealId: UUID?
+
+        /// Set when saveMeal() detects a recent carb entry with identical
+        /// macros — the view binds an alert to this and resumes the held
+        /// continuation when the user picks. Cleared after every decision.
+        var duplicateCarbAlert: DuplicateCarbAlert?
+        struct DuplicateCarbAlert: Identifiable {
+            let id = UUID()
+            let existingCarbs: Decimal
+            let existingFat: Decimal
+            let existingProtein: Decimal
+            let secondsAgo: Int
+            let proceed: CheckedContinuation<Bool, Never>
+        }
         var smartSenseMaxAdjustment: Double = 0.20
         var glucoseFromPersistence: [GlucoseStored] = []
         var determination: [OrefDetermination] = []
@@ -741,6 +754,23 @@ extension Treatments {
             do {
                 guard carbs > 0 || fat > 0 || protein > 0 else { return }
 
+                // Duplicate guard — when the user taps Save then Bolus, the
+                // bolus path also calls saveMeal() (line ~534 above). Same
+                // when they enter a meal from both the Saved Meals "Start"
+                // button AND the Treatments picker. Result: same carbs
+                // stored twice within seconds, doubling effective COB.
+                // Surface a confirmation dialog when this pattern is
+                // detected so the user can choose intentionally.
+                if let dup = await findDuplicateRecentCarbEntry(
+                    carbs: carbs, fat: fat, protein: protein, within: 5 * 60
+                ) {
+                    let proceed = await confirmDuplicateSave(existing: dup)
+                    if !proceed {
+                        debug(.default, "[saveMeal] Duplicate carb entry cancelled by user")
+                        return
+                    }
+                }
+
                 await MainActor.run {
                     self.carbs = min(self.carbs, self.maxCarbs)
                     self.fat = min(self.fat, self.maxFat)
@@ -798,6 +828,54 @@ extension Treatments {
             protein = Decimal(meal.protein)
             date = meal.detectedAt
             selectedMealID = meal.id
+        }
+
+        /// Looks for a recent local carb entry whose macros match the values
+        /// the user is about to save. Used to detect the Save-then-Bolus
+        /// double-tap pattern (and the "Start from Saved Meals + Treatments"
+        /// double-entry pattern) before they silently double the COB.
+        func findDuplicateRecentCarbEntry(
+            carbs: Decimal,
+            fat: Decimal,
+            protein: Decimal,
+            within seconds: TimeInterval
+        ) async -> CarbEntryStored? {
+            let ctx = CoreDataStack.shared.persistentContainer.viewContext
+            let cutoff = Date().addingTimeInterval(-seconds)
+            return await ctx.perform {
+                let req = CarbEntryStored.fetchRequest()
+                req.predicate = NSPredicate(
+                    format: "date >= %@ AND isFPU == NO AND carbs == %f AND fat == %f AND protein == %f",
+                    cutoff as NSDate,
+                    NSDecimalNumber(decimal: carbs).doubleValue,
+                    NSDecimalNumber(decimal: fat).doubleValue,
+                    NSDecimalNumber(decimal: protein).doubleValue
+                )
+                req.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
+                req.fetchLimit = 1
+                return (try? ctx.fetch(req))?.first
+            }
+        }
+
+        /// Shows the duplicate-carb confirmation alert and suspends until the
+        /// user decides. Returns true when the user wants to add the
+        /// duplicate anyway, false when they want to cancel the new save.
+        func confirmDuplicateSave(existing: CarbEntryStored) async -> Bool {
+            let existingCarbs = Decimal(existing.carbs)
+            let existingFat = Decimal(existing.fat)
+            let existingProtein = Decimal(existing.protein)
+            let secondsAgo = Int(Date().timeIntervalSince(existing.date ?? Date()))
+            return await withCheckedContinuation { cont in
+                Task { @MainActor in
+                    self.duplicateCarbAlert = DuplicateCarbAlert(
+                        existingCarbs: existingCarbs,
+                        existingFat: existingFat,
+                        existingProtein: existingProtein,
+                        secondsAgo: secondsAgo,
+                        proceed: cont
+                    )
+                }
+            }
         }
 
         /// Picker handoff from the new Saved Meals sheet. Pre-fills macros from

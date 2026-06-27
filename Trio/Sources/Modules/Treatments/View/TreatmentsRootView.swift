@@ -653,6 +653,36 @@ extension Treatments {
             } message: {
                 Text("\(state.determinationFailureMessage)")
             }
+            .alert(
+                "Duplicate carb entry?",
+                isPresented: Binding(
+                    get: { state.duplicateCarbAlert != nil },
+                    set: { if !$0 { state.duplicateCarbAlert = nil } }
+                ),
+                presenting: state.duplicateCarbAlert
+            ) { alert in
+                Button("Add anyway") {
+                    alert.proceed.resume(returning: true)
+                    state.duplicateCarbAlert = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    alert.proceed.resume(returning: false)
+                    state.duplicateCarbAlert = nil
+                }
+            } message: { alert in
+                let mins = max(1, alert.secondsAgo / 60)
+                let secs = alert.secondsAgo
+                let when = secs < 60 ? "\(secs) seconds ago" : "\(mins) minute\(mins == 1 ? "" : "s") ago"
+                var parts = ["\(NSDecimalNumber(decimal: alert.existingCarbs).intValue)g carbs"]
+                if alert.existingFat > 0 {
+                    parts.append("\(NSDecimalNumber(decimal: alert.existingFat).intValue)g fat")
+                }
+                if alert.existingProtein > 0 {
+                    parts.append("\(NSDecimalNumber(decimal: alert.existingProtein).intValue)g protein")
+                }
+                let summary = parts.joined(separator: ", ")
+                return Text("You just entered \(summary) \(when). Add this as a separate entry?")
+            }
             .alert("API Key Required", isPresented: $showAPIKeyRequiredAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
