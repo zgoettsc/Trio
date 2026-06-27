@@ -166,3 +166,4 @@
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowSMBMinutesMultiplier","newValue":"1.5","oldValue":"2"},"timestamp":"2026-06-27T22:34:35.396Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowSMBRatioValue","newValue":"0.7","oldValue":"0.8"},"timestamp":"2026-06-27T22:34:35.396Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowToughMealCapPercent","newValue":"75","oldValue":"80"},"timestamp":"2026-06-27T22:34:35.396Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
+{"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Running","overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5","percentage":75,"targetMgdL":160},"timestamp":"2026-06-27T22:47:29.532Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
