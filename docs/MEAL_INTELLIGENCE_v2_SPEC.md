@@ -201,6 +201,15 @@ provides the per-instance compute, just aggregate.
 
 ## Feature 5 — Live (a priori) carbs estimator + banner
 
+**SHIPPED.** The simple version described below shipped first, then hit
+real-world false-positive cases (FP-heavy meals, BG trajectory turning
+down, loop suspended at the safety floor, re-firing against
+already-accepted suggestions). All of those are addressed by the
+hardening pass documented in **`MEAL_INTELLIGENCE_v3_SPEC.md §2`**
+(FP guard, trend guard, loop-parked guard, auto-retract, live-carb-sum
+fix, suppression telemetry). Keep this section as the original spec
+and refer to v3 for the as-built behavior.
+
 **Rationale:**
 The post-hoc estimator catches misses AFTER the fact. A live version
 nudges the user mid-meal to add more carbs (or phantom COB) when the

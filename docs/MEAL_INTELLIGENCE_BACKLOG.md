@@ -72,6 +72,12 @@ so use cautiously — bumping too high will over-correct quick-carb meals.
 
 ## 2. Live (a priori) carbs estimator — discussion
 
+**SHIPPED + HARDENED.** Original spec landed in v2 (Feature 5). After
+real-world false positives a five-piece hardening pass was added —
+FP-early-window guard, trend guard, loop-parked guard, auto-retract,
+live-carb-sum fix — see **`MEAL_INTELLIGENCE_v3_SPEC.md §2`** for the
+as-built behavior, guard stack ordering, and suppression telemetry.
+
 The post-hoc estimator (shipped in `SavedMealInstanceDetailView`) is easy
 because we know peakBG. Live, you have to project. Three reasonable
 approaches:
