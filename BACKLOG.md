@@ -65,11 +65,19 @@ so use cautiously — bumping too high will over-correct quick-carb meals.
 
 ## 2. Live (a priori) carbs estimator — discussion
 
+**SHIPPED + HARDENED.** Original method (A) shipped in v2 (Feature 5).
+After real-world false positives a five-piece hardening pass was added
+— FP-early-window guard, trend guard, loop-parked guard, auto-retract,
+live-carb-sum fix — see **`MEAL_INTELLIGENCE_v3_SPEC.md §2`** for the
+as-built behavior, guard stack ordering, and suppression telemetry.
+Method (B) historical-curve overlay and method (C) trajectory
+classifier remain open follow-ups.
+
 The post-hoc estimator (shipped in `SavedMealInstanceDetailView`) is easy
 because we know peakBG. Live, you have to project. Three reasonable
 approaches:
 
-### A. Expectation-deviation method (cheapest) — shipped (v2 spec)
+### A. Expectation-deviation method (cheapest) — shipped (v2 spec) + v3 hardened
 Each loop, compute what BG *should be* given activation BG +
 COB-absorbed-so-far × ISF/CR − insulin-delivered × ISF. If actual exceeds
 expected by more than ~30 mg/dL, the missing rise implies extra carbs
@@ -206,6 +214,10 @@ when available."
 ---
 
 ## 6. Inverse calibration (v3) — solve for CR/ISF given KNOWN carbs
+
+**SHIPPED** (commits f652226f0 + 8adb0c52d). See
+`MEAL_INTELLIGENCE_v3_SPEC.md §1` for the as-built spec, schema,
+math, UI, telemetry, and files touched.
 
 **Idea:** flip the post-hoc estimator. Instead of trusting CR/ISF and
 inferring carbs, trust carbs (when the user verified them) and infer
