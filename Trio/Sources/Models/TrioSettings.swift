@@ -170,6 +170,14 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// Off = silent notification (still appears on lock screen, doesn't
     /// make noise). Independent of the master notifications toggle.
     var liveCarbsEstimatorNotificationSound: Bool = true
+    /// Fat-protein guard. When ON, suppresses estimator suggestions during
+    /// the first 60 min of a meal window if the logged fat + protein total
+    /// is ≥ 25g. The early-window "BG higher than expected" signal on
+    /// fat-protein meals is actually the carb-absorption curve, not
+    /// under-counted carbs — accepting the suggestion stacks phantom carbs
+    /// that drive over-aggressive SMBs. Defaults ON; user can disable for
+    /// meals where fast carbs dominate macros.
+    var liveCarbsEstimatorFPGuardEnabled: Bool = true
     /// In-flight estimator suggestion that the home view should surface
     /// as a banner / sheet on next foreground. Cleared when the user
     /// acts on it or dismisses. Persists across app restarts so a
@@ -486,6 +494,9 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Bool.self, forKey: .liveCarbsEstimatorNotificationSound) {
             settings.liveCarbsEstimatorNotificationSound = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .liveCarbsEstimatorFPGuardEnabled) {
+            settings.liveCarbsEstimatorFPGuardEnabled = v
         }
         if let v = try? container.decode(PendingLiveCarbsSuggestion.self, forKey: .pendingLiveCarbsSuggestion) {
             settings.pendingLiveCarbsSuggestion = v

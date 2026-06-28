@@ -198,6 +198,17 @@ struct EatingModeTuningView: View {
                             set: { vm.liveCarbsSound = $0; vm.save(\.liveCarbsEstimatorNotificationSound, $0) }
                         ))
                     }
+                    Toggle(isOn: Binding(
+                        get: { vm.liveCarbsFPGuard },
+                        set: { vm.liveCarbsFPGuard = $0; vm.save(\.liveCarbsEstimatorFPGuardEnabled, $0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Suppress on fat-protein meals (first hour)")
+                            Text("Skips the suggestion when fat+protein ≥ 25g and the window is < 60 min old — the early 'BG too high' signal on FP meals is the absorption curve, not missing carbs.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .listRowBackground(Color.chart)
@@ -237,6 +248,7 @@ private final class ViewModel: ObservableObject {
     @Published var liveCarbsEnabled: Bool = true
     @Published var liveCarbsNotifications: Bool = true
     @Published var liveCarbsSound: Bool = true
+    @Published var liveCarbsFPGuard: Bool = true
 
     private let resolver: Resolver = TrioApp.resolver
     private lazy var settingsManager: SettingsManager? = resolver.resolve(SettingsManager.self)
@@ -256,6 +268,7 @@ private final class ViewModel: ObservableObject {
         liveCarbsEnabled = s.liveCarbsEstimatorEnabled
         liveCarbsNotifications = s.liveCarbsEstimatorNotificationsEnabled
         liveCarbsSound = s.liveCarbsEstimatorNotificationSound
+        liveCarbsFPGuard = s.liveCarbsEstimatorFPGuardEnabled
     }
 
     /// Generic setter that writes a single TrioSettings field through SettingsManager.
@@ -281,6 +294,7 @@ private final class ViewModel: ObservableObject {
         s.liveCarbsEstimatorEnabled = true
         s.liveCarbsEstimatorNotificationsEnabled = true
         s.liveCarbsEstimatorNotificationSound = true
+        s.liveCarbsEstimatorFPGuardEnabled = true
         settingsManager?.settings = s
         reload()
     }

@@ -836,6 +836,37 @@ final class BaseAPSManager: APSManager, Injectable {
         }
         guard liveCarbsConsecutiveAboveThreshold >= 3 else { return }
 
+        // Fat-protein guard. On FP-heavy meals (≥25g fat+protein logged
+        // by the user so far) the first 60 min show a "BG higher than
+        // expected" signal that is the carb absorption curve, NOT
+        // missing carbs. Accepting the suggestion stacks phantom carbs
+        // that drive over-aggressive SMBs and parks the user with too
+        // much IOB when the FP-delayed half of the rise finally lands.
+        // After 60 min the rise has matured and the signal can be
+        // trusted again — guard releases on its own without resetting
+        // the consecutive counter.
+        if s.liveCarbsEstimatorFPGuardEnabled, minutesSinceOpen < 60 {
+            let fpSum = sumFatProteinSinceWindowOpen(activatedAt: activatedAt)
+            if fpSum >= 25 {
+                algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                    kind: .liveCarbsEstimateSuppressed,
+                    timestamp: now,
+                    windowId: windowId,
+                    payload: [
+                        "reason": .string("fpGuard"),
+                        "fpGramsLogged": .double(fpSum),
+                        "fpGuardThresholdGrams": .double(25),
+                        "fpGuardWindowMinutes": .double(60),
+                        "minutesSinceOpen": .double(minutesSinceOpen),
+                        "extra": .double(extra),
+                        "enteredCarbs": .double(enteredCarbs),
+                        "bg": .double(bg)
+                    ]
+                ))
+                return
+            }
+        }
+
         // Re-fire cooldown
         if let last = lastLiveCarbsTrigger,
            last.windowId == windowId,
@@ -902,6 +933,25 @@ final class BaseAPSManager: APSManager, Injectable {
                 "cr": .double(cr)
             ]
         ))
+    }
+
+    /// Sum of fat + protein grams logged via non-FPU carb entries from
+    /// window activation through now. FPU-derived rows (isFPU == YES) are
+    /// the auto-generated late-carb-equivalent chunks, NOT the user's
+    /// macros — including them double-counts.
+    private func sumFatProteinSinceWindowOpen(activatedAt: Date) -> Double {
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var total: Double = 0
+        ctx.performAndWait {
+            let req = CarbEntryStored.fetchRequest()
+            req.predicate = NSPredicate(
+                format: "date >= %@ AND isFPU == NO",
+                activatedAt as NSDate
+            )
+            let rows = (try? ctx.fetch(req)) ?? []
+            total = rows.reduce(0) { $0 + $1.fat + $1.protein }
+        }
+        return total
     }
 
     func simulateDetermineBasal(

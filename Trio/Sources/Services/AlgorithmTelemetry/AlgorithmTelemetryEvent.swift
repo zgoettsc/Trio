@@ -32,6 +32,7 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case liveCarbsEstimateTriggered // mid-meal BG trajectory implies entered carbs were too low; suggestion shown
     case liveCarbsEstimateAccepted // user accepted the suggestion and added carbs
     case liveCarbsEstimateDismissed // user dismissed the suggestion
+    case liveCarbsEstimateSuppressed // 3-loop threshold met BUT a guard suppressed firing (e.g. fat-protein early-window guard)
     case mealCarbsVerified // user attested ground-truth carbs for a closed instance — drives inverse calibrator
     case mealCarbsVerifiedCleared // user cleared a previously verified amount
 }
