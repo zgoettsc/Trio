@@ -823,7 +823,15 @@ final class BaseAPSManager: APSManager, Injectable {
         // window-snapshot fields haven't been backfilled yet on this row.
         let bgAtActivation = s.mealClassifierActivationBG
         guard let bgStart = bgAtActivation, bgStart > 0 else { return }
-        let enteredCarbs = Double(truncating: s.mealWindowEstimatedCarbs as NSDecimalNumber)
+        // Sum ALL non-FPU carb entries since window open. Crucially this
+        // includes any extra entries the user added (via the suggestion
+        // sheet OR by hand) — `s.mealWindowEstimatedCarbs` freezes at
+        // activation, so using it would have the estimator keep saying
+        // "the meal is bigger" against the original 65g long after the
+        // user already accepted a +31g suggestion bumping logged total
+        // to 96g. Reading the live sum makes acceptance visible to the
+        // trigger and stops the repeat-prompting loop cold.
+        let enteredCarbs = sumCarbsSinceWindowOpen(activatedAt: activatedAt)
         // Skip if user hasn't logged carbs yet — no baseline to compare to.
         guard enteredCarbs > 0 else { return }
         // Resolve ISF / CR from the most recent determination.
@@ -1022,6 +1030,27 @@ final class BaseAPSManager: APSManager, Injectable {
                 "cr": .double(cr)
             ]
         ))
+    }
+
+    /// Sum of carbs (g) logged via non-FPU CarbEntryStored rows from
+    /// window activation through now. Includes the initial meal entry
+    /// AND any subsequent additions (estimator add, estimator edit,
+    /// manual carb entries during the window). FPU-derived chunks are
+    /// excluded — they're absorption-curve fictional carbs, not user
+    /// macros, and counting them would double-credit the meal.
+    private func sumCarbsSinceWindowOpen(activatedAt: Date) -> Double {
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var total: Double = 0
+        ctx.performAndWait {
+            let req = CarbEntryStored.fetchRequest()
+            req.predicate = NSPredicate(
+                format: "date >= %@ AND isFPU == NO",
+                activatedAt as NSDate
+            )
+            let rows = (try? ctx.fetch(req)) ?? []
+            total = rows.reduce(0) { $0 + $1.carbs }
+        }
+        return total
     }
 
     /// Sum of fat + protein grams logged via non-FPU carb entries from
