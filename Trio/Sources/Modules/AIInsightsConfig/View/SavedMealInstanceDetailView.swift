@@ -521,12 +521,13 @@ enum CarbsEstimator {
             )
         }
 
-        // Historical rows from before the temp-basal-integration bug fix
-        // may have negative or zero totalInsulinDeliveredU. When the stored
-        // value is implausibly low (< the raw SMB sum on smbsJSON), fall
-        // back to the SMB sum so the estimator produces sensible numbers.
-        // SMB sum is a conservative lower bound — doesn't include temp
-        // basal effects, but at least represents the loop's bolus response.
+        // Use the stored signed value when it's physically plausible
+        // (suspensions reduce implied carbs, which is correct math).
+        // Legacy fallback: when stored is MORE negative than the SMB
+        // sum could ever explain, it's the pre-fix overlap bug — the
+        // suspension integral can't physically exceed SMBs delivered
+        // (a 6h window's full suspension caps at ~-8U, easily covered
+        // by the SMBs on a real meal). Use SMB sum alone then.
         let smbSumFromJSON: Double = {
             guard let json = inst.smbsJSON,
                   let data = json.data(using: .utf8),
@@ -536,10 +537,15 @@ enum CarbsEstimator {
         }()
         let insulin: Double = {
             let stored = inst.totalInsulinDeliveredU
-            if stored >= smbSumFromJSON { return stored }
-            // Stored is suspect — at minimum we delivered the SMBs in
-            // smbsJSON. Use that as the floor.
-            return smbSumFromJSON
+            // If stored is implausibly negative (magnitude > SMBs), the
+            // pre-fix overlap bug inflated the suspension integral.
+            // Fall back to SMB sum alone (no temp delta credit) —
+            // still overshoots the true estimate a bit but stops the
+            // math from going negative.
+            if stored < 0, abs(stored) > smbSumFromJSON {
+                return smbSumFromJSON
+            }
+            return stored
         }()
 
         let rise = max(0, peak - bgStart)
@@ -585,12 +591,16 @@ enum CarbsEstimator {
             confidence = min(confidence, .low)
             caveats.append("using fallback values for: " + fallbacksUsed.joined(separator: ", "))
         }
-        if inst.totalInsulinDeliveredU < smbSumFromJSON {
-            // The stored insulin metric is implausible (likely a row
-            // emitted before the temp-basal-integration bug fix). We
-            // substituted the SMB sum as a lower bound.
+        if inst.totalInsulinDeliveredU < 0,
+           abs(inst.totalInsulinDeliveredU) > smbSumFromJSON
+        {
+            // The stored insulin metric is implausibly negative — bug in
+            // the pre-80b77f873 temp-basal-overlap integration. We
+            // substituted the SMB sum (loop's positive contribution
+            // alone). This OVERSHOOTS the true estimate because basal
+            // contributions are missing.
             confidence = min(confidence, .low)
-            caveats.append("stored insulin total was implausible (\(String(format: "%.2f", inst.totalInsulinDeliveredU)) U); using SMB sum (\(String(format: "%.2f", smbSumFromJSON)) U) as lower bound — temp basal contribution missing")
+            caveats.append("legacy row, stored insulin (\(String(format: "%.2f", inst.totalInsulinDeliveredU)) U) was from the pre-fix overlap bug; using SMB sum (\(String(format: "%.2f", smbSumFromJSON)) U) — estimate will overshoot")
         }
         let footnote: String = {
             var parts = [

@@ -108,14 +108,16 @@ struct SavedMealOutcomeCalculator {
             }
         }
 
-        // Insulin "above baseline" = SMBs + integral of POSITIVE (temp -
-        // scheduled) delta over the window. Captures the loop's positive
-        // contribution to the meal. We deliberately ignore basal
-        // suppression (temp < scheduled) because that's a separate loop
-        // behavior — reacting to a falling-BG-risk prediction, not
-        // "negative meal coverage." Including it would mean a well-bolused
-        // meal that briefly crashed BG would have a negative metric, which
-        // is meaningless. Result is always ≥ 0 for any real meal.
+        // Insulin "above baseline" = SMBs + signed integral of (temp -
+        // scheduled). The signed delta is physically correct for the
+        // estimator's back-calculation of carbs: if the loop suspended
+        // basal, less insulin acted on the BG curve → the meal's implied
+        // carbs are smaller for the same observed rise. With the
+        // overlap-clipping fix (80b77f873), the realistic worst-case
+        // for full suspension over a 6h meal is ~-8U, easily outweighed
+        // by SMBs on a real meal, so the SUM stays positive in practice.
+        // (Display clamps to 0 to avoid confusing users on the off
+        // chance the math goes slightly negative.)
         let smbContribution = smbs.reduce(0) { $0 + $1.units }
         let tempBasalContribution = integrateTempBasalDelta(from: activatedAt, to: closedAt)
         let insulinAboveBaseline = smbContribution + tempBasalContribution
@@ -256,16 +258,13 @@ struct SavedMealOutcomeCalculator {
                 let durationHours = stepEnd.timeIntervalSince(cursor) / 3600
                 let scheduledRate = scheduledBasalRate(at: cursor, profile: basalProfile)
                 let actualRate = Double(truncating: tb.rate)
-                // Only POSITIVE deltas count toward meal coverage. A loop
-                // suspension below scheduled basal is a falling-BG-risk
-                // reaction, not negative meal dosing — counting it here
-                // would let a meal with a brief BG crash come out with a
-                // negative "insulin above baseline" metric, which is
-                // meaningless. See the F-21 follow-up in FINDINGS.md.
-                let delta = actualRate - scheduledRate
-                if delta > 0 {
-                    total += delta * durationHours
-                }
+                // SIGNED delta. Suspensions count as negative — physically
+                // correct: less insulin acted on the BG curve than baseline,
+                // so the same observed rise implies fewer carbs. With the
+                // overlap-clipping fix the integration magnitude is bounded
+                // by (max basal × window hours), which is small enough that
+                // SMBs dominate on any real meal.
+                total += (actualRate - scheduledRate) * durationHours
                 cursor = stepEnd
             }
         }
