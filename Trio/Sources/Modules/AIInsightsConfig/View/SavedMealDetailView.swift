@@ -626,7 +626,7 @@ struct SavedMealDetailView: View {
                     aggCalibRow(
                         label: "Median back-calc CR",
                         value: String(format: "%.1f g/U", cr),
-                        current: String(format: "%.1f", current),
+                        baseline: String(format: "%.1f", current),
                         deltaPercent: agg.deltaCRPercent
                     )
                 }
@@ -634,7 +634,7 @@ struct SavedMealDetailView: View {
                     aggCalibRow(
                         label: "Median back-calc ISF",
                         value: "\(Int(isf.rounded())) mg/dL/U",
-                        current: "\(Int(current.rounded()))",
+                        baseline: "\(Int(current.rounded()))",
                         deltaPercent: agg.deltaISFPercent
                     )
                 } else if agg.usedISFIndeterminateCount == agg.instanceCount, agg.instanceCount > 0 {
@@ -655,7 +655,7 @@ struct SavedMealDetailView: View {
         }
     }
 
-    private func aggCalibRow(label: String, value: String, current: String, deltaPercent: Double?) -> some View {
+    private func aggCalibRow(label: String, value: String, baseline: String, deltaPercent: Double?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label)
@@ -663,7 +663,10 @@ struct SavedMealDetailView: View {
                 Text(value).fontWeight(.semibold).monospacedDigit()
             }
             HStack {
-                Text("vs current \(current)")
+                // Baseline shown here is the profile value that was active when
+                // the first verified instance ran — NOT today's profile.
+                // Accurate when CR/ISF haven't shifted, slightly stale otherwise.
+                Text("vs profile-at-meal-time \(baseline)")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if let pct = deltaPercent {

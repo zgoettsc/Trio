@@ -196,7 +196,7 @@ struct SavedMealInstanceDetailView: View {
                     calibRow(
                         label: "Back-calc CR",
                         value: String(format: "%.1f g/U", backCR),
-                        current: String(format: "%.1f", result.assumedCR),
+                        baseline: String(format: "%.1f", result.assumedCR),
                         deltaPercent: result.deltaCRPercent
                     )
                 }
@@ -204,7 +204,7 @@ struct SavedMealInstanceDetailView: View {
                     calibRow(
                         label: "Back-calc ISF",
                         value: "\(Int(backISF.rounded())) mg/dL/U",
-                        current: "\(Int(result.assumedISF.rounded()))",
+                        baseline: "\(Int(result.assumedISF.rounded()))",
                         deltaPercent: result.deltaISFPercent
                     )
                 } else if result.isfIndeterminate {
@@ -224,7 +224,7 @@ struct SavedMealInstanceDetailView: View {
         }
     }
 
-    private func calibRow(label: String, value: String, current: String, deltaPercent: Double?) -> some View {
+    private func calibRow(label: String, value: String, baseline: String, deltaPercent: Double?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label)
@@ -232,7 +232,11 @@ struct SavedMealInstanceDetailView: View {
                 Text(value).fontWeight(.semibold).monospacedDigit()
             }
             HStack {
-                Text("vs current \(current)")
+                // The baseline is the value oref was actually using at this
+                // meal — captured via `*AtActivation` fields. Comparing to
+                // it (not today's profile) keeps the back-calc honest when
+                // the user has since edited their profile.
+                Text("vs profile-at-meal-time \(baseline)")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if let pct = deltaPercent {
