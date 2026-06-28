@@ -498,7 +498,7 @@
 		F2B0C3D40023000000000001 /* SavedMealsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40022000000000001 /* SavedMealsListView.swift */; };
 		F2B0C3D40025000000000001 /* SavedMealEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40024000000000001 /* SavedMealEditView.swift */; };
 		F2B0C3D40027000000000001 /* SavedMealDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40026000000000001 /* SavedMealDetailView.swift */; };
-		F2B0C3D40029000000000001 /* SavedMealInstanceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40028000000000001 /* SavedMealInstanceDetailView.swift */; };
+		F2B0C3D40035000000000001 /* SavedMealInstanceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40034000000000001 /* SavedMealInstanceDetailView.swift */; };
 		F2B0C3D40029000000000001 /* SavedMealOutcomeCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40028000000000001 /* SavedMealOutcomeCalculator.swift */; };
 		F2B0C3D4002B000000000001 /* SavedMealAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4002A000000000001 /* SavedMealAnalytics.swift */; };
 		F2B0C3D4002D000000000001 /* SavedMealTelemetryRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D4002C000000000001 /* SavedMealTelemetryRow.swift */; };
@@ -1448,7 +1448,7 @@
 		F2B0C3D40022000000000001 /* SavedMealsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsListView.swift; sourceTree = "<group>"; };
 		F2B0C3D40024000000000001 /* SavedMealEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealEditView.swift; sourceTree = "<group>"; };
 		F2B0C3D40026000000000001 /* SavedMealDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealDetailView.swift; sourceTree = "<group>"; };
-		F2B0C3D40028000000000001 /* SavedMealInstanceDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealInstanceDetailView.swift; sourceTree = "<group>"; };
+		F2B0C3D40034000000000001 /* SavedMealInstanceDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealInstanceDetailView.swift; sourceTree = "<group>"; };
 		F2B0C3D40028000000000001 /* SavedMealOutcomeCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealOutcomeCalculator.swift; sourceTree = "<group>"; };
 		F2B0C3D4002A000000000001 /* SavedMealAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealAnalytics.swift; sourceTree = "<group>"; };
 		F2B0C3D4002C000000000001 /* SavedMealTelemetryRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealTelemetryRow.swift; sourceTree = "<group>"; };
@@ -3301,7 +3301,7 @@
 				F2B0C3D40022000000000001 /* SavedMealsListView.swift */,
 				F2B0C3D40024000000000001 /* SavedMealEditView.swift */,
 				F2B0C3D40026000000000001 /* SavedMealDetailView.swift */,
-				F2B0C3D40028000000000001 /* SavedMealInstanceDetailView.swift */,
+				F2B0C3D40034000000000001 /* SavedMealInstanceDetailView.swift */,
 				F2B0C3D4002A000000000001 /* SavedMealAnalytics.swift */,
 				F2B0C3D4002E000000000001 /* SavedMealPickerView.swift */,
 				F2B0C3D40032000000000001 /* SavedMealBackfillPickerView.swift */,
@@ -4765,7 +4765,7 @@
 				F2B0C3D40023000000000001 /* SavedMealsListView.swift in Sources */,
 				F2B0C3D40025000000000001 /* SavedMealEditView.swift in Sources */,
 				F2B0C3D40027000000000001 /* SavedMealDetailView.swift in Sources */,
-				F2B0C3D40029000000000001 /* SavedMealInstanceDetailView.swift in Sources */,
+				F2B0C3D40035000000000001 /* SavedMealInstanceDetailView.swift in Sources */,
 				F2B0C3D40029000000000001 /* SavedMealOutcomeCalculator.swift in Sources */,
 				F2B0C3D4002B000000000001 /* SavedMealAnalytics.swift in Sources */,
 				F2B0C3D4002D000000000001 /* SavedMealTelemetryRow.swift in Sources */,
