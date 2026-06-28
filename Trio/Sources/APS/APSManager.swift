@@ -781,6 +781,42 @@ final class BaseAPSManager: APSManager, Injectable {
               let bg = sample.bg
         else { return }
         let minutesSinceOpen = now.timeIntervalSince(activatedAt) / 60
+
+        // Auto-retract a stale pending banner the moment trajectory turns.
+        // The pendingLiveCarbsSuggestion sits in settings until the user
+        // taps it — but if BG started dropping after it fired, the
+        // suggestion is no longer valid and the banner is wrong / harmful.
+        // Retract on either: trend has turned negative, or loop has
+        // parked at the safety floor (eventualBG ≤ 55). Logged as
+        // suppressed with reason "retracted" so we can see how often
+        // this happens.
+        if let pending = s.pendingLiveCarbsSuggestion,
+           pending.windowId == windowId
+        {
+            let nowFalling = (sample.shortAvgDelta ?? 1) <= 0
+            let nowParked = (sample.eventualBG ?? 999) <= 55
+            if nowFalling || nowParked {
+                var updated = s
+                updated.pendingLiveCarbsSuggestion = nil
+                settingsManager.settings = updated
+                algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                    kind: .liveCarbsEstimateSuppressed,
+                    timestamp: now,
+                    windowId: windowId,
+                    payload: [
+                        "reason": .string("retracted"),
+                        "nowFalling": .bool(nowFalling),
+                        "nowParked": .bool(nowParked),
+                        "shortAvgDelta": .double(sample.shortAvgDelta ?? 0),
+                        "eventualBG": .double(sample.eventualBG ?? 0),
+                        "minutesSinceOpen": .double(minutesSinceOpen),
+                        "priorSuggestedExtra": .double(pending.suggestedExtra)
+                    ]
+                ))
+                return
+            }
+        }
+
         guard minutesSinceOpen >= 30 else { return } // signal needs time to develop
 
         // Inputs — fall back to current OrefDetermination's ISF/CR if the
@@ -835,6 +871,59 @@ final class BaseAPSManager: APSManager, Injectable {
             return
         }
         guard liveCarbsConsecutiveAboveThreshold >= 3 else { return }
+
+        // Trend guard. The implied-extra math is direction-blind — it
+        // looks at accumulated rise + IOB, which both stay elevated long
+        // after BG has peaked and started falling. Without this check
+        // the estimator fires "your meal looks bigger" while BG is
+        // actively dropping, which is the exact opposite of what's
+        // happening. Require shortAvgDelta > 0 (15-min trend up) to
+        // confirm there are still carbs arriving worth covering. If the
+        // user is genuinely going low, that's a hypo alarm — different
+        // signal, different path.
+        let trendUp = (sample.shortAvgDelta ?? 0) > 0 || (sample.delta5m ?? 0) > 2
+        if !trendUp {
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .liveCarbsEstimateSuppressed,
+                timestamp: now,
+                windowId: windowId,
+                payload: [
+                    "reason": .string("trendNotRising"),
+                    "shortAvgDelta": .double(sample.shortAvgDelta ?? 0),
+                    "delta5m": .double(sample.delta5m ?? 0),
+                    "extra": .double(extra),
+                    "enteredCarbs": .double(enteredCarbs),
+                    "bg": .double(bg),
+                    "minutesSinceOpen": .double(minutesSinceOpen)
+                ]
+            ))
+            return
+        }
+
+        // Loop-active guard. eventualBG = 39 is oref's minimum-floor
+        // sentinel — it predicts BG would crash if dosing continued, so
+        // it has shut off all insulin. Telling the user to add more
+        // carbs in this state is nonsense: the loop has zero room to
+        // dose the new carbs anyway, and they'd just stack on top of
+        // already-too-much IOB. Treat anything within 15 mg/dL of the
+        // floor as "loop is parked, don't fire."
+        let loopParked = (sample.eventualBG ?? 999) <= 55
+        if loopParked {
+            algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+                kind: .liveCarbsEstimateSuppressed,
+                timestamp: now,
+                windowId: windowId,
+                payload: [
+                    "reason": .string("loopParked"),
+                    "eventualBG": .double(sample.eventualBG ?? 0),
+                    "extra": .double(extra),
+                    "enteredCarbs": .double(enteredCarbs),
+                    "bg": .double(bg),
+                    "minutesSinceOpen": .double(minutesSinceOpen)
+                ]
+            ))
+            return
+        }
 
         // Fat-protein guard. On FP-heavy meals (≥25g fat+protein logged
         // by the user so far) the first 60 min show a "BG higher than
