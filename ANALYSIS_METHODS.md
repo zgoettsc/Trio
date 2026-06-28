@@ -14,7 +14,7 @@ One JSON object per line. Common fields: `kind`, `timestamp`, `windowId`,
 
 | kind | payload fields |
 |---|---|
-| `mealWindowActivated` | source, estimatedCarbs, bg, iob, cob, delta5m, durationMinutes |
+| `mealWindowActivated` | source, estimatedCarbs, bg, iob, cob, delta5m, bgTrend30m, autosensRatio, smartSenseRatio, effectiveISF, durationMinutes |
 | `mealWindowCancelled` | source (`shortcut`/`homeBanner`/`liveActivityLink`), minutesSinceActivation, bg, iob |
 | `mealWindowExpired` | source (`naturalExpiry`), elapsedMinutes, wasCarbsConfirmed |
 | `mealWindowCarbsConfirmed` | carbs, fat, protein, minutesSinceActivation |
@@ -28,6 +28,7 @@ One JSON object per line. Common fields: `kind`, `timestamp`, `windowId`,
 | `tempTargetStarted` | tempTargetId, name, targetMgdL, durationMinutes |
 | `tempTargetCancelled` | tempTargetId |
 | `mealWindowTuningChanged` | field, oldValue, newValue — emitted per-field when any of the 9 PLAN.md tuning settings change |
+| `podChanged` | source (`pumpRewind`) — pod swap (Omnipod) or cartridge change (Medtronic) |
 
 ### `loop.jsonl`
 
@@ -63,6 +64,47 @@ Two rows per window, joined by `windowId`:
   `totalSMBInsulin`, `totalManualBolusInsulin`, `floorActivationCount` populated.
 
 Filter for outcome rows with `select(.peakBG != null)`.
+
+### `meals.jsonl` (and per-meal `history/<mealId>.jsonl`)
+
+One row per closed `SavedMealInstance`. Same row written to both:
+the daily roll-up (`telemetry/<YYYY-MM>/<DD>/meals.jsonl`) and the
+per-meal history file (`telemetry/meals/history/<mealId>.jsonl`).
+
+Stable fields you'll filter on every analysis:
+
+- `instanceId`, `savedMealId`, `savedMealName` (nil if anonymized),
+  `windowId`, `startedAt`, `closedAt`, `deviceTimeZone`
+- `macros.carbs`, `macros.fat`, `macros.protein` (all optional)
+- `carbBucket` — `"small"` <40g, `"medium"` 40–80g, `"large"` ≥80g
+- `initialClassification`, `finalClassification` —
+  `simple`/`medium`/`complex`
+- `bgCurveJSON` — array of `{t, bg}` where `t` is minutes-from-activation
+- `smbsJSON` — array of `{t, units}`
+- `floorActivationsJSON` — array of `{t, prior, floored, factor}`
+- `classifierUpgradesJSON` — array of upgrade events
+- `outcomeScore` — 0–100
+- `metrics.{peakBG, timeInRangeMinutes, timeAboveRangeMinutes,
+  timeBelowRangeMinutes, lowsCount, timeToBaselineMinutes,
+  totalInsulinDeliveredU, smbCount, floorActivationCount}`
+
+**Activation context (added schema v10)** — one-shot snapshot taken
+at the moment the eating-mode window opened:
+
+- `context.bgAtActivation` — BG (mg/dL) at activation
+- `context.bgTrendAtActivation` — Δ BG over prior 30 min (mg/dL,
+  positive = rising into the meal)
+- `context.autosensRatioAtActivation` — oref Autosens (1.0 neutral,
+  >1 resistant, <1 sensitive)
+- `context.smartSenseRatioAtActivation` — Smart-Sense blended final
+  ratio (post-Autosens + post-Garmin)
+- `context.effectiveISFAtActivation` — ISF (mg/dL per U) oref was
+  actually using at activation, already adjusted by Autosens
+
+All five `context` fields are individually optional — nil when the
+source value wasn't available (fresh install, sensor outage,
+Smart-Sense disabled, <30 min of glucose history). Pre-v10 rows
+have no `context` block at all.
 
 ### `settings.json`
 
@@ -418,6 +460,146 @@ Hour 18:00 — CR 12 g/U observed back-calc 10
 
 Always present as **suggestions**, never auto-apply. Confidence depends on
 sample count per hour — flag hours with <5 events as low-confidence.
+
+---
+
+## Analysis 5 — Insulin-sensitivity readings vs per-meal excursion
+
+**Goal:** answer two questions with one regression set:
+1. Does a high Autosens / Smart-Sense reading at meal-time actually
+   predict a larger excursion? If yes, the sensors are doing their
+   job. If not, they're noise (or backwards) for your physiology.
+2. Are pre-meal BG and trend independent predictors of excursion
+   size? "Starts high → flatter rise" is folk wisdom — check it.
+
+**Inputs:** `meals.jsonl` (or `meals/history/<mealId>.jsonl` to
+restrict to one meal), schema v10+.
+
+**Recipe:**
+
+```python
+import pandas as pd, glob, json
+
+def load_jsonl(pattern):
+    rows = []
+    for p in sorted(glob.glob(pattern)):
+        with open(p) as f:
+            rows.extend(json.loads(line) for line in f)
+    return pd.DataFrame(rows)
+
+meals = load_jsonl("telemetry/*/*/meals.jsonl")
+# Pre-v10 rows lack `context` — drop them or fill with NaN
+ctx_cols = [
+    "bgAtActivation", "bgTrendAtActivation",
+    "autosensRatioAtActivation", "smartSenseRatioAtActivation",
+    "effectiveISFAtActivation",
+]
+for c in ctx_cols:
+    meals[c] = meals.context.apply(lambda d: (d or {}).get(c))
+meals["peakBG"]  = meals.metrics.apply(lambda d: d.get("peakBG"))
+meals["peakDelta"] = meals.peakBG - meals.bgAtActivation
+
+# 1) Correlation: sensitivity ratio vs excursion size
+import numpy as np
+for ratio in ["autosensRatioAtActivation", "smartSenseRatioAtActivation"]:
+    s = meals.dropna(subset=[ratio, "peakDelta"])
+    if len(s) < 10:
+        print(f"{ratio}: insufficient samples ({len(s)})")
+        continue
+    corr = np.corrcoef(s[ratio], s.peakDelta)[0, 1]
+    print(f"{ratio} × peakDelta: r={corr:+.2f}, n={len(s)}")
+    # NEGATIVE r = sensor working (high sensitivity → bigger excursion
+    # would mean dosing was UNDER what was needed; you'd expect either
+    # neutral or slightly positive in a well-tuned loop).
+    # POSITIVE r when sensor flags "resistant" → larger excursion =
+    # sensor is correctly identifying days you need more coverage.
+
+# 2) Per-meal: does Autosens explain run-to-run variance?
+for mealId, group in meals.groupby("savedMealId"):
+    g = group.dropna(subset=["autosensRatioAtActivation", "peakDelta"])
+    if len(g) < 5: continue
+    corr = np.corrcoef(g.autosensRatioAtActivation, g.peakDelta)[0, 1]
+    name = g.iloc[0].savedMealName or mealId[:8]
+    print(f"{name:20s} n={len(g):3d}  Autosens×Δ r={corr:+.2f}")
+
+# 3) Baseline-BG hypothesis: does starting higher → flatter excursion?
+s = meals.dropna(subset=["bgAtActivation", "peakDelta"])
+if len(s) >= 10:
+    corr = np.corrcoef(s.bgAtActivation, s.peakDelta)[0, 1]
+    print(f"bgAtActivation × peakDelta: r={corr:+.2f}, n={len(s)}")
+    # NEGATIVE = your hypothesis confirmed.
+    # POSITIVE = high-start meals run higher AUC; folk wisdom wrong.
+
+# 4) Trend at activation as predictor:
+s = meals.dropna(subset=["bgTrendAtActivation", "peakDelta"])
+if len(s) >= 10:
+    corr = np.corrcoef(s.bgTrendAtActivation, s.peakDelta)[0, 1]
+    print(f"bgTrendAtActivation × peakDelta: r={corr:+.2f}, n={len(s)}")
+    # POSITIVE = already-rising meals run hotter (intuitive: the meal
+    # arrived on top of a basal-low or rebound). Worth pre-emptively
+    # bumping a Saved Meal to Complex when this trend is strong.
+
+# 5) Combined model — does Smart-Sense add anything over Autosens alone?
+from sklearn.linear_model import LinearRegression
+s = meals.dropna(subset=ctx_cols + ["peakDelta"])
+if len(s) >= 20:
+    base = LinearRegression().fit(s[["autosensRatioAtActivation"]], s.peakDelta)
+    full = LinearRegression().fit(s[ctx_cols], s.peakDelta)
+    print(f"R² Autosens only: {base.score(s[['autosensRatioAtActivation']], s.peakDelta):.2f}")
+    print(f"R² All 5 context: {full.score(s[ctx_cols], s.peakDelta):.2f}")
+    # If full ≈ base, the extra signals add no info beyond Autosens.
+    # If full >> base, you've justified Smart-Sense / baseline-BG features.
+```
+
+**Per-meal scatter plot (Saved Meal Detail UI candidate):**
+
+```python
+import matplotlib.pyplot as plt
+g = meals[meals.savedMealId == "<your-meal-id>"].dropna(
+    subset=["autosensRatioAtActivation", "peakDelta"]
+)
+plt.scatter(g.autosensRatioAtActivation, g.peakDelta)
+plt.xlabel("Autosens ratio at activation")
+plt.ylabel("Peak Δ (mg/dL above activation BG)")
+plt.title(g.iloc[0].savedMealName or "")
+plt.axhline(0, color="gray", lw=0.5); plt.axvline(1.0, color="gray", lw=0.5)
+plt.show()
+```
+
+**What to look for:**
+- A clear negative slope when correlating Autosens × peakDelta across
+  ALL meals would suggest the loop *already* compensates for measured
+  sensitivity changes — exactly the closed-loop ideal. Flat or
+  positive means the sensor flags something dosing isn't acting on.
+- Per-meal Autosens correlations vary by composition: protein-heavy
+  meals where late-phase coverage matters may correlate poorly with
+  an Autosens reading taken at activation (the relevant sensitivity
+  shifts hours later).
+- High variance at neutral Autosens (≈1.0) with low variance at
+  extreme readings = the sensor only adds value when it deviates;
+  near-neutral readings are noise.
+
+**Caveats:**
+- `effectiveISFAtActivation` is *already* Autosens-adjusted — don't
+  treat it as an independent variable alongside `autosensRatio`.
+- `smartSenseRatio` and `autosensRatio` are correlated by construction
+  (Smart-Sense blends Autosens with Garmin). Use Variance Inflation
+  Factor (VIF) before reading combined-regression coefficients.
+- Pre-v10 rows lack `context`. Either drop them or backfill with nil
+  and report sample counts in every output.
+- `bgTrendAtActivation` is nil when <30 min of glucose history exists
+  (fresh sensor, post-outage). Don't treat nil as 0.
+
+---
+
+## Cross-cutting: `mealWindowActivated` event payload (schema update)
+
+The event payload on `mealWindowActivated` now also carries the same
+activation context: `bgTrend30m`, `autosensRatio`, `smartSenseRatio`,
+`effectiveISF`. Useful when you want the context but don't care which
+saved meal (or no saved meal was attached). The `meals.jsonl` row is
+the canonical source if a SavedMeal *was* used — it stays consistent
+across instance updates while events are append-only.
 
 ---
 
