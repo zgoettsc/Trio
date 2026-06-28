@@ -1,6 +1,7 @@
 import Charts
 import CoreData
 import Foundation
+import Swinject
 import SwiftUI
 
 /// Per-instance detail page. Navigated to from a SavedMealDetailView history
@@ -15,6 +16,21 @@ struct SavedMealInstanceDetailView: View {
     @Environment(AppState.self) var appState
 
     @ObservedObject var instance: SavedMealInstance
+
+    enum ChartMode: String, CaseIterable, Identifiable {
+        case absolute, delta
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .absolute: return "Absolute"
+            case .delta: return "Δ from baseline"
+            }
+        }
+    }
+
+    @State private var chartMode: ChartMode = .absolute
+
+    private let resolver: Resolver = TrioApp.resolver
 
     var body: some View {
         Form {
@@ -79,7 +95,10 @@ struct SavedMealInstanceDetailView: View {
 
     @ViewBuilder
     private var carbsEstimateSection: some View {
-        let estimate = CarbsEstimator.estimate(from: instance)
+        let estimate = CarbsEstimator.estimate(
+            from: instance,
+            fallback: fallbackInputs()
+        )
         Section(
             header: Text("Carbs"),
             footer: Text(estimate.footnote)
@@ -121,29 +140,48 @@ struct SavedMealInstanceDetailView: View {
     @ViewBuilder
     private var chartSection: some View {
         if let curve = decodeBGCurve(), !curve.isEmpty {
+            let baseline = resolvedBaseline(curve: curve)
+            // Δ mode is only meaningful when we have a baseline reference.
+            let canShowDelta = baseline != nil
             Section(header: Text("BG curve")) {
+                if canShowDelta {
+                    Picker("View", selection: $chartMode) {
+                        ForEach(ChartMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
                 Chart {
                     ForEach(curve, id: \.t) { point in
+                        let y = yValue(for: point.bg, baseline: baseline)
                         LineMark(
                             x: .value("Minutes", point.t),
-                            y: .value("BG", point.bg)
+                            y: .value("BG", y)
                         )
                         .interpolationMethod(.monotone)
                     }
-                    if let baseline = instance.bgAtActivation?.doubleValue {
+                    if chartMode == .absolute, let baseline {
                         RuleMark(y: .value("Baseline", baseline))
                             .foregroundStyle(.secondary)
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     }
-                    RuleMark(y: .value("180", 180))
-                        .foregroundStyle(.orange.opacity(0.5))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
+                    if chartMode == .delta {
+                        RuleMark(y: .value("Zero", 0))
+                            .foregroundStyle(.secondary)
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    } else {
+                        RuleMark(y: .value("180", 180))
+                            .foregroundStyle(.orange.opacity(0.5))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
+                    }
                     if let smbs = decodeSMBs() {
                         ForEach(smbs.indices, id: \.self) { idx in
                             let s = smbs[idx]
+                            let bgAtT = interpolatedBG(at: s.t, curve: curve)
                             PointMark(
                                 x: .value("Minutes", s.t),
-                                y: .value("BG", interpolatedBG(at: s.t, curve: curve))
+                                y: .value("BG", yValue(for: bgAtT, baseline: baseline))
                             )
                             .symbol(.diamond)
                             .symbolSize(15 + s.units * 30)
@@ -153,11 +191,23 @@ struct SavedMealInstanceDetailView: View {
                 }
                 .frame(height: 220)
                 .chartXAxisLabel("Minutes since activation")
-                .chartYAxisLabel("BG (mg/dL)")
+                .chartYAxisLabel(chartMode == .delta ? "Δ from baseline (mg/dL)" : "BG (mg/dL)")
                 .padding(.vertical, 4)
             }
             .listRowBackground(Color.chart)
         }
+    }
+
+    private func yValue(for bg: Double, baseline: Double?) -> Double {
+        if chartMode == .delta, let b = baseline { return bg - b }
+        return bg
+    }
+
+    /// Baseline = stored `bgAtActivation` if present, else the first
+    /// point in `bgCurveJSON`. Returns nil when neither is available.
+    private func resolvedBaseline(curve: [BGPoint]) -> Double? {
+        if let b = instance.bgAtActivation?.doubleValue, b > 0 { return b }
+        return curve.first?.bg
     }
 
     @ViewBuilder
@@ -261,6 +311,69 @@ struct SavedMealInstanceDetailView: View {
         return try? JSONDecoder().decode([SMBPoint].self, from: data)
     }
 
+    /// Resolved estimator inputs — uses stored context fields when present,
+    /// falls back to bgCurveJSON (first/max BG) and current profile schedules
+    /// for ISF / CR on pre-v10 or backfilled instances. The estimator gets
+    /// a `usedFallback` flag so it can downgrade confidence and label clearly.
+    private func fallbackInputs() -> CarbsEstimator.FallbackInputs {
+        let curve = decodeBGCurve() ?? []
+        // BG baseline fallback: first point on the curve.
+        let bgFallback: Double? = curve.first?.bg
+        // Peak fallback: max of the curve.
+        let peakFallback: Double? = curve.map { $0.bg }.max()
+        // ISF / CR fallback: pick the schedule entry active at the meal's
+        // start time-of-day from the user's current profile JSONs.
+        let when = instance.startedAt ?? Date()
+        let isfFallback = scheduledValueAt(
+            file: OpenAPS.Settings.insulinSensitivities,
+            arrayKey: "sensitivities",
+            valueKey: "sensitivity",
+            at: when
+        )
+        let crFallback = scheduledValueAt(
+            file: OpenAPS.Settings.carbRatios,
+            arrayKey: "schedule",
+            valueKey: "ratio",
+            at: when
+        )
+        return CarbsEstimator.FallbackInputs(
+            bgAtActivation: bgFallback,
+            peakBG: peakFallback,
+            effectiveISF: isfFallback,
+            carbRatio: crFallback
+        )
+    }
+
+    /// Pulls a profile JSON via FileStorage and finds the active entry for
+    /// the given Date's time-of-day. Returns nil if the file is missing or
+    /// no entry covers that time. Format both files share: an array of
+    /// objects each with `offset` (minutes-from-midnight) + a value field.
+    private func scheduledValueAt(
+        file: String,
+        arrayKey: String,
+        valueKey: String,
+        at date: Date
+    ) -> Double? {
+        guard let fileStorage = resolver.resolve(FileStorage.self) else { return nil }
+        guard let raw: RawJSON = fileStorage.retrieveRaw(file) else { return nil }
+        guard let data = raw.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = json[arrayKey] as? [[String: Any]],
+              !arr.isEmpty
+        else { return nil }
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.hour, .minute], from: date)
+        let minutesIntoDay = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+        // Pick the entry with largest offset <= minutesIntoDay.
+        let sorted = arr.compactMap { entry -> (offset: Int, value: Double)? in
+            guard let off = entry["offset"] as? Int,
+                  let v = entry[valueKey] as? Double else { return nil }
+            return (off, v)
+        }.sorted { $0.offset < $1.offset }
+        let active = sorted.last { $0.offset <= minutesIntoDay } ?? sorted.first
+        return active?.value
+    }
+
     /// Best-effort BG at a given minute via linear interpolation; falls back
     /// to nearest point. Used to anchor SMB diamonds on the line.
     private func interpolatedBG(at t: Double, curve: [BGPoint]) -> Double {
@@ -327,27 +440,77 @@ enum CarbsEstimator {
         let footnote: String
     }
 
-    static func estimate(from inst: SavedMealInstance) -> Result {
+    /// Inputs the view can provide when the instance's own context fields
+    /// are missing. Each is optional — fallbacks fill in for pre-v10 /
+    /// backfilled rows. When any fallback is used, confidence is downgraded
+    /// and the footnote calls out which values came from where.
+    struct FallbackInputs {
+        let bgAtActivation: Double?
+        let peakBG: Double?
+        let effectiveISF: Double?
+        let carbRatio: Double?
+
+        static let empty = FallbackInputs(
+            bgAtActivation: nil, peakBG: nil,
+            effectiveISF: nil, carbRatio: nil
+        )
+    }
+
+    static func estimate(
+        from inst: SavedMealInstance,
+        fallback: FallbackInputs = .empty
+    ) -> Result {
         let entered = inst.carbsAtActivation?.doubleValue ?? 0
 
-        guard
-            let bgStartN = inst.bgAtActivation, bgStartN.doubleValue > 0,
-            inst.peakBG > 0,
-            let isfN = inst.effectiveISFAtActivation, isfN.doubleValue > 0,
-            let crN = inst.carbRatioAtActivation, crN.doubleValue > 0
-        else {
+        // Resolve each input: stored value first, fallback second. Track
+        // which ones used the fallback so we can downgrade confidence.
+        var fallbacksUsed: [String] = []
+
+        let bgStart: Double? = {
+            if let v = inst.bgAtActivation?.doubleValue, v > 0 { return v }
+            if let v = fallback.bgAtActivation, v > 0 {
+                fallbacksUsed.append("activation BG from BG curve")
+                return v
+            }
+            return nil
+        }()
+
+        let peak: Double? = {
+            if inst.peakBG > 0 { return inst.peakBG }
+            if let v = fallback.peakBG, v > 0 {
+                fallbacksUsed.append("peak BG from BG curve")
+                return v
+            }
+            return nil
+        }()
+
+        let isf: Double? = {
+            if let v = inst.effectiveISFAtActivation?.doubleValue, v > 0 { return v }
+            if let v = fallback.effectiveISF, v > 0 {
+                fallbacksUsed.append("ISF from current profile")
+                return v
+            }
+            return nil
+        }()
+
+        let cr: Double? = {
+            if let v = inst.carbRatioAtActivation?.doubleValue, v > 0 { return v }
+            if let v = fallback.carbRatio, v > 0 {
+                fallbacksUsed.append("CR from current profile")
+                return v
+            }
+            return nil
+        }()
+
+        guard let bgStart, let peak, let isf, let cr else {
             return Result(
                 entered: entered,
                 estimatedGrams: nil, rangeLabel: nil, deltaGrams: nil, deltaColor: .secondary,
                 confidence: .none,
-                footnote: "Estimator needs activation BG, peak BG, effective ISF, and CR — at least one is missing for this instance (likely pre-v10 or backfilled)."
+                footnote: "Estimator needs activation BG, peak BG, ISF, and CR. At least one is missing (no BG curve on this instance, no profile on disk, or pre-v10)."
             )
         }
 
-        let bgStart = bgStartN.doubleValue
-        let peak = inst.peakBG
-        let isf = isfN.doubleValue
-        let cr = crN.doubleValue
         let insulin = max(0, inst.totalInsulinDeliveredU)
 
         let rise = max(0, peak - bgStart)
@@ -386,6 +549,12 @@ enum CarbsEstimator {
         if inst.backfilled {
             confidence = min(confidence, .medium)
             caveats.append("instance was backfilled, not live-tracked")
+        }
+        if !fallbacksUsed.isEmpty {
+            // Fallbacks always cap at low — the stored context is the truth;
+            // using today's profile / curve-derived values is best-effort.
+            confidence = min(confidence, .low)
+            caveats.append("using fallback values for: " + fallbacksUsed.joined(separator: ", "))
         }
         let footnote: String = {
             var parts = [
