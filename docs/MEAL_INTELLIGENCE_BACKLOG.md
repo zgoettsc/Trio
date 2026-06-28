@@ -240,6 +240,10 @@ when available."
 
 ## 6. Inverse calibration (v3) — solve for CR/ISF given KNOWN carbs
 
+**SHIPPED** (commits f652226f0 + 8adb0c52d). See
+`MEAL_INTELLIGENCE_v3_SPEC.md §1` for the as-built spec, schema,
+math, UI, telemetry, and files touched.
+
 **Idea:** flip the post-hoc estimator. Instead of trusting CR/ISF and
 inferring carbs, trust carbs (when the user verified them) and infer
 the effective CR (or ISF) that the BG response implies. Use this as
