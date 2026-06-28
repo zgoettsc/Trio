@@ -178,3 +178,4 @@
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowSMBRatioValue","newValue":"0.75","oldValue":"0.7"},"timestamp":"2026-06-28T00:01:26.816Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
 {"kind":"smbDelivered","payload":{"bg":330,"floorActivated":false,"insulinReq":1.48,"iob":6.647,"minutesSinceWindowOpen":104.80931631525358,"units":1.1},"timestamp":"2026-06-28T00:02:34.275Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
 {"kind":"smbDelivered","payload":{"bg":343,"floorActivated":false,"insulinReq":2.12,"iob":7.364,"minutesSinceWindowOpen":109.82712173263232,"units":1.55},"timestamp":"2026-06-28T00:07:35.343Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
+{"kind":"smbDelivered","payload":{"bg":357,"floorActivated":false,"insulinReq":1.4769999999999999,"iob":8.523,"minutesSinceWindowOpen":114.7860480328401,"units":1.1},"timestamp":"2026-06-28T00:12:32.879Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
