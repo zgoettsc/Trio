@@ -35,6 +35,7 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case liveCarbsEstimateSuppressed // 3-loop threshold met BUT a guard suppressed firing (e.g. fat-protein early-window guard)
     case mealCarbsVerified // user attested ground-truth carbs for a closed instance — drives inverse calibrator
     case mealCarbsVerifiedCleared // user cleared a previously verified amount
+    case mealWindowClosedByExitRule // behavior-based exit detector fired (peakDropConfirmed / loopIdleAtBaseline / maxDurationCap)
 }
 
 struct AlgorithmTelemetryEvent: Codable {

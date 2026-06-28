@@ -761,6 +761,16 @@ final class BaseAPSManager: APSManager, Injectable {
         if mealWindowActive && s.liveCarbsEstimatorEnabled {
             evaluateLiveCarbsEstimate(sample: sample, settings: s, at: now)
         }
+
+        // v3 spec — behavior-based meal-window exit. Closes the window
+        // when BG has actually returned toward baseline (peak passed +
+        // dropping) OR the loop has been idle with BG in range for
+        // 30+ min. Replaces rigid timer-based expiry with a state-based
+        // exit; a hard safety cap (mealWindowBehaviorExitMaxMinutes,
+        // default 10h) is still enforced via auditExpiredMealWindow.
+        if mealWindowActive && s.mealWindowBehaviorBasedExitEnabled {
+            evaluateMealWindowExit(sample: sample, settings: s, at: now)
+        }
     }
 
     /// Backing storage for live-estimator dedupe. Re-fires at most once per
@@ -1030,6 +1040,131 @@ final class BaseAPSManager: APSManager, Injectable {
                 "cr": .double(cr)
             ]
         ))
+    }
+
+    /// Behavior-based exit. Closes the meal window when BG has actually
+    /// finished doing what it was going to do — peak passed and falling,
+    /// OR loop idle with BG in range. Replaces timer-based expiry; the
+    /// safety cap (mealWindowBehaviorExitMaxMinutes) still applies via
+    /// auditExpiredMealWindow.
+    ///
+    /// Gates designed to avoid premature close:
+    /// - Minimum duration (mealWindowDurationMinutes, default 90 min)
+    ///   before any exit fires — protects against single-sample noise
+    ///   and gives short fast-carb meals time to develop a real signal.
+    /// - Floor-park inhibitor — if loop has parked at the safety floor
+    ///   (eventualBG ≤ 55), do NOT close. Window stays open so the user
+    ///   keeps meal-mode aggression/floor logic in play during recovery.
+    /// - Peak-confirmation requires drop ≥ 30 mg/dL AND ≥ 45 min since
+    ///   the running max — handles fat-protein second-peak meals where
+    ///   a brief dip then re-rise should reset, not close.
+    private func evaluateMealWindowExit(
+        sample: AlgorithmTelemetryLoopSample,
+        settings s: TrioSettings,
+        at now: Date
+    ) {
+        guard let windowId = s.mealWindowId,
+              let activatedAt = s.mealWindowActivationDate,
+              let bg = sample.bg
+        else { return }
+        let minutesSinceOpen = now.timeIntervalSince(activatedAt) / 60
+
+        // Minimum duration floor.
+        let minDuration = Double(truncating: s.mealWindowDurationMinutes as NSDecimalNumber)
+        guard minutesSinceOpen >= minDuration else { return }
+
+        // Never close while loop is parked at the safety floor — the
+        // meal isn't "done", the user is mid-recovery and needs meal-mode
+        // protections (e.g. floor logic) to stay active.
+        let eventualBG = sample.eventualBG ?? 999
+        if eventualBG <= 55 { return }
+
+        // Compute peak BG + when it happened. Same context (viewContext)
+        // is fine here — GlucoseStored is the read-only-ish series of
+        // sensor readings and ordering is deterministic.
+        guard let (peakBG, peakAt) = peakBGSinceWindowOpen(activatedAt: activatedAt)
+        else { return }
+        let dropFromPeak = peakBG - bg
+        let minutesSincePeak = now.timeIntervalSince(peakAt) / 60
+
+        // Rule 1: peak passed + dropping. Three signals must agree:
+        //   - drop ≥ 30 mg/dL from peak
+        //   - ≥ 45 min since peak (lets FP late-second-peak reset by
+        //     bumping the running max instead of triggering false exit)
+        //   - shortAvgDelta < 0 (15-min trend negative, confirms direction)
+        let shortAvg = sample.shortAvgDelta ?? 0
+        if dropFromPeak >= 30, minutesSincePeak >= 45, shortAvg < 0 {
+            algorithmTelemetryManager?.closeMealWindowByExitRule(
+                reason: "peakDropConfirmed",
+                payload: [
+                    "bg": .double(bg),
+                    "peakBG": .double(peakBG),
+                    "dropFromPeak": .double(dropFromPeak),
+                    "minutesSincePeak": .double(minutesSincePeak),
+                    "shortAvgDelta": .double(shortAvg),
+                    "eventualBG": .double(eventualBG)
+                ]
+            )
+            return
+        }
+
+        // Rule 2: loop has been idle + BG in target range. Catches
+        // monotonic-finish meals that never produce a sharp peak (e.g.
+        // small carb-only meal absorbed cleanly).
+        let minutesSinceLastSMB = minutesSinceLastSMBInWindow(activatedAt: activatedAt)
+        let loopIdle = minutesSinceLastSMB >= 30
+        let inRange = bg >= 80 && bg <= 140
+        if loopIdle, inRange {
+            algorithmTelemetryManager?.closeMealWindowByExitRule(
+                reason: "loopIdleAtBaseline",
+                payload: [
+                    "bg": .double(bg),
+                    "peakBG": .double(peakBG),
+                    "minutesSinceLastSMB": .double(minutesSinceLastSMB),
+                    "shortAvgDelta": .double(shortAvg),
+                    "eventualBG": .double(eventualBG)
+                ]
+            )
+            return
+        }
+    }
+
+    /// Returns the highest BG seen in GlucoseStored since the window
+    /// opened, plus when that sample was recorded. Returns nil if no
+    /// samples exist in the interval yet (very fresh window or sensor gap).
+    private func peakBGSinceWindowOpen(activatedAt: Date) -> (bg: Double, at: Date)? {
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var result: (Double, Date)?
+        ctx.performAndWait {
+            let req = GlucoseStored.fetchRequest()
+            req.predicate = NSPredicate(format: "date >= %@", activatedAt as NSDate)
+            req.sortDescriptors = [NSSortDescriptor(key: "glucose", ascending: false)]
+            req.fetchLimit = 1
+            if let top = (try? ctx.fetch(req))?.first, let date = top.date {
+                result = (Double(top.glucose), date)
+            }
+        }
+        return result
+    }
+
+    /// Minutes since the most recent SMB in the active meal window.
+    /// Returns 999 if none have fired — i.e. "the loop has not been
+    /// dosing aggressively for the meal."
+    private func minutesSinceLastSMBInWindow(activatedAt: Date) -> Double {
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var lastDate: Date?
+        ctx.performAndWait {
+            let req = PumpEventStored.fetchRequest()
+            req.predicate = NSPredicate(
+                format: "timestamp >= %@ AND bolus != nil AND bolus.isSMB == YES",
+                activatedAt as NSDate
+            )
+            req.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
+            req.fetchLimit = 1
+            lastDate = (try? ctx.fetch(req))?.first?.timestamp
+        }
+        guard let lastDate else { return 999 }
+        return Date().timeIntervalSince(lastDate) / 60
     }
 
     /// Sum of carbs (g) logged via non-FPU CarbEntryStored rows from

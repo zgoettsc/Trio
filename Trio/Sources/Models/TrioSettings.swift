@@ -178,6 +178,20 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// that drive over-aggressive SMBs. Defaults ON; user can disable for
     /// meals where fast carbs dominate macros.
     var liveCarbsEstimatorFPGuardEnabled: Bool = true
+
+    /// Behavior-based meal-window exit. When ON, the window stays open
+    /// until BG actually returns toward baseline (peak passed + drop
+    /// confirmed) OR the loop has been quiet for 30+ min with BG in
+    /// range — instead of expiring at a fixed timer (90 / 240 min). A
+    /// safety cap (mealWindowBehaviorExitMaxMinutes) still applies.
+    /// Solves the "window closed at 90 min but BG was still climbing"
+    /// gap on quick-action-without-carbs meals.
+    var mealWindowBehaviorBasedExitEnabled: Bool = true
+    /// Hard safety cap on behavior-based exit — the absolute oldest a
+    /// meal window can be before being force-closed regardless of
+    /// signals. Default 10 h; should comfortably exceed the longest
+    /// realistic fat-protein meal absorption tail.
+    var mealWindowBehaviorExitMaxMinutes: Decimal = 600
     /// In-flight estimator suggestion that the home view should surface
     /// as a banner / sheet on next foreground. Cleared when the user
     /// acts on it or dismisses. Persists across app restarts so a
@@ -497,6 +511,12 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Bool.self, forKey: .liveCarbsEstimatorFPGuardEnabled) {
             settings.liveCarbsEstimatorFPGuardEnabled = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .mealWindowBehaviorBasedExitEnabled) {
+            settings.mealWindowBehaviorBasedExitEnabled = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowBehaviorExitMaxMinutes) {
+            settings.mealWindowBehaviorExitMaxMinutes = v
         }
         if let v = try? container.decode(PendingLiveCarbsSuggestion.self, forKey: .pendingLiveCarbsSuggestion) {
             settings.pendingLiveCarbsSuggestion = v

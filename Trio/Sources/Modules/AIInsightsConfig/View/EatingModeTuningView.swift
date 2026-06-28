@@ -213,6 +213,20 @@ struct EatingModeTuningView: View {
             }
             .listRowBackground(Color.chart)
 
+            // MARK: Behavior-based meal window exit
+            Section(
+                header: Text("Meal window — exit"),
+                footer: Text("When ON: window closes when BG actually returns toward baseline (peak passed + dropping, OR loop quiet for 30 min with BG in range), instead of expiring at a fixed timer. A hard safety cap still applies (default 10 h) so a sensor outage or stuck plateau can't keep the window open forever. Solves the 'window expired while BG was still climbing' case.")
+            ) {
+                Toggle(isOn: Binding(
+                    get: { vm.behaviorBasedExit },
+                    set: { vm.behaviorBasedExit = $0; vm.save(\.mealWindowBehaviorBasedExitEnabled, $0) }
+                )) {
+                    Text("Behavior-based window exit")
+                }
+            }
+            .listRowBackground(Color.chart)
+
             // MARK: Reset to defaults
             Section(footer: Text("Resets all eating-mode tuning toggles and sliders to the shipped defaults. Doesn't affect telemetry settings or other Trio preferences.")) {
                 Button(role: .destructive) {
@@ -249,6 +263,7 @@ private final class ViewModel: ObservableObject {
     @Published var liveCarbsNotifications: Bool = true
     @Published var liveCarbsSound: Bool = true
     @Published var liveCarbsFPGuard: Bool = true
+    @Published var behaviorBasedExit: Bool = true
 
     private let resolver: Resolver = TrioApp.resolver
     private lazy var settingsManager: SettingsManager? = resolver.resolve(SettingsManager.self)
@@ -269,6 +284,7 @@ private final class ViewModel: ObservableObject {
         liveCarbsNotifications = s.liveCarbsEstimatorNotificationsEnabled
         liveCarbsSound = s.liveCarbsEstimatorNotificationSound
         liveCarbsFPGuard = s.liveCarbsEstimatorFPGuardEnabled
+        behaviorBasedExit = s.mealWindowBehaviorBasedExitEnabled
     }
 
     /// Generic setter that writes a single TrioSettings field through SettingsManager.
@@ -295,6 +311,7 @@ private final class ViewModel: ObservableObject {
         s.liveCarbsEstimatorNotificationsEnabled = true
         s.liveCarbsEstimatorNotificationSound = true
         s.liveCarbsEstimatorFPGuardEnabled = true
+        s.mealWindowBehaviorBasedExitEnabled = true
         settingsManager?.settings = s
         reload()
     }

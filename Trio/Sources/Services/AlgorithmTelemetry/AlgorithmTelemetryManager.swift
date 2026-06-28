@@ -29,6 +29,14 @@ protocol AlgorithmTelemetryManager: AnyObject {
     @discardableResult
     func auditExpiredMealWindow() -> String?
 
+    /// Close the active meal window via the behavior-based exit detector.
+    /// Mirrors auditExpiredMealWindow's close machinery (telemetry event,
+    /// recordWindowClose, wipe settings) but with closeReason
+    /// "behaviorBasedExit" and a custom payload identifying which rule
+    /// fired (peakDropConfirmed / loopIdleAtBaseline / maxDurationCap).
+    @discardableResult
+    func closeMealWindowByExitRule(reason: String, payload: [String: AlgorithmTelemetryJSONValue]) -> String?
+
     /// Write today's settings snapshot if not already present.
     func maintainDailySnapshot()
 
@@ -436,7 +444,15 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
             ? s.mealWindowExtendedDurationMinutes
             : s.mealWindowDurationMinutes
-        let cappedDuration = min(durationMinutes, 360)
+        // When behavior-based exit is enabled the per-loop detector is
+        // the primary close path; this timer becomes a hard safety cap
+        // that only fires if the loop never noticed the meal was done.
+        // Cap the cap by mealWindowBehaviorExitMaxMinutes so windows
+        // CAN run long when the user wants them to (default 600 min).
+        let hardCap: Decimal = s.mealWindowBehaviorBasedExitEnabled
+            ? s.mealWindowBehaviorExitMaxMinutes
+            : 360
+        let cappedDuration = min(durationMinutes, hardCap)
         let expiresAt = activatedAt.addingTimeInterval(
             TimeInterval(truncating: cappedDuration as NSDecimalNumber) * 60
         )
@@ -482,6 +498,57 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             ns.mealClassifierUpgradedAt = nil
             ns.mealWindowSavedMealId = nil
             ns.mealWindowSavedMealInstanceId = nil
+            self.settingsManager.settings = ns
+        }
+        return windowId
+    }
+
+    @discardableResult
+    func closeMealWindowByExitRule(reason: String, payload: [String: AlgorithmTelemetryJSONValue]) -> String? {
+        let s = settingsManager.settings
+        guard let activatedAt = s.mealWindowActivationDate else { return nil }
+        let windowId = s.mealWindowId
+        let now = Date()
+        var fullPayload = payload
+        fullPayload["reason"] = .string(reason)
+        fullPayload["minutesSinceOpen"] = .double(now.timeIntervalSince(activatedAt) / 60)
+        fullPayload["carbsConfirmed"] = .bool(s.mealWindowCarbsConfirmed)
+        logEvent(AlgorithmTelemetryEvent(
+            kind: .mealWindowClosedByExitRule,
+            timestamp: now,
+            windowId: windowId,
+            payload: fullPayload
+        ))
+        recordWindowClose(
+            windowId: windowId,
+            activatedAt: activatedAt,
+            closedAt: now,
+            closeReason: "behaviorBasedExit:\(reason)",
+            estimatedCarbs: s.mealWindowEstimatedCarbs > 0
+                ? Double(truncating: s.mealWindowEstimatedCarbs as NSDecimalNumber)
+                : nil,
+            carbsConfirmed: s.mealWindowCarbsConfirmed,
+            bgAtActivation: nil,
+            iobAtActivation: nil,
+            cobAtActivation: nil
+        )
+        DispatchQueue.main.async {
+            var ns = self.settingsManager.settings
+            ns.mealWindowActivationDate = nil
+            ns.mealWindowEstimatedCarbs = 0
+            ns.mealWindowCarbsConfirmed = false
+            ns.mealWindowId = nil
+            ns.mealCurrentClassification = .simple
+            ns.mealClassifierActivationBG = nil
+            ns.mealClassifierPhase1ConfirmedAt = nil
+            ns.mealClassifierPhase1Trough = nil
+            ns.mealClassifierPhase2ConfirmedAt = nil
+            ns.mealClassifierUpgradedAt = nil
+            ns.mealWindowSavedMealId = nil
+            ns.mealWindowSavedMealInstanceId = nil
+            // Clear pending live-carbs suggestion banner — meal is over,
+            // the suggestion is no longer actionable.
+            ns.pendingLiveCarbsSuggestion = nil
             self.settingsManager.settings = ns
         }
         return windowId

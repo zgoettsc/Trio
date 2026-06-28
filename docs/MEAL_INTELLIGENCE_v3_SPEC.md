@@ -223,7 +223,107 @@ Trend, loop-parked, retract, and live-carb-sum are not user-toggleable
 
 ---
 
-## 3. Open v3 items (not built)
+## 3. Behavior-based meal-window exit (SHIPPED — commit pending)
+
+Replaces rigid timer-based window expiry with a state-based "the
+meal is done" detector. Solves the case the user hit on quick-action
+lunches: window opens via Action Button without carbs entered, BG
+climbs, classifier upgrades Simple → Medium (not Complex), loop
+correctly fires SMBs, window expires at the rigid 90-min mark while
+BG is still climbing and the loop is still dosing — meal-mode
+aggression yanked at exactly the wrong moment.
+
+### Why the previous design fell short
+
+`mealWindowDurationMinutes` (90) ran to expiry. Auto-extend only fired
+on Complex upgrade (late-re-rise pattern). Steadily-climbing meals
+that hit Medium but not Complex closed at the timer regardless of BG
+trajectory. The system already has the signals — it just wasn't using
+them for window close.
+
+### Exit rules (any one closes the window)
+
+Evaluated on every loop pass while `mealWindowBehaviorBasedExitEnabled`
+is on, AFTER `minutesSinceOpen ≥ mealWindowDurationMinutes` (the
+minimum-duration floor):
+
+| Rule | Conditions (all must hold) | Use case |
+|---|---|---|
+| `peakDropConfirmed` | drop from running max ≥ 30 mg/dL AND ≥ 45 min since max AND `shortAvgDelta < 0` AND `eventualBG > 55` | Normal "BG came down" exit. FP late-second-peak resets via new max instead of triggering false exit |
+| `loopIdleAtBaseline` | no SMB fired in last 30 min AND BG ∈ [80, 140] AND `eventualBG > 55` | Monotonic-finish meals that absorb cleanly without a sharp peak (small carb-only) |
+| `maxDurationCap` | `minutesSinceOpen ≥ mealWindowBehaviorExitMaxMinutes` (default 600 = 10 h) | Safety cap — enforced via `auditExpiredMealWindow`'s tightened cap when behavior-exit is on |
+
+### Floor-park inhibitor
+
+The detector returns immediately if `eventualBG ≤ 55` (oref parked
+near safety floor). The meal is NOT done if the loop has shut off
+insulin to prevent a crash — keep the window open so the user has
+meal-mode floor logic + the visible banner during recovery.
+
+### Minimum-duration floor
+
+Behavior-exit never fires before `mealWindowDurationMinutes` (default
+90). Single-sample noise + thin early-window data + short
+fast-carb meals all benefit from the floor.
+
+### Hard safety cap
+
+`mealWindowBehaviorExitMaxMinutes` (default 600) bounds how long a
+window can run. Enforced in `AlgorithmTelemetryManager.auditExpiredMealWindow`:
+when behavior-exit is on, the cap on natural-expiry rises from 360 to
+this value; when off, falls back to the old 360 cap.
+
+### Telemetry
+
+New event: `mealWindowClosedByExitRule`. Payload always includes
+`reason` (one of the three above), `minutesSinceOpen`, `carbsConfirmed`,
+plus rule-specific fields:
+
+- `peakDropConfirmed`: bg, peakBG, dropFromPeak, minutesSincePeak,
+  shortAvgDelta, eventualBG
+- `loopIdleAtBaseline`: bg, peakBG, minutesSinceLastSMB,
+  shortAvgDelta, eventualBG
+- `maxDurationCap`: emitted via `mealWindowExpired` as before
+  (rule path remains the safety-cap timer)
+
+`recordWindowClose` writes `closeReason = "behaviorBasedExit:<rule>"`
+so the per-meal summary row identifies which rule fired without
+re-joining the events table.
+
+### Settings
+
+| Field | Default | Effect |
+|---|---|---|
+| `mealWindowBehaviorBasedExitEnabled` | true | Master switch |
+| `mealWindowBehaviorExitMaxMinutes` | 600 (10 h) | Hard safety cap |
+
+Toggle exposed in Eating Mode Tuning → "Meal window — exit". Cap is
+not user-toggleable for v1; raise it in v4 if needed for ultra-long
+FP meals.
+
+### Files
+
+- `Trio/Sources/Models/TrioSettings.swift` (two new settings + Decodable)
+- `Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryEvent.swift` (new event kind)
+- `Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryManager.swift` (cap raise + closeMealWindowByExitRule)
+- `Trio/Sources/APS/APSManager.swift` (evaluateMealWindowExit + peakBG/SMB helpers)
+- `Trio/Sources/Modules/AIInsightsConfig/View/EatingModeTuningView.swift` (toggle)
+
+### Verification path
+
+1. Quick-action a meal without entering carbs (mirror today's lunch
+   bug). Confirm the window stays open past 90 min as long as BG is
+   climbing or SMBs are firing.
+2. After BG peaks and starts dropping, confirm `peakDropConfirmed`
+   event fires within ~50 min of the peak (drop ≥ 30 + 45 min min).
+3. FP meal with a clear second peak: verify the dip-and-re-rise
+   bumps the running max instead of closing the window during the dip.
+4. Disable the toggle and confirm timer-based 90-min expiry returns
+   on the next meal.
+
+---
+
+## 4. Open v3 items (not built)
 
 ### 3a. Meal tags
 
@@ -258,7 +358,7 @@ values without the SMB-sum fallback path.
 
 ---
 
-## 4. Verification path
+## 5. Verification path
 
 1. Mark today's Sunday Breakfast as verified at the user's best guess
    (~95g). Check the per-instance Calibration section shows back-calc
