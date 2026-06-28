@@ -14,7 +14,7 @@ One JSON object per line. Common fields: `kind`, `timestamp`, `windowId`,
 
 | kind | payload fields |
 |---|---|
-| `mealWindowActivated` | source, estimatedCarbs, bg, iob, cob, delta5m, bgTrend30m, autosensRatio, smartSenseRatio, effectiveISF, durationMinutes |
+| `mealWindowActivated` | source, estimatedCarbs, bg, iob, cob, delta5m, bgTrend30m, autosensRatio, smartSenseRatio, effectiveISF, carbRatio, durationMinutes |
 | `mealWindowCancelled` | source (`shortcut`/`homeBanner`/`liveActivityLink`), minutesSinceActivation, bg, iob |
 | `mealWindowExpired` | source (`naturalExpiry`), elapsedMinutes, wasCarbsConfirmed |
 | `mealWindowCarbsConfirmed` | carbs, fat, protein, minutesSinceActivation |
@@ -100,8 +100,12 @@ at the moment the eating-mode window opened:
   ratio (post-Autosens + post-Garmin)
 - `context.effectiveISFAtActivation` — ISF (mg/dL per U) oref was
   actually using at activation, already adjusted by Autosens
+- `context.carbRatioAtActivation` — CR (g/U) at activation. Combined
+  with ISF, lets you back-calculate `carbs ↔ mg/dL` (1g carbs raises
+  BG by ISF/CR mg/dL) — basis for the in-app per-instance estimated-
+  carbs panel and Analysis 6 below.
 
-All five `context` fields are individually optional — nil when the
+All six `context` fields are individually optional — nil when the
 source value wasn't available (fresh install, sensor outage,
 Smart-Sense disabled, <30 min of glucose history). Pre-v10 rows
 have no `context` block at all.
@@ -492,7 +496,7 @@ meals = load_jsonl("telemetry/*/*/meals.jsonl")
 ctx_cols = [
     "bgAtActivation", "bgTrendAtActivation",
     "autosensRatioAtActivation", "smartSenseRatioAtActivation",
-    "effectiveISFAtActivation",
+    "effectiveISFAtActivation", "carbRatioAtActivation",
 ]
 for c in ctx_cols:
     meals[c] = meals.context.apply(lambda d: (d or {}).get(c))
@@ -546,7 +550,7 @@ if len(s) >= 20:
     base = LinearRegression().fit(s[["autosensRatioAtActivation"]], s.peakDelta)
     full = LinearRegression().fit(s[ctx_cols], s.peakDelta)
     print(f"R² Autosens only: {base.score(s[['autosensRatioAtActivation']], s.peakDelta):.2f}")
-    print(f"R² All 5 context: {full.score(s[ctx_cols], s.peakDelta):.2f}")
+    print(f"R² All context fields: {full.score(s[ctx_cols], s.peakDelta):.2f}")
     # If full ≈ base, the extra signals add no info beyond Autosens.
     # If full >> base, you've justified Smart-Sense / baseline-BG features.
 ```
@@ -592,14 +596,88 @@ plt.show()
 
 ---
 
+## Analysis 6 — Carb-counting feedback (estimated carbs from BG response)
+
+**Goal:** every closed instance with `bgAtActivation`, `peakBG`,
+`effectiveISFAtActivation`, and `carbRatioAtActivation` lets you
+back-calculate what carbs the meal *actually looked like* — useful
+when a meal blows past expectations and you suspect the entered carb
+number was wrong. The in-app per-instance detail page (Saved Meal →
+tap an instance row) surfaces this estimate live with a ±15% range;
+this is the cross-meal aggregation.
+
+**Identity used.** 1 g of carbs raises BG by `ISF / CR` mg/dL. Given:
+
+- observed `peak_rise = peakBG - bgAtActivation` (mg/dL)
+- delivered `insulin = totalInsulinDeliveredU` (U)
+
+the implied carbs are:
+
+```
+carbs_for_rise   = peak_rise × CR / ISF      # what the rise alone implies
+carbs_offset_by  = insulin × CR              # what the insulin already covered
+estimated_carbs  = carbs_for_rise + carbs_offset_by
+```
+
+**Recipe:**
+
+```python
+# Reuse `meals` from Analysis 5
+for c in ["bgAtActivation", "carbRatioAtActivation", "effectiveISFAtActivation"]:
+    meals[c] = meals.context.apply(lambda d: (d or {}).get(c))
+meals["peakBG"] = meals.metrics.apply(lambda d: d.get("peakBG"))
+meals["insulinU"] = meals.metrics.apply(lambda d: d.get("totalInsulinDeliveredU"))
+meals["enteredCarbs"] = meals.macros.apply(lambda d: (d or {}).get("carbs"))
+
+est = meals.dropna(subset=[
+    "bgAtActivation", "peakBG", "effectiveISFAtActivation", "carbRatioAtActivation"
+]).copy()
+rise = (est.peakBG - est.bgAtActivation).clip(lower=0)
+est["estimatedCarbs"] = (rise * est.carbRatioAtActivation / est.effectiveISFAtActivation
+                          + est.insulinU.fillna(0) * est.carbRatioAtActivation)
+est["delta"] = est.estimatedCarbs - est.enteredCarbs
+
+# Per-meal: median entered vs median estimated — does the user
+# systematically undercount this dish?
+summary = est.groupby("savedMealName").agg(
+    n=("delta", "size"),
+    entered_median=("enteredCarbs", "median"),
+    estimated_median=("estimatedCarbs", "median"),
+    median_delta=("delta", "median"),
+).query("n >= 3").sort_values("median_delta", ascending=False)
+print(summary)
+
+# Suggested correction per meal: if entered_median + median_delta is
+# more consistent across runs (lower variance) than entered alone,
+# nudge the SavedMeal's default carbs upward.
+```
+
+**Caveats:**
+- Peak-based estimate is a **lower bound** on what the user actually
+  ate when BG didn't return to baseline within the window
+  (`timeToBaselineMinutes == 0`) — late carbs may still be absorbing
+  past the window edge. Tag these and treat as "≥ estimated."
+- Override-affected windows (`windowHadOverride = true`) distort the
+  insulin half of the equation (smbIsOff, custom percentage).
+  Estimator is unreliable on them — drop or flag separately.
+- ISF / CR are themselves estimates. The per-instance estimate
+  inherits their uncertainty. The in-app UI shows ±15% range to
+  reflect this; the analysis above assumes point estimates — fold a
+  ±15% interval in if you're acting on a single result.
+- Backfilled rows (`backfilled = true`) often have synthesized
+  context — they're fine as bulk inputs but unreliable individually.
+
+---
+
 ## Cross-cutting: `mealWindowActivated` event payload (schema update)
 
 The event payload on `mealWindowActivated` now also carries the same
 activation context: `bgTrend30m`, `autosensRatio`, `smartSenseRatio`,
-`effectiveISF`. Useful when you want the context but don't care which
-saved meal (or no saved meal was attached). The `meals.jsonl` row is
-the canonical source if a SavedMeal *was* used — it stays consistent
-across instance updates while events are append-only.
+`effectiveISF`, `carbRatio`. Useful when you want the context but
+don't care which saved meal (or no saved meal was attached). The
+`meals.jsonl` row is the canonical source if a SavedMeal *was* used —
+it stays consistent across instance updates while events are
+append-only.
 
 ---
 
