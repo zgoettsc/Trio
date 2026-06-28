@@ -313,6 +313,19 @@ private struct SavedMealRow: View {
     @ObservedObject var meal: SavedMeal
     let onTap: () -> Void
 
+    /// cachedInstanceCount only counts CLOSED instances (matches the
+    /// SavedMealStorage update logic). If a window is currently active for
+    /// this meal, surface it so the row reads "1 · in progress" instead of
+    /// "0 ·" while the user is still eating.
+    private var activeInstanceCount: Int {
+        let arr = (meal.instances?.allObjects as? [SavedMealInstance]) ?? []
+        return arr.filter { $0.closedAt == nil }.count
+    }
+
+    private var displayCount: Int {
+        Int(meal.cachedInstanceCount) + activeInstanceCount
+    }
+
     var body: some View {
         HStack {
             NavigationLink(destination: SavedMealDetailView(meal: meal)) {
@@ -322,7 +335,11 @@ private struct SavedMealRow: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(meal.name ?? "(unnamed)").font(.headline)
                         HStack(spacing: 6) {
-                            Text("\(meal.cachedInstanceCount) ×")
+                            Text("\(displayCount) ×")
+                            if activeInstanceCount > 0 {
+                                Text("·").foregroundStyle(.tertiary)
+                                Text("in progress").foregroundStyle(.green)
+                            }
                             if let cls = meal.cachedRecommendedClassification ?? meal.defaultClassification {
                                 Text("·").foregroundStyle(.tertiary)
                                 Text(cls.capitalized)
