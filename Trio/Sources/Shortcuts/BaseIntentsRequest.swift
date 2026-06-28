@@ -20,6 +20,7 @@ import Swinject
     @Injected() var bolusSafetyValidator: BolusSafetyValidator!
     @Injected() var algorithmTelemetryManager: AlgorithmTelemetryManager!
     @Injected() var savedMealStorage: SavedMealStorage!
+    @Injected() var smartSenseManager: SmartSenseManager!
 
     let resolver: Resolver
 

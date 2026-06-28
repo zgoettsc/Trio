@@ -157,23 +157,10 @@ import Foundation
 
         settingsManager.settings = s
 
-        // If we have a saved meal, create the instance row now and link it.
-        if let mealId = savedMealId, let meal = savedMealStorage.meal(id: mealId) {
-            let instanceId = savedMealStorage.startInstance(
-                meal: meal,
-                windowId: windowId,
-                startedAt: now,
-                actualCarbs: estimatedCarbs,
-                actualFat: actualFat,
-                actualProtein: actualProtein
-            )
-            var s2 = settingsManager.settings
-            s2.mealWindowSavedMealInstanceId = instanceId.uuidString
-            settingsManager.settings = s2
-        }
-
-        // Telemetry: log activation with whatever context we have on-hand. Loop samples
-        // (Phase 2 hook in OpenAPS) will fill in signal/velocity data on the next pass.
+        // Telemetry/context snapshot must happen BEFORE instance creation so
+        // we can persist sensitivity context (Autosens, Smart-Sense, ISF) and
+        // baseline BG on the instance row — analytics correlates these with
+        // peak excursion later. See ANALYSIS_METHODS.md "Instance context".
         let snapshot = await currentSnapshot()
         // Now we have the activation BG — write it for the classifier's
         // Phase 2 baseline reference.
@@ -182,6 +169,28 @@ import Foundation
             s2.mealClassifierActivationBG = bg
             settingsManager.settings = s2
         }
+
+        // If we have a saved meal, create the instance row now and link it,
+        // capturing the sensitivity/BG context as a one-shot snapshot.
+        if let mealId = savedMealId, let meal = savedMealStorage.meal(id: mealId) {
+            let instanceId = savedMealStorage.startInstance(
+                meal: meal,
+                windowId: windowId,
+                startedAt: now,
+                actualCarbs: estimatedCarbs,
+                actualFat: actualFat,
+                actualProtein: actualProtein,
+                bgAtActivation: snapshot.bg,
+                bgTrendAtActivation: snapshot.bgTrend30m,
+                autosensRatio: snapshot.autosensRatio,
+                smartSenseRatio: snapshot.smartSenseRatio,
+                effectiveISF: snapshot.effectiveISF
+            )
+            var s2 = settingsManager.settings
+            s2.mealWindowSavedMealInstanceId = instanceId.uuidString
+            settingsManager.settings = s2
+        }
+
         var activationPayload: [String: AlgorithmTelemetryJSONValue] = [
             "source": .string("shortcut"),
             "estimatedCarbs": .from(estimatedCarbs),
@@ -189,6 +198,10 @@ import Foundation
             "iob": .from(snapshot.iob),
             "cob": .from(snapshot.cob),
             "delta5m": .from(snapshot.delta5m),
+            "bgTrend30m": .from(snapshot.bgTrend30m),
+            "autosensRatio": .from(snapshot.autosensRatio),
+            "smartSenseRatio": .from(snapshot.smartSenseRatio),
+            "effectiveISF": .from(snapshot.effectiveISF),
             "durationMinutes": .from(s.mealWindowDurationMinutes)
         ]
         if let mealId = savedMealId {
@@ -317,6 +330,10 @@ import Foundation
         let iob: Double?
         let cob: Int?
         let delta5m: Double?
+        let bgTrend30m: Double?
+        let autosensRatio: Double?
+        let smartSenseRatio: Double?
+        let effectiveISF: Double?
     }
 
     private func currentSnapshot() async -> ContextSnapshot {
@@ -325,17 +342,35 @@ import Foundation
         var delta: Double?
         var iob: Double?
         var cob: Int?
+        var bgTrend30m: Double?
+        var autosensRatio: Double?
+        var effectiveISF: Double?
 
-        // Glucose: latest reading + 5-min delta via CoreData (avoids depending on
-        // Nightscout sync queue state).
+        // Glucose: latest reading + 5-min delta + 30-min trend via CoreData
+        // (avoids depending on Nightscout sync queue state). Pulling enough
+        // readings to cover ~30 min back (12 samples at 5-min spacing + slack).
+        let now = Date()
         await viewContext.perform {
             let req = GlucoseStored.fetchRequest()
             req.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
-            req.fetchLimit = 2
-            if let results = try? self.viewContext.fetch(req) {
-                if let last = results.first { bg = Double(last.glucose) }
+            req.fetchLimit = 12
+            if let results = try? self.viewContext.fetch(req), let first = results.first {
+                bg = Double(first.glucose)
                 if results.count >= 2 {
                     delta = Double(results[0].glucose - results[1].glucose)
+                }
+                // 30-min trend: find the reading closest to (now - 30min) and
+                // diff against the latest. Falls back to nil if we don't have
+                // 30+ minutes of data.
+                let target = now.addingTimeInterval(-30 * 60)
+                let candidate = results.min { lhs, rhs in
+                    guard let ld = lhs.date, let rd = rhs.date else { return false }
+                    return abs(ld.timeIntervalSince(target)) < abs(rd.timeIntervalSince(target))
+                }
+                if let cand = candidate, let cd = cand.date,
+                   abs(cd.timeIntervalSince(target)) < 10 * 60
+                {
+                    bgTrend30m = Double(first.glucose - cand.glucose)
                 }
             }
         }
@@ -344,16 +379,34 @@ import Foundation
             iob = Double(truncating: iobValue as NSDecimalNumber)
         }
 
-        // COB from latest determination
+        // COB + Autosens + post-Autosens ISF from latest determination.
         await viewContext.perform {
             let req = OrefDetermination.fetchRequest()
             req.sortDescriptors = [NSSortDescriptor(key: "deliverAt", ascending: false)]
             req.fetchLimit = 1
             if let result = try? self.viewContext.fetch(req).first {
                 cob = Int(result.cob)
+                if let s = result.sensitivityRatio {
+                    autosensRatio = s.doubleValue
+                }
+                if let isf = result.insulinSensitivity {
+                    effectiveISF = isf.doubleValue
+                }
             }
         }
 
-        return ContextSnapshot(bg: bg, iob: iob, cob: cob, delta5m: delta)
+        // SmartSense final ratio — latest computed result from the manager.
+        let smartSenseRatio = smartSenseManager?.latestResult?.finalRatio
+
+        return ContextSnapshot(
+            bg: bg,
+            iob: iob,
+            cob: cob,
+            delta5m: delta,
+            bgTrend30m: bgTrend30m,
+            autosensRatio: autosensRatio,
+            smartSenseRatio: smartSenseRatio,
+            effectiveISF: effectiveISF
+        )
     }
 }

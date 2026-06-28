@@ -57,6 +57,19 @@ public extension SavedMealInstance {
     @NSManaged var windowHadTempTarget: Bool
     @NSManaged var sensorGapMinutes: Int32
 
+    /// Snapshot of insulin-sensitivity context AT THE MOMENT the window
+    /// opened. Lets analysis correlate excursion size (peakBG -
+    /// bgAtActivation, AUC, etc.) with both the calculated Autosens ratio
+    /// and the Smart-Sense blended ratio: does a high resistance reading
+    /// actually predict a larger excursion, or are the sensors noise?
+    /// All five are optional — nil means the value wasn't available at the
+    /// time (e.g. fresh install, sensor outage, Smart-Sense disabled).
+    @NSManaged var bgAtActivation: NSDecimalNumber?
+    @NSManaged var bgTrendAtActivation: NSDecimalNumber?
+    @NSManaged var autosensRatioAtActivation: NSDecimalNumber?
+    @NSManaged var smartSenseRatioAtActivation: NSDecimalNumber?
+    @NSManaged var effectiveISFAtActivation: NSDecimalNumber?
+
     @NSManaged var savedMeal: SavedMeal?
 }
 

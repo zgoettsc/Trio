@@ -35,7 +35,12 @@ protocol SavedMealStorage {
         startedAt: Date,
         actualCarbs: Decimal?,
         actualFat: Decimal?,
-        actualProtein: Decimal?
+        actualProtein: Decimal?,
+        bgAtActivation: Double?,
+        bgTrendAtActivation: Double?,
+        autosensRatio: Double?,
+        smartSenseRatio: Double?,
+        effectiveISF: Double?
     ) -> UUID
 
     /// Called when a meal window closes. Backfills instance fields with the
@@ -233,7 +238,12 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
         startedAt: Date,
         actualCarbs: Decimal? = nil,
         actualFat: Decimal? = nil,
-        actualProtein: Decimal? = nil
+        actualProtein: Decimal? = nil,
+        bgAtActivation: Double? = nil,
+        bgTrendAtActivation: Double? = nil,
+        autosensRatio: Double? = nil,
+        smartSenseRatio: Double? = nil,
+        effectiveISF: Double? = nil
     ) -> UUID {
         let instanceId = UUID()
         context.performAndWait {
@@ -250,6 +260,11 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             inst.proteinAtActivation = actualProtein.map(NSDecimalNumber.init(decimal:)) ?? mealInCtx.defaultProtein
             inst.initialClassification = mealInCtx.defaultClassification ?? MealClassification.simple.rawValue
             inst.carbBucketSource = (actualCarbs != nil || mealInCtx.defaultCarbs != nil) ? "macros" : "inferred"
+            inst.bgAtActivation = bgAtActivation.map(NSDecimalNumber.init(value:))
+            inst.bgTrendAtActivation = bgTrendAtActivation.map(NSDecimalNumber.init(value:))
+            inst.autosensRatioAtActivation = autosensRatio.map(NSDecimalNumber.init(value:))
+            inst.smartSenseRatioAtActivation = smartSenseRatio.map(NSDecimalNumber.init(value:))
+            inst.effectiveISFAtActivation = effectiveISF.map(NSDecimalNumber.init(value:))
             mealInCtx.addToInstances(inst)
             mealInCtx.updatedAt = startedAt
             try? context.save()

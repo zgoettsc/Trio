@@ -348,6 +348,11 @@
         <attribute name="overrideSuppressedSMB" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="windowHadTempTarget" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="sensorGapMinutes" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="bgAtActivation" optional="YES" attributeType="Decimal"/>
+        <attribute name="bgTrendAtActivation" optional="YES" attributeType="Decimal"/>
+        <attribute name="autosensRatioAtActivation" optional="YES" attributeType="Decimal"/>
+        <attribute name="smartSenseRatioAtActivation" optional="YES" attributeType="Decimal"/>
+        <attribute name="effectiveISFAtActivation" optional="YES" attributeType="Decimal"/>
         <relationship name="savedMeal" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="SavedMeal" inverseName="instances" inverseEntity="SavedMeal"/>
         <fetchIndex name="byStartedAt">
             <fetchIndexElement property="startedAt" type="Binary" order="descending"/>

@@ -25,6 +25,11 @@ struct SavedMealTelemetryRow: Encodable {
     let classifierUpgradesJSON: String?
     let outcomeScore: Int
     let metrics: Metrics
+    /// Sensitivity/BG context captured at window activation. All optional —
+    /// nil when the source value wasn't available (fresh install, sensor
+    /// outage, Smart-Sense disabled, <30 min of glucose history). Enables
+    /// "does Autosens/Smart-Sense predict excursion size?" analysis.
+    let context: ActivationContext?
     let buildSchema: Int
 
     struct Macros: Encodable {
@@ -43,6 +48,22 @@ struct SavedMealTelemetryRow: Encodable {
         let totalInsulinDeliveredU: Double
         let smbCount: Int
         let floorActivationCount: Int
+    }
+
+    struct ActivationContext: Encodable {
+        /// BG (mg/dL) at the moment the window opened.
+        let bgAtActivation: Double?
+        /// Δ BG over the prior 30 min (mg/dL). Positive = rising into the
+        /// meal; negative = falling.
+        let bgTrendAtActivation: Double?
+        /// Oref Autosens ratio (1.0 = neutral, >1 = resistant, <1 = sensitive).
+        let autosensRatioAtActivation: Double?
+        /// Smart Sense final blended ratio (post-Autosens, post-Garmin).
+        let smartSenseRatioAtActivation: Double?
+        /// Effective ISF (mg/dL per U) used by oref at activation — already
+        /// adjusted by Autosens. Useful for comparing dosing pressure across
+        /// instances of the same meal at different sensitivity readings.
+        let effectiveISFAtActivation: Double?
     }
 }
 

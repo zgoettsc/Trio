@@ -488,9 +488,25 @@ telemetry/meals/
     "smbCount": 32,
     "floorActivationCount": 4
   },
-  "buildSchema": 6
+  "context": {
+    "bgAtActivation": 132,
+    "bgTrendAtActivation": -4,
+    "autosensRatioAtActivation": 1.08,
+    "smartSenseRatioAtActivation": 1.14,
+    "effectiveISFAtActivation": 42
+  },
+  "buildSchema": 10
 }
 ```
+
+The `context` block is captured once at window activation. It lets
+analytics correlate excursion size (peakBG - bgAtActivation, AUC) with
+the live insulin-sensitivity readings so we can tell whether
+Autosens / Smart-Sense actually predict per-meal coverage demand.
+Fields are individually optional — nil when the source value wasn't
+available (fresh install, sensor outage, <30 min of glucose history,
+Smart-Sense disabled). See `telemetry` branch `ANALYSIS_METHODS.md`
+for the correlation queries that consume these fields.
 
 `bgCurve` rows use minutes-from-activation (`t`) for compactness and
 sortability. Full BG resolution from the loop telemetry stream — every

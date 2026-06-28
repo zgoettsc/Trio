@@ -546,7 +546,14 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 smbCount: metrics.smbCount,
                 floorActivationCount: metrics.floorActivationCount
             ),
-            buildSchema: 8
+            context: SavedMealTelemetryRow.ActivationContext(
+                bgAtActivation: inst.bgAtActivation?.doubleValue,
+                bgTrendAtActivation: inst.bgTrendAtActivation?.doubleValue,
+                autosensRatioAtActivation: inst.autosensRatioAtActivation?.doubleValue,
+                smartSenseRatioAtActivation: inst.smartSenseRatioAtActivation?.doubleValue,
+                effectiveISFAtActivation: inst.effectiveISFAtActivation?.doubleValue
+            ),
+            buildSchema: 10
         )
         logger.appendMealInstance(row, on: closedAt)
         logger.appendPerMealHistory(row, mealId: mealId)
@@ -613,7 +620,14 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 smbCount: Int(inst.smbCount),
                 floorActivationCount: Int(inst.floorActivationCount)
             ),
-            buildSchema: 9
+            context: SavedMealTelemetryRow.ActivationContext(
+                bgAtActivation: inst.bgAtActivation?.doubleValue,
+                bgTrendAtActivation: inst.bgTrendAtActivation?.doubleValue,
+                autosensRatioAtActivation: inst.autosensRatioAtActivation?.doubleValue,
+                smartSenseRatioAtActivation: inst.smartSenseRatioAtActivation?.doubleValue,
+                effectiveISFAtActivation: inst.effectiveISFAtActivation?.doubleValue
+            ),
+            buildSchema: 10
         )
         logger.appendMealInstance(row, on: closedAt)
         logger.appendPerMealHistory(row, mealId: mealId)
