@@ -218,7 +218,15 @@ struct SavedMealInstanceDetailView: View {
             metricRow("Time above 180", value: minutes(instance.timeAboveRangeMinutes))
             metricRow("Time below 70", value: minutes(instance.timeBelowRangeMinutes))
             metricRow("Time to baseline", value: instance.timeToBaselineMinutes > 0 ? minutes(instance.timeToBaselineMinutes) : "didn't return")
-            metricRow("Total insulin", value: String(format: "%.2f U", instance.totalInsulinDeliveredU))
+            // Negative values are impossible (the calculator had a temp-
+            // basal-overlap bug before commit 80b77f873). Show a clear
+            // placeholder for legacy rows instead of the nonsense value.
+            metricRow(
+                "Total insulin",
+                value: instance.totalInsulinDeliveredU < 0
+                    ? "— (legacy data; see Carbs section)"
+                    : String(format: "%.2f U", instance.totalInsulinDeliveredU)
+            )
             metricRow("SMBs", value: "\(instance.smbCount)")
             metricRow("Floor activations", value: "\(instance.floorActivationCount)")
         }
