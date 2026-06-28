@@ -27,6 +27,11 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case mealWindowClassifierUpgraded // 3-phase classifier upgraded current window (e.g. medium → complex)
     case mealWindowClassifierPhase // phase confirmation (phase1, phase2 — informational, not a classification change)
     case podChanged // pump rewind+prime — pod swap on Omnipod, cartridge change on traditional pumps
+    case overrideStartedDuringMealWindow // override started AFTER a meal window opened — separate from overrideStarted so the warning path can be analyzed
+    case mealWindowAutoExtended // classifier upgraded to Complex; window duration was bumped to keep aggression alive for the late-rise phase
+    case liveCarbsEstimateTriggered // mid-meal BG trajectory implies entered carbs were too low; suggestion shown
+    case liveCarbsEstimateAccepted // user accepted the suggestion and added carbs
+    case liveCarbsEstimateDismissed // user dismissed the suggestion
 }
 
 struct AlgorithmTelemetryEvent: Codable {
@@ -88,6 +93,10 @@ struct AlgorithmTelemetryLoopSample: Codable {
     let forcedUAM: Bool?
     let phantomCOBGrams: Double?
     let relaxedRisingGuard: Bool?
+    /// v2 spec — multiplier oref used for COB consumption this loop. 1.0 if
+    /// disabled / inactive; <1.0 means COB drain was slowed. Lets analysis
+    /// verify the setting actually fired.
+    let effectiveCOBDecayMultiplier: Double?
     /// Diagnostic — proves whether the rT.mealWindowApplied object decoded
     /// successfully out of the oref JSON. If false on a meal-window pass,
     /// the JS isn't emitting it (or Swift can't decode it). If true but the

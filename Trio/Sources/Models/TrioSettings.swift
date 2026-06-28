@@ -147,6 +147,17 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// was wired up).
     var lastInstanceTelemetrySweepGeneration: Int = 0
 
+    /// Dedupe key for the "override-started-during-meal-window" warning.
+    /// Format: "<windowId>|<overrideId>". Prevents firing the same warning
+    /// twice for the same (window, override) pair.
+    var lastMealWindowOverrideWarningKey: String = ""
+
+    /// New tunable (v2 spec) — multiplies oref's per-loop COB decay rate
+    /// during an active meal window. 1.0 = normal. 0.5 = drain at half
+    /// speed. Useful for fat-heavy meals where actual absorption outlasts
+    /// the model.
+    var mealWindowCOBDecayMultiplier: Decimal = 1.0
+
     // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
     // on the trio repo for tuning analysis. PAT is in Keychain, not here.
     var telemetryEnabled: Bool = false
@@ -442,6 +453,12 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Int.self, forKey: .lastInstanceTelemetrySweepGeneration) {
             settings.lastInstanceTelemetrySweepGeneration = v
+        }
+        if let v = try? container.decode(String.self, forKey: .lastMealWindowOverrideWarningKey) {
+            settings.lastMealWindowOverrideWarningKey = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowCOBDecayMultiplier) {
+            settings.mealWindowCOBDecayMultiplier = v
         }
 
         if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {

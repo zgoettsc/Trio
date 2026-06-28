@@ -154,6 +154,30 @@ struct EatingModeTuningView: View {
             }
             .listRowBackground(Color.chart)
 
+            // MARK: COB Decay Multiplier
+            Section(
+                header: Text("COB Decay Multiplier"),
+                footer: Text(
+                    "Slows oref's COB consumption during a meal window. 1.0 = normal. 0.5 = drain at half speed. Fat-heavy meals (Indian, pizza, coconut) routinely outlast the model — this stretches what's already there so the floor keeps dosing past the natural absorption window. Different from phantom COB — doesn't lie about quantity."
+                )
+            ) {
+                HStack {
+                    Text("Multiplier")
+                    Spacer()
+                    Text(String(format: "%.2f×", NSDecimalNumber(decimal: vm.cobDecayMultiplier).doubleValue))
+                        .foregroundStyle(.secondary)
+                }
+                Slider(
+                    value: Binding(
+                        get: { NSDecimalNumber(decimal: vm.cobDecayMultiplier).doubleValue },
+                        set: { vm.cobDecayMultiplier = Decimal($0); vm.save(\.mealWindowCOBDecayMultiplier, vm.cobDecayMultiplier) }
+                    ),
+                    in: 0.25 ... 1.0,
+                    step: 0.05
+                )
+            }
+            .listRowBackground(Color.chart)
+
             // MARK: Reset to defaults
             Section(footer: Text("Resets all eating-mode tuning toggles and sliders to the shipped defaults. Doesn't affect telemetry settings or other Trio preferences.")) {
                 Button(role: .destructive) {
@@ -185,6 +209,7 @@ private final class ViewModel: ObservableObject {
     @Published var phantomCOBGrams: Decimal = 20
     @Published var smbMinutesMultiplier: Decimal = 2.0
     @Published var toughMealCapPercent: Decimal = 75
+    @Published var cobDecayMultiplier: Decimal = 1.0
 
     private let resolver: Resolver = TrioApp.resolver
     private lazy var settingsManager: SettingsManager? = resolver.resolve(SettingsManager.self)
@@ -200,6 +225,7 @@ private final class ViewModel: ObservableObject {
         phantomCOBGrams = s.mealWindowPhantomCOBGrams
         smbMinutesMultiplier = s.mealWindowSMBMinutesMultiplier
         toughMealCapPercent = s.mealWindowToughMealCapPercent
+        cobDecayMultiplier = s.mealWindowCOBDecayMultiplier
     }
 
     /// Generic setter that writes a single TrioSettings field through SettingsManager.
@@ -221,6 +247,7 @@ private final class ViewModel: ObservableObject {
         s.mealWindowPhantomCOBGrams = 20
         s.mealWindowSMBMinutesMultiplier = 2.0
         s.mealWindowToughMealCapPercent = 75
+        s.mealWindowCOBDecayMultiplier = 1.0
         settingsManager?.settings = s
         reload()
     }

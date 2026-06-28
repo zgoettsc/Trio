@@ -5,6 +5,7 @@ import LoopKit
 import LoopKitUI
 import SwiftDate
 import Swinject
+import UserNotifications
 
 protocol APSManager {
     func heartbeat(date: Date)
@@ -663,6 +664,9 @@ final class BaseAPSManager: APSManager, Injectable {
             forcedUAM: applied?.forcedUAM,
             phantomCOBGrams: applied?.phantomCOBGrams.map { Double(truncating: $0 as NSNumber) },
             relaxedRisingGuard: applied?.relaxedRisingGuard,
+            effectiveCOBDecayMultiplier: mealWindowActive
+                ? Double(truncating: s.mealWindowCOBDecayMultiplier as NSDecimalNumber)
+                : nil,
             mealWindowAppliedDecoded: mealWindowActive ? (applied != nil) : nil,
             mealWindowFloorDecoded: mealWindowActive ? (floor != nil) : nil,
             mealWindowAppliedRaw: mealWindowActive ? openAPS.lastRawMealWindowAppliedSnippet : nil,
@@ -748,6 +752,133 @@ final class BaseAPSManager: APSManager, Injectable {
                 ]
             ))
         }
+
+        // v2 spec Feature 5 — live carbs estimator. When the in-flight BG
+        // arc implies the entered carb count was severely too low, fire a
+        // local notification so the user can add carbs mid-meal. Uses the
+        // same back-calc as the post-hoc estimator (1g raises BG by ISF/CR);
+        // gated heavily to avoid noise.
+        if mealWindowActive {
+            evaluateLiveCarbsEstimate(sample: sample, settings: s, at: now)
+        }
+    }
+
+    /// Backing storage for live-estimator dedupe. Re-fires at most once per
+    /// 30 min per window. (windowId, last fire time).
+    private var lastLiveCarbsTrigger: (windowId: String, at: Date)?
+
+    /// Counts consecutive loops the threshold has been met (3 in a row to fire).
+    private var liveCarbsConsecutiveAboveThreshold: Int = 0
+
+    private func evaluateLiveCarbsEstimate(
+        sample: AlgorithmTelemetryLoopSample,
+        settings s: TrioSettings,
+        at now: Date
+    ) {
+        // Gating preconditions
+        guard let windowId = s.mealWindowId,
+              let activatedAt = s.mealWindowActivationDate,
+              let bg = sample.bg
+        else { return }
+        let minutesSinceOpen = now.timeIntervalSince(activatedAt) / 60
+        guard minutesSinceOpen >= 30 else { return } // signal needs time to develop
+
+        // Inputs — fall back to current OrefDetermination's ISF/CR if the
+        // window-snapshot fields haven't been backfilled yet on this row.
+        let bgAtActivation = s.mealClassifierActivationBG
+        guard let bgStart = bgAtActivation, bgStart > 0 else { return }
+        let enteredCarbs = Double(truncating: s.mealWindowEstimatedCarbs as NSDecimalNumber)
+        // Skip if user hasn't logged carbs yet — no baseline to compare to.
+        guard enteredCarbs > 0 else { return }
+        // Resolve ISF / CR from the most recent determination.
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var isf: Double = 0
+        var cr: Double = 0
+        ctx.performAndWait {
+            let req = OrefDetermination.fetchRequest()
+            req.sortDescriptors = [NSSortDescriptor(key: "deliverAt", ascending: false)]
+            req.fetchLimit = 1
+            if let last = (try? ctx.fetch(req))?.first {
+                isf = last.insulinSensitivity?.doubleValue ?? 0
+                cr = last.carbRatio?.doubleValue ?? 0
+            }
+        }
+        guard isf > 0, cr > 0 else { return }
+
+        // Skip during overrides — the math gets distorted (smbIsOff,
+        // percentage scaling). Surfaced separately via the override-during-
+        // meal warning instead.
+        var overrideActive = false
+        ctx.performAndWait {
+            let req = OverrideStored.fetchRequest()
+            req.predicate = NSPredicate(format: "enabled == YES")
+            req.fetchLimit = 1
+            overrideActive = ((try? ctx.fetch(req))?.first) != nil
+        }
+        if overrideActive { return }
+
+        // Back-calc what total carbs the BG response implies so far.
+        // implied_so_far = (currentBG - bgAtActivation) × CR/ISF + insulinDelivered × CR
+        let rise = max(0, bg - bgStart)
+        // Insulin delta from window start — approximate via IOB delta. Not
+        // perfect (some delivered insulin has cleared by now), but biases
+        // toward UNDER-estimating carbs, which makes the trigger conservative.
+        let iobDelta = max(0, (sample.iob ?? 0))
+        let impliedSoFar = rise * cr / isf + iobDelta * cr
+        let extra = impliedSoFar - enteredCarbs
+        let threshold = max(20.0, enteredCarbs * 0.3)
+
+        if extra >= threshold {
+            liveCarbsConsecutiveAboveThreshold += 1
+        } else {
+            liveCarbsConsecutiveAboveThreshold = 0
+            return
+        }
+        guard liveCarbsConsecutiveAboveThreshold >= 3 else { return }
+
+        // Re-fire cooldown
+        if let last = lastLiveCarbsTrigger,
+           last.windowId == windowId,
+           now.timeIntervalSince(last.at) < 30 * 60
+        {
+            return
+        }
+        lastLiveCarbsTrigger = (windowId, now)
+        liveCarbsConsecutiveAboveThreshold = 0 // reset after firing
+
+        // ±15% uncertainty on the suggestion
+        let low = Int((extra * 0.85).rounded())
+        let high = Int((extra * 1.15).rounded())
+        let suggestion = Int(extra.rounded())
+
+        // Local push
+        let content = UNMutableNotificationContent()
+        content.title = "⚠ Meal looking bigger than logged"
+        content.body = "BG suggests ~\(suggestion) g more than the \(Int(enteredCarbs)) g you entered (range \(low)–\(high) g). Consider adding carbs to your COB."
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "liveCarbsEstimate-\(windowId)-\(Int(now.timeIntervalSince1970))",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { _ in }
+
+        algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+            kind: .liveCarbsEstimateTriggered,
+            timestamp: now,
+            windowId: windowId,
+            payload: [
+                "enteredCarbs": .double(enteredCarbs),
+                "impliedSoFar": .double(impliedSoFar),
+                "extra": .double(extra),
+                "suggestedAdd": .double(extra),
+                "minutesSinceOpen": .double(minutesSinceOpen),
+                "bg": .double(bg),
+                "bgAtActivation": .double(bgStart),
+                "isf": .double(isf),
+                "cr": .double(cr)
+            ]
+        ))
     }
 
     func simulateDetermineBasal(

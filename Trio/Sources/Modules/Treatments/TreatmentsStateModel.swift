@@ -840,7 +840,16 @@ extension Treatments {
             protein: Decimal,
             within seconds: TimeInterval
         ) async -> CarbEntryStored? {
-            let ctx = CoreDataStack.shared.persistentContainer.viewContext
+            // Use a fresh task context, not viewContext. The carb entry we
+            // want to detect was likely just written by another code path
+            // (e.g. AnnounceMealIntentRequest.startMealAndLogCarbs via the
+            // SavedMeals Start button) using the storage's private context.
+            // viewContext doesn't always pick up those changes synchronously,
+            // so a viewContext query can miss recently-saved rows — exactly
+            // what we saw on dinner 2026-06-27 (two 65g entries 39s apart,
+            // no alert). A task context always reads fresh from the
+            // persistent store coordinator.
+            let ctx = CoreDataStack.shared.newTaskContext()
             let cutoff = Date().addingTimeInterval(-seconds)
             return await ctx.perform {
                 let req = CarbEntryStored.fetchRequest()

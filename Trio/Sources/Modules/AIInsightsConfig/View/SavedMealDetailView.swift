@@ -177,6 +177,9 @@ struct SavedMealDetailView: View {
                     analyticsSection
                 }
 
+                sensitivityScatterSection
+                carbCountFeedbackSection
+
                 Section(
                     header: Text("History (\(filteredInstances.count))"),
                     footer: Text("Swipe a row to delete a single instance.")
@@ -550,6 +553,125 @@ struct SavedMealDetailView: View {
             Spacer()
             Text("+\(Int(time)) min @ \(Int(bg.rounded()))")
                 .foregroundStyle(.secondary).monospacedDigit()
+        }
+    }
+
+    // MARK: - Sensitivity scatter (v2 spec Feature 3)
+
+    /// Each instance is a dot: x = autosens ratio at activation, y = peak Δ
+    /// above baseline. Tells you whether the loop's sensitivity reading
+    /// actually predicts how big this meal's excursion will be.
+    @ViewBuilder
+    private var sensitivityScatterSection: some View {
+        let points = filteredInstances.compactMap { inst -> (x: Double, y: Double, label: Date?)? in
+            guard let ratio = inst.autosensRatioAtActivation?.doubleValue, ratio > 0,
+                  let bgStart = inst.bgAtActivation?.doubleValue, bgStart > 0,
+                  inst.peakBG > 0
+            else { return nil }
+            let peakDelta = inst.peakBG - bgStart
+            return (ratio, peakDelta, inst.startedAt)
+        }
+        if points.count >= 3 {
+            Section(
+                header: Text("Sensitivity vs excursion"),
+                footer: Text("Each dot is one instance. X = Autosens at activation, Y = peak Δ above starting BG. Negative slope means the loop already compensates for sensitivity (good). Flat slope means Autosens is noise for this meal. Positive slope means the sensor flags resistance and dosing isn't catching up.")
+            ) {
+                Chart {
+                    ForEach(points.indices, id: \.self) { idx in
+                        let p = points[idx]
+                        PointMark(
+                            x: .value("Autosens", p.x),
+                            y: .value("Peak Δ", p.y)
+                        )
+                        .foregroundStyle(.purple.opacity(0.7))
+                        .symbolSize(50)
+                    }
+                    RuleMark(x: .value("Neutral", 1.0))
+                        .foregroundStyle(.secondary)
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    RuleMark(y: .value("Zero", 0))
+                        .foregroundStyle(.secondary)
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                }
+                .frame(height: 200)
+                .chartXAxisLabel("Autosens ratio")
+                .chartYAxisLabel("Peak Δ (mg/dL)")
+                .padding(.vertical, 4)
+            }
+            .listRowBackground(Color.chart)
+        }
+    }
+
+    // MARK: - Carb-count feedback (v2 spec Feature 4)
+
+    /// Aggregates the per-instance estimator across all qualifying instances
+    /// and surfaces the median Δ vs entered. When the meal is consistently
+    /// under-counted by ≥20g across ≥3 instances, suggests bumping the
+    /// SavedMeal's default carbs.
+    @ViewBuilder
+    private var carbCountFeedbackSection: some View {
+        // Reliable subset only: skip override-affected and not-returned-to-baseline.
+        let reliable = filteredInstances.filter {
+            !$0.windowHadOverride && !$0.windowHadTempTarget
+        }
+        let estimates = reliable.compactMap { inst -> (entered: Double, estimated: Double)? in
+            guard let bgStart = inst.bgAtActivation?.doubleValue, bgStart > 0,
+                  inst.peakBG > 0,
+                  let isf = inst.effectiveISFAtActivation?.doubleValue, isf > 0,
+                  let cr = inst.carbRatioAtActivation?.doubleValue, cr > 0
+            else { return nil }
+            let entered = inst.carbsAtActivation?.doubleValue ?? 0
+            let rise = max(0, inst.peakBG - bgStart)
+            let insulin = max(0, inst.totalInsulinDeliveredU)
+            let est = rise * cr / isf + insulin * cr
+            return (entered, est)
+        }
+        if estimates.count >= 3 {
+            let medianEntered = estimates.map(\.entered).sorted()[estimates.count / 2]
+            let medianEstimated = estimates.map(\.estimated).sorted()[estimates.count / 2]
+            let medianDelta = medianEstimated - medianEntered
+            let deltaColor: Color = {
+                if abs(medianDelta) < 20 { return .green }
+                if abs(medianDelta) < 50 { return .orange }
+                return .red
+            }()
+            let suggestion = max(medianEntered, medianEntered + medianDelta)
+            Section(
+                header: Text("Carb-count feedback"),
+                footer: Text("Estimated from BG response across \(estimates.count) reliable instances (override-affected and didn't-return-to-baseline excluded). When the meal consistently behaves bigger than the entered count, raise the saved meal's default to match.")
+            ) {
+                HStack {
+                    Text("Instances analyzed").foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(estimates.count)").monospacedDigit()
+                }
+                HStack {
+                    Text("Median entered").foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(Int(medianEntered.rounded())) g").monospacedDigit()
+                }
+                HStack {
+                    Text("Median estimated").foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(Int(medianEstimated.rounded())) g").monospacedDigit()
+                }
+                HStack {
+                    Text("Median Δ vs entered")
+                    Spacer()
+                    Text("\(medianDelta >= 0 ? "+" : "")\(Int(medianDelta.rounded())) g")
+                        .foregroundStyle(deltaColor)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                }
+                if abs(medianDelta) >= 20 {
+                    Button {
+                        showEdit = true
+                    } label: {
+                        Label("Bump default to \(Int(suggestion.rounded())) g", systemImage: "wrench.adjustable")
+                    }
+                }
+            }
+            .listRowBackground(Color.chart)
         }
     }
 }

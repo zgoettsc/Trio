@@ -41,6 +41,7 @@ struct TrioCustomOrefVariables: JSON, Equatable {
     var mealWindowPhantomCOBGrams: Decimal
     var mealWindowSMBMinutesMultiplier: Decimal
     var mealWindowToughMealCapPercent: Decimal
+    var mealWindowCOBDecayMultiplier: Decimal
 
     init(
         average_total_data: Decimal,
@@ -81,7 +82,8 @@ struct TrioCustomOrefVariables: JSON, Equatable {
         mealWindowPhantomCOB: Bool = false,
         mealWindowPhantomCOBGrams: Decimal = 20,
         mealWindowSMBMinutesMultiplier: Decimal = 2.0,
-        mealWindowToughMealCapPercent: Decimal = 75
+        mealWindowToughMealCapPercent: Decimal = 75,
+        mealWindowCOBDecayMultiplier: Decimal = 1.0
     ) {
         self.average_total_data = average_total_data
         self.weightedAverage = weightedAverage
@@ -122,6 +124,7 @@ struct TrioCustomOrefVariables: JSON, Equatable {
         self.mealWindowPhantomCOBGrams = mealWindowPhantomCOBGrams
         self.mealWindowSMBMinutesMultiplier = mealWindowSMBMinutesMultiplier
         self.mealWindowToughMealCapPercent = mealWindowToughMealCapPercent
+        self.mealWindowCOBDecayMultiplier = mealWindowCOBDecayMultiplier
     }
 }
 
@@ -166,5 +169,6 @@ extension TrioCustomOrefVariables {
         case mealWindowPhantomCOBGrams
         case mealWindowSMBMinutesMultiplier
         case mealWindowToughMealCapPercent
+        case mealWindowCOBDecayMultiplier
     }
 }

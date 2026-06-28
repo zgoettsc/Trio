@@ -180,6 +180,13 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
     const mwPhantomCOBGrams = trio_custom_variables.mealWindowPhantomCOBGrams || 20;
     const mwSMBMinutesMultiplier = trio_custom_variables.mealWindowSMBMinutesMultiplier || 1;
     const mwToughMealCapPercent = trio_custom_variables.mealWindowToughMealCapPercent || 75;
+    // v2 spec — slows oref's per-loop COB consumption during an active meal
+    // window. 1.0 = normal. 0.5 = drain at half speed. Fat-heavy meals
+    // routinely outlast oref's natural absorption model (observed dinner
+    // 2026-06-27 + Indian 2026-06-26: COB hit 0 30-90 min before BG actually
+    // peaked, leaving a long un-covered late climb). This stretches what's
+    // already there without lying about quantity (different from phantom COB).
+    const mwCOBDecayMultiplier = trio_custom_variables.mealWindowCOBDecayMultiplier || 1.0;
 
     // Item 5 — Phantom COB (PLAN.md). When the user has activated the meal window
     // but oref's mealCOB hasn't caught up (the ~30min lag observed in round-2 data,
@@ -941,6 +948,16 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
     var totalCI = Math.max(0, ci / 5 * 60 * remainingCATime / 2);
     // totalCI (mg/dL) / CSF (mg/dL/g) = total carbs absorbed (g)
     var totalCA = totalCI / csf;
+    // v2 spec — slow COB "consumption" during an active meal window by
+    // crediting less of the observed CI to carbs-already-absorbed. This
+    // leaves more pending carbs in `remainingCarbs` below, which keeps
+    // `eventualBG` higher and prompts more dosing during fat/protein-meal
+    // late phases. Different from phantom COB (which lies about quantity);
+    // here we accept observed CI is real but stretch the time it takes the
+    // model to consume the bucket. Default 1.0 (no change).
+    if (mealWindowActive && mealWindowMinutesRemaining > 0 && mwCOBDecayMultiplier < 1.0) {
+        totalCA = totalCA * mwCOBDecayMultiplier;
+    }
     var remainingCarbsCap = 90; // default to 90
     var remainingCarbsFraction = 1;
     if (profile.remainingCarbsCap) { remainingCarbsCap = Math.min(90,profile.remainingCarbsCap); }

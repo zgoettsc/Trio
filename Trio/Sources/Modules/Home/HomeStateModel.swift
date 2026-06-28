@@ -7,6 +7,7 @@ import LoopKitUI
 import Observation
 import SwiftDate
 import SwiftUI
+import UserNotifications
 
 extension Home {
     @Observable final class StateModel: BaseStateModel<Provider> {
@@ -23,6 +24,7 @@ extension Home {
         @ObservationIgnored @Injected() var bluetoothManager: BluetoothStateManager!
         @ObservationIgnored @Injected() var iobService: IOBService!
         @ObservationIgnored @Injected() var profileManager: ProfileManager!
+        @ObservationIgnored @Injected() var algorithmTelemetryManager: AlgorithmTelemetryManager!
 
         var cgmStateModel: CGMSettings.StateModel {
             CGMSettings.StateModel.shared
@@ -268,6 +270,84 @@ extension Home {
                     self.setupFPUsArray()
                 }
                 .store(in: &subscriptions)
+
+            // Bug 2 fix — when an override starts DURING an active meal
+            // window, the existing activation-time warning has already
+            // passed. Subscribe to override changes and re-check here so
+            // the user gets a heads-up that aggression is being suppressed.
+            Foundation.NotificationCenter.default
+                .publisher(for: .didUpdateOverrideConfiguration)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.warnIfOverrideSuppressesActiveMealWindow()
+                }
+                .store(in: &subscriptions)
+        }
+
+        /// Fires a local push when a freshly-started override is suppressing
+        /// or weakening dosing during an active meal window. Deduped per
+        /// (windowId, overrideId) so the user only gets one warning per
+        /// override-start. See docs/MEAL_INTELLIGENCE_v2_SPEC.md Bug 2.
+        private func warnIfOverrideSuppressesActiveMealWindow() {
+            let settings = settingsManager.settings
+            guard let windowId = settings.mealWindowId,
+                  settings.mealWindowActivationDate != nil else { return }
+            let ctx = CoreDataStack.shared.newTaskContext()
+            ctx.perform { [weak self] in
+                guard let self = self else { return }
+                let req = OverrideStored.fetchRequest()
+                req.predicate = NSPredicate(format: "enabled == YES")
+                req.fetchLimit = 5
+                let actives = (try? ctx.fetch(req)) ?? []
+                for override in actives {
+                    let targetD = override.target as? NSDecimalNumber
+                    let targetVal = targetD?.doubleValue ?? 0
+                    let suppresses = override.smbIsOff ||
+                        (override.percentage > 0 && override.percentage <= 80) ||
+                        targetVal >= 140
+                    guard suppresses else { continue }
+                    let overrideId = override.id ?? "unknown"
+                    let dedupeKey = "\(windowId)|\(overrideId)"
+                    if self.settingsManager.settings.lastMealWindowOverrideWarningKey == dedupeKey {
+                        continue
+                    }
+                    var s = self.settingsManager.settings
+                    s.lastMealWindowOverrideWarningKey = dedupeKey
+                    self.settingsManager.settings = s
+                    let nameSnap = override.name ?? "Override"
+                    let smbOff = override.smbIsOff
+                    let pct = Double(override.percentage)
+                    DispatchQueue.main.async {
+                        self.sendOverrideDuringMealWarning(name: nameSnap)
+                        self.algorithmTelemetryManager.logEvent(AlgorithmTelemetryEvent(
+                            kind: .overrideStartedDuringMealWindow,
+                            timestamp: Date(),
+                            windowId: windowId,
+                            payload: [
+                                "overrideId": .string(overrideId),
+                                "overrideName": .string(nameSnap),
+                                "smbIsOff": .bool(smbOff),
+                                "percentage": .double(pct),
+                                "target": .double(targetVal)
+                            ]
+                        ))
+                    }
+                    break // one warning per check
+                }
+            }
+        }
+
+        private func sendOverrideDuringMealWarning(name: String) {
+            let content = UNMutableNotificationContent()
+            content.title = "⚠ Override during meal window"
+            content.body = "\"\(name)\" started during your active meal window. SMB dosing may be reduced — meal coverage will be weaker."
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: "mealWindowOverrideWarning-\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(request) { _ in }
         }
 
         private func registerHandlers() {
