@@ -176,3 +176,4 @@
 {"kind":"smbDelivered","payload":{"bg":324,"floorActivated":true,"insulinReq":1.722,"iob":5.777,"minutesSinceWindowOpen":99.76371479829153,"units":1.25},"timestamp":"2026-06-27T23:57:31.539Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowToughMealCapPercent","newValue":"85","oldValue":"75"},"timestamp":"2026-06-28T00:01:26.816Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
 {"kind":"mealWindowTuningChanged","payload":{"field":"mealWindowSMBRatioValue","newValue":"0.75","oldValue":"0.7"},"timestamp":"2026-06-28T00:01:26.816Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
+{"kind":"smbDelivered","payload":{"bg":330,"floorActivated":false,"insulinReq":1.48,"iob":6.647,"minutesSinceWindowOpen":104.80931631525358,"units":1.1},"timestamp":"2026-06-28T00:02:34.275Z","windowId":"BFE029FA-C46C-40FB-B619-E2F499EB4DCF"}
