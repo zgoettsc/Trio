@@ -66,3 +66,4 @@
 {"kind":"mealWindowExpired","payload":{"elapsedMinutes":93.20832345088323,"source":"naturalExpiry","wasCarbsConfirmed":false},"timestamp":"2026-06-28T19:14:00.370Z","windowId":"8530F9D1-3E8D-4960-AFF4-E3E55DB0110D"}
 {"kind":"smbDelivered","payload":{"bg":185,"floorActivated":false,"insulinReq":0.21000000000000002,"iob":1.7890000000000001,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-06-28T19:22:36.070Z"}
 {"kind":"smbDelivered","payload":{"bg":193,"floorActivated":false,"insulinReq":0.41,"iob":1.7280000000000002,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-06-28T19:27:34.533Z"}
+{"kind":"smbDelivered","payload":{"bg":214,"floorActivated":false,"insulinReq":0.93,"iob":1.739,"minutesSinceWindowOpen":null,"units":0.45},"timestamp":"2026-06-28T19:42:34.889Z"}
