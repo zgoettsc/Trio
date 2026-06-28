@@ -178,6 +178,7 @@ struct SavedMealDetailView: View {
                 }
 
                 sensitivityScatterSection
+                calibrationAggregateSection
                 carbCountFeedbackSection
 
                 Section(
@@ -599,6 +600,85 @@ struct SavedMealDetailView: View {
                 .padding(.vertical, 4)
             }
             .listRowBackground(Color.chart)
+        }
+    }
+
+    // MARK: - Calibration aggregate (inverse CR/ISF)
+
+    /// Aggregates back-calc CR + ISF across verified instances. Tighter
+    /// signal than the forward estimator because verified carbs are
+    /// ground truth — the math says "given your meal really was N g,
+    /// what CR/ISF would explain the BG response?" Cross-check against
+    /// the user's current profile to flag drift.
+    @ViewBuilder
+    private var calibrationAggregateSection: some View {
+        let verified = filteredInstances.filter {
+            ($0.userVerifiedCarbsAmount?.doubleValue ?? 0) > 0
+        }
+        if !verified.isEmpty {
+            let agg = InverseCalibrator.aggregate(instances: verified)
+            Section(
+                header: Text("Calibration (verified meals)"),
+                footer: Text(agg.footnote)
+            ) {
+                statRow("Verified instances", value: "\(agg.instanceCount)")
+                if let cr = agg.medianBackCalcCR, let current = agg.currentCR {
+                    aggCalibRow(
+                        label: "Median back-calc CR",
+                        value: String(format: "%.1f g/U", cr),
+                        current: String(format: "%.1f", current),
+                        deltaPercent: agg.deltaCRPercent
+                    )
+                }
+                if let isf = agg.medianBackCalcISF, let current = agg.currentISF {
+                    aggCalibRow(
+                        label: "Median back-calc ISF",
+                        value: "\(Int(isf.rounded())) mg/dL/U",
+                        current: "\(Int(current.rounded()))",
+                        deltaPercent: agg.deltaISFPercent
+                    )
+                } else if agg.usedISFIndeterminateCount == agg.instanceCount, agg.instanceCount > 0 {
+                    HStack {
+                        Text("Median back-calc ISF")
+                        Spacer()
+                        Text("indeterminate").foregroundStyle(.secondary).font(.caption)
+                    }
+                }
+                if agg.instanceCount < 3 {
+                    Label("Need ≥3 verified meals before changing your profile based on this.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .listRowBackground(Color.chart)
+        }
+    }
+
+    private func aggCalibRow(label: String, value: String, current: String, deltaPercent: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                Spacer()
+                Text(value).fontWeight(.semibold).monospacedDigit()
+            }
+            HStack {
+                Text("vs current \(current)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if let pct = deltaPercent {
+                    let color: Color = {
+                        let a = Swift.abs(pct)
+                        if a < 10 { return .green }
+                        if a < 25 { return .orange }
+                        return .red
+                    }()
+                    Text("\(pct >= 0 ? "+" : "")\(String(format: "%.1f", pct))%")
+                        .font(.caption)
+                        .foregroundStyle(color)
+                        .monospacedDigit()
+                }
+            }
         }
     }
 

@@ -29,6 +29,7 @@ struct SavedMealInstanceDetailView: View {
     }
 
     @State private var chartMode: ChartMode = .absolute
+    @State private var showVerifySheet = false
 
     private let resolver: Resolver = TrioApp.resolver
 
@@ -36,6 +37,8 @@ struct SavedMealInstanceDetailView: View {
         Form {
             headerSection
             carbsEstimateSection
+            verifiedCarbsSection
+            calibrationSection
             chartSection
             metricsSection
             contextSection
@@ -44,6 +47,9 @@ struct SavedMealInstanceDetailView: View {
         .background(appState.trioBackgroundColor(for: colorScheme))
         .navigationTitle(instance.savedMeal?.name ?? "Instance")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showVerifySheet) {
+            VerifyCarbsSheet(instance: instance)
+        }
     }
 
     // MARK: - Sections
@@ -135,6 +141,138 @@ struct SavedMealInstanceDetailView: View {
             }
         }
         .listRowBackground(Color.chart)
+    }
+
+    @ViewBuilder
+    private var verifiedCarbsSection: some View {
+        Section(
+            header: Text("Verified carbs"),
+            footer: Text("Mark this meal as verified when you read the label, weighed the food, or otherwise *know* the carb count. Drives the calibration math below — single verified meals have wide uncertainty, ≥3 across the same hour-of-day starts to mean something.")
+        ) {
+            if let amount = instance.userVerifiedCarbsAmount?.doubleValue, amount > 0 {
+                HStack {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    Text("Verified at \(Int(amount.rounded())) g")
+                        .fontWeight(.medium)
+                    Spacer()
+                    if let when = instance.verifiedAt {
+                        Text(when, style: .date).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Button {
+                    showVerifySheet = true
+                } label: {
+                    Label("Edit verified amount", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    clearVerified()
+                } label: {
+                    Label("Clear verification", systemImage: "xmark.seal")
+                }
+            } else {
+                Button {
+                    showVerifySheet = true
+                } label: {
+                    Label("Mark as verified (I know the exact carbs)", systemImage: "checkmark.seal")
+                }
+            }
+        }
+        .listRowBackground(Color.chart)
+    }
+
+    @ViewBuilder
+    private var calibrationSection: some View {
+        if let result = InverseCalibrator.calibrate(from: instance, fallback: fallbackInputs()) {
+            Section(
+                header: Text("Calibration (back-calc)"),
+                footer: Text(result.footnote)
+            ) {
+                HStack {
+                    Text("Verified carbs")
+                    Spacer()
+                    Text("\(Int(result.verifiedCarbs.rounded())) g").foregroundStyle(.secondary).monospacedDigit()
+                }
+                if let backCR = result.backCalcCR {
+                    calibRow(
+                        label: "Back-calc CR",
+                        value: String(format: "%.1f g/U", backCR),
+                        current: String(format: "%.1f", result.assumedCR),
+                        deltaPercent: result.deltaCRPercent
+                    )
+                }
+                if let backISF = result.backCalcISF {
+                    calibRow(
+                        label: "Back-calc ISF",
+                        value: "\(Int(backISF.rounded())) mg/dL/U",
+                        current: "\(Int(result.assumedISF.rounded()))",
+                        deltaPercent: result.deltaISFPercent
+                    )
+                } else if result.isfIndeterminate {
+                    HStack {
+                        Text("Back-calc ISF")
+                        Spacer()
+                        Text("indeterminate").foregroundStyle(.secondary).font(.caption)
+                    }
+                }
+                HStack {
+                    Text("Confidence")
+                    Spacer()
+                    Text(result.confidence.label).foregroundStyle(result.confidence.color)
+                }
+            }
+            .listRowBackground(Color.chart)
+        }
+    }
+
+    private func calibRow(label: String, value: String, current: String, deltaPercent: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                Spacer()
+                Text(value).fontWeight(.semibold).monospacedDigit()
+            }
+            HStack {
+                Text("vs current \(current)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if let pct = deltaPercent {
+                    Text("\(pct >= 0 ? "+" : "")\(String(format: "%.1f", pct))%")
+                        .font(.caption)
+                        .foregroundStyle(colorForDelta(pct))
+                        .monospacedDigit()
+                }
+            }
+        }
+    }
+
+    private func colorForDelta(_ pct: Double) -> Color {
+        let abs = Swift.abs(pct)
+        if abs < 10 { return .green }
+        if abs < 25 { return .orange }
+        return .red
+    }
+
+    private func clearVerified() {
+        let id = instance.objectID
+        let ctx = CoreDataStack.shared.newTaskContext()
+        let priorAmount = instance.userVerifiedCarbsAmount?.doubleValue
+        let windowId = instance.windowId
+        ctx.perform {
+            if let row = try? ctx.existingObject(with: id) as? SavedMealInstance {
+                row.userVerifiedCarbsAmount = nil
+                row.verifiedAt = nil
+                try? ctx.save()
+            }
+        }
+        let telemetry = resolver.resolve(AlgorithmTelemetryManager.self)
+        telemetry?.logEvent(AlgorithmTelemetryEvent(
+            kind: .mealCarbsVerifiedCleared,
+            timestamp: Date(),
+            windowId: windowId,
+            payload: [
+                "priorVerifiedCarbs": .double(priorAmount ?? 0)
+            ]
+        ))
     }
 
     @ViewBuilder
@@ -637,4 +775,180 @@ private func min(_ a: CarbsEstimator.Confidence, _ b: CarbsEstimator.Confidence)
         switch c { case .high: return 3; case .medium: return 2; case .low: return 1; case .none: return 0 }
     }
     return rank(a) <= rank(b) ? a : b
+}
+
+// MARK: - Verify carbs sheet
+
+/// Lightweight sheet for capturing user-verified ground-truth carbs on a
+/// closed instance. Defaults to the entered value (or the entered+estimator
+/// total if the live estimator added to this meal). The verified amount
+/// feeds `InverseCalibrator` — it deliberately does NOT mutate
+/// `carbsAtActivation` or write a new carb entry; this is a calibration
+/// attestation, not a dosing change.
+struct VerifyCarbsSheet: View {
+    @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
+    @Environment(AppState.self) var appState
+    @ObservedObject var instance: SavedMealInstance
+
+    @State private var amountText: String = ""
+    @FocusState private var amountFocused: Bool
+
+    private let resolver: Resolver = TrioApp.resolver
+
+    var body: some View {
+        NavigationView {
+            Form {
+                summarySection
+                amountSection
+                guidanceSection
+            }
+            .scrollContentBackground(.hidden)
+            .background(appState.trioBackgroundColor(for: colorScheme))
+            .navigationTitle("Verify carbs")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") { save() }
+                        .disabled(parsedAmount <= 0)
+                        .fontWeight(.semibold)
+                }
+                ToolbarItem(placement: .keyboard) {
+                    HStack {
+                        Spacer()
+                        Button("Done") { amountFocused = false }
+                    }
+                }
+            }
+            .onAppear {
+                amountText = defaultAmountText()
+                amountFocused = true
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var summarySection: some View {
+        Section(header: Text(instance.savedMeal?.name ?? "Instance")) {
+            HStack {
+                Text("Entered")
+                Spacer()
+                Text("\(Int((instance.carbsAtActivation?.doubleValue ?? 0).rounded())) g")
+                    .foregroundStyle(.secondary)
+            }
+            if let added = instance.carbsAddedByEstimator?.doubleValue, added > 0 {
+                HStack {
+                    Text("Estimator added")
+                    Spacer()
+                    Text("+\(Int(added.rounded())) g").foregroundStyle(.secondary)
+                }
+            }
+            if let edited = instance.carbsEditedTo?.doubleValue, edited > 0 {
+                HStack {
+                    Text("Edited to")
+                    Spacer()
+                    Text("\(Int(edited.rounded())) g").foregroundStyle(.secondary)
+                }
+            }
+            if instance.peakBG > 0, let bg = instance.bgAtActivation?.doubleValue, bg > 0 {
+                HStack {
+                    Text("Peak rise")
+                    Spacer()
+                    Text("\(Int((instance.peakBG - bg).rounded())) mg/dL").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .listRowBackground(Color.chart)
+    }
+
+    @ViewBuilder
+    private var amountSection: some View {
+        Section(
+            header: Text("True carbs (g)"),
+            footer: Text("How many grams did this meal *really* contain? Use label values, weighing, or a trusted nutrition source. The math gets garbage if this is a guess.")
+        ) {
+            HStack {
+                TextField("0", text: $amountText)
+                    .keyboardType(.decimalPad)
+                    .focused($amountFocused)
+                    .font(.title3)
+                    .padding(.vertical, 4)
+                Text("g").foregroundStyle(.secondary)
+            }
+        }
+        .listRowBackground(Color.chart)
+    }
+
+    @ViewBuilder
+    private var guidanceSection: some View {
+        Section {
+            Label("This does not change dosing. It records your verified carb count so the app can back-calculate what CR / ISF the BG response actually implied.", systemImage: "info.circle")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .listRowBackground(Color.chart)
+    }
+
+    private var parsedAmount: Double {
+        Double(amountText.replacingOccurrences(of: ",", with: ".")) ?? 0
+    }
+
+    private func defaultAmountText() -> String {
+        if let v = instance.userVerifiedCarbsAmount?.doubleValue, v > 0 {
+            return "\(Int(v.rounded()))"
+        }
+        if let edited = instance.carbsEditedTo?.doubleValue, edited > 0 {
+            return "\(Int(edited.rounded()))"
+        }
+        let entered = instance.carbsAtActivation?.doubleValue ?? 0
+        let added = instance.carbsAddedByEstimator?.doubleValue ?? 0
+        let total = entered + added
+        return total > 0 ? "\(Int(total.rounded()))" : ""
+    }
+
+    private func save() {
+        let amount = parsedAmount
+        guard amount > 0 else { return }
+        let id = instance.objectID
+        let ctx = CoreDataStack.shared.newTaskContext()
+        let windowId = instance.windowId
+        let priorAmount = instance.userVerifiedCarbsAmount?.doubleValue ?? 0
+        ctx.perform {
+            if let row = try? ctx.existingObject(with: id) as? SavedMealInstance {
+                row.userVerifiedCarbsAmount = NSDecimalNumber(value: amount)
+                row.verifiedAt = Date()
+                try? ctx.save()
+            }
+        }
+        let telemetry = resolver.resolve(AlgorithmTelemetryManager.self)
+        // Back-calc what this verified value implies for CR/ISF so the
+        // event row is self-contained for offline analysis (no need to
+        // join against the SavedMealInstance row).
+        let result = InverseCalibrator.calibrate(from: instance)
+        var payload: [String: AlgorithmTelemetryJSONValue] = [
+            "verifiedCarbs": .double(amount),
+            "priorVerifiedCarbs": .double(priorAmount),
+            "entered": .double(instance.carbsAtActivation?.doubleValue ?? 0)
+        ]
+        if let r = result {
+            payload["assumedCR"] = .double(r.assumedCR)
+            payload["assumedISF"] = .double(r.assumedISF)
+            if let v = r.backCalcCR { payload["backCalcCR"] = .double(v) }
+            if let v = r.backCalcISF { payload["backCalcISF"] = .double(v) }
+            if let v = r.deltaCRPercent { payload["deltaCRPercent"] = .double(v) }
+            if let v = r.deltaISFPercent { payload["deltaISFPercent"] = .double(v) }
+            payload["isfIndeterminate"] = .bool(r.isfIndeterminate)
+            payload["confidence"] = .string(r.confidence.label)
+        }
+        telemetry?.logEvent(AlgorithmTelemetryEvent(
+            kind: .mealCarbsVerified,
+            timestamp: Date(),
+            windowId: windowId,
+            payload: payload
+        ))
+        dismiss()
+    }
 }

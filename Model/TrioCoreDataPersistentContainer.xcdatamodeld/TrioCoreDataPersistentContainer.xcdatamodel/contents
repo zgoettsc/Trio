@@ -356,6 +356,8 @@
         <attribute name="carbRatioAtActivation" optional="YES" attributeType="Decimal"/>
         <attribute name="carbsAddedByEstimator" optional="YES" attributeType="Decimal"/>
         <attribute name="carbsEditedTo" optional="YES" attributeType="Decimal"/>
+        <attribute name="userVerifiedCarbsAmount" optional="YES" attributeType="Decimal"/>
+        <attribute name="verifiedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <relationship name="savedMeal" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="SavedMeal" inverseName="instances" inverseEntity="SavedMeal"/>
         <fetchIndex name="byStartedAt">
             <fetchIndexElement property="startedAt" type="Binary" order="descending"/>

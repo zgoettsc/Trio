@@ -86,6 +86,15 @@ public extension SavedMealInstance {
     /// preserved; `carbsAtActivation` is NOT mutated.
     @NSManaged var carbsEditedTo: NSDecimalNumber?
 
+    /// User-verified ground-truth carbs (label-read, weighed, or otherwise
+    /// confidently known). When set, drives the inverse calibrator: given
+    /// the BG response we observed, what CR/ISF would explain it? Reserved
+    /// for meals where the user is certain — never auto-filled.
+    @NSManaged var userVerifiedCarbsAmount: NSDecimalNumber?
+    /// Timestamp the user marked this instance verified. Lets analytics
+    /// track when calibration data accumulated and aging out old reads.
+    @NSManaged var verifiedAt: Date?
+
     @NSManaged var savedMeal: SavedMeal?
 }
 
