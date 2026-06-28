@@ -758,7 +758,7 @@ final class BaseAPSManager: APSManager, Injectable {
         // local notification so the user can add carbs mid-meal. Uses the
         // same back-calc as the post-hoc estimator (1g raises BG by ISF/CR);
         // gated heavily to avoid noise.
-        if mealWindowActive {
+        if mealWindowActive && s.liveCarbsEstimatorEnabled {
             evaluateLiveCarbsEstimate(sample: sample, settings: s, at: now)
         }
     }
@@ -847,21 +847,44 @@ final class BaseAPSManager: APSManager, Injectable {
         liveCarbsConsecutiveAboveThreshold = 0 // reset after firing
 
         // ±15% uncertainty on the suggestion
-        let low = Int((extra * 0.85).rounded())
-        let high = Int((extra * 1.15).rounded())
+        let low = extra * 0.85
+        let high = extra * 1.15
         let suggestion = Int(extra.rounded())
 
-        // Local push
-        let content = UNMutableNotificationContent()
-        content.title = "⚠ Meal looking bigger than logged"
-        content.body = "BG suggests ~\(suggestion) g more than the \(Int(enteredCarbs)) g you entered (range \(low)–\(high) g). Consider adding carbs to your COB."
-        content.sound = .default
-        let request = UNNotificationRequest(
-            identifier: "liveCarbsEstimate-\(windowId)-\(Int(now.timeIntervalSince1970))",
-            content: content,
-            trigger: nil
+        // Persist the suggestion as a pending banner / sheet input. Survives
+        // app restart and is the SOLE actionable surface — the notification
+        // is just an alert that something is there to act on.
+        var settingsToWrite = settingsManager.settings
+        settingsToWrite.pendingLiveCarbsSuggestion = PendingLiveCarbsSuggestion(
+            windowId: windowId,
+            triggeredAt: now,
+            enteredCarbs: enteredCarbs,
+            suggestedExtra: extra,
+            rangeLow: low,
+            rangeHigh: high,
+            bgAtTrigger: bg,
+            savedMealInstanceId: settingsToWrite.mealWindowSavedMealInstanceId,
+            savedMealName: nil // populated by view layer from CoreData if needed
         )
-        UNUserNotificationCenter.current().add(request) { _ in }
+        settingsManager.settings = settingsToWrite
+
+        // Local push — opt-in. Master switch + sound switch both honored.
+        // When notifications are off, the user still sees the in-app
+        // banner on next foreground; we just don't wake them up at 2am.
+        if settingsToWrite.liveCarbsEstimatorNotificationsEnabled {
+            let content = UNMutableNotificationContent()
+            content.title = "⚠ Meal looking bigger than logged"
+            content.body = "BG suggests ~\(suggestion) g more than the \(Int(enteredCarbs)) g you entered (range \(Int(low.rounded()))–\(Int(high.rounded())) g). Open Trio to add or adjust."
+            if settingsToWrite.liveCarbsEstimatorNotificationSound {
+                content.sound = .default
+            }
+            let request = UNNotificationRequest(
+                identifier: "liveCarbsEstimate-\(windowId)-\(Int(now.timeIntervalSince1970))",
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(request) { _ in }
+        }
 
         algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
             kind: .liveCarbsEstimateTriggered,

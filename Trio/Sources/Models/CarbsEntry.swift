@@ -15,6 +15,14 @@ struct CarbsEntry: JSON, Equatable, Hashable, Identifiable {
 
     static let local = "Trio"
     static let appleHealth = "applehealth"
+    /// New CarbsEntry written by the live mid-meal carbs estimator when the
+    /// user accepts an "Add Ng now" suggestion. Lets analysis distinguish
+    /// estimator-injected carbs from user-entered carbs so the post-hoc
+    /// estimator's self-calibration loop stays clean.
+    static let liveEstimator = "Trio-LiveEstimator"
+    /// Carbs from the "Edit original to N g" path — replaces the original
+    /// entry at its original timestamp with the new larger amount.
+    static let liveEstimatorEdit = "Trio-LiveEstimator-Edit"
 
     static func == (lhs: CarbsEntry, rhs: CarbsEntry) -> Bool {
         lhs.createdAt == rhs.createdAt

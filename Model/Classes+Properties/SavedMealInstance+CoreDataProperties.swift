@@ -75,6 +75,17 @@ public extension SavedMealInstance {
     /// like" in carb-equivalents.
     @NSManaged var carbRatioAtActivation: NSDecimalNumber?
 
+    /// Cumulative carbs the live mid-meal estimator added via the user
+    /// accepting "Add N g now" suggestions. Does NOT mutate
+    /// `carbsAtActivation` — that stays frozen at the user's first decision
+    /// so the post-hoc estimator's self-calibration math stays clean.
+    /// `true_entered_for_this_meal = carbsAtActivation + carbsAddedByEstimator`.
+    @NSManaged var carbsAddedByEstimator: NSDecimalNumber?
+    /// If the user picked "Edit original to N g" instead of "Add now", the
+    /// final value the original entry was edited to. Original timestamp is
+    /// preserved; `carbsAtActivation` is NOT mutated.
+    @NSManaged var carbsEditedTo: NSDecimalNumber?
+
     @NSManaged var savedMeal: SavedMeal?
 }
 

@@ -158,6 +158,24 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// the model.
     var mealWindowCOBDecayMultiplier: Decimal = 1.0
 
+    /// Master switch for the live mid-meal carbs estimator. When off, the
+    /// loop doesn't run the estimator at all — no notifications, no
+    /// pending suggestions written, no telemetry.
+    var liveCarbsEstimatorEnabled: Bool = true
+    /// Whether the estimator fires a local push notification when it
+    /// triggers. Off = the suggestion still lands as an in-app banner on
+    /// next foreground, just no push (no wake-up at 2am).
+    var liveCarbsEstimatorNotificationsEnabled: Bool = true
+    /// Whether the estimator's notification plays a sound + vibration.
+    /// Off = silent notification (still appears on lock screen, doesn't
+    /// make noise). Independent of the master notifications toggle.
+    var liveCarbsEstimatorNotificationSound: Bool = true
+    /// In-flight estimator suggestion that the home view should surface
+    /// as a banner / sheet on next foreground. Cleared when the user
+    /// acts on it or dismisses. Persists across app restarts so a
+    /// suggestion fired while the app was closed isn't lost.
+    var pendingLiveCarbsSuggestion: PendingLiveCarbsSuggestion?
+
     // Telemetry — auto-pushes meal-window data + loop decisions to a private branch
     // on the trio repo for tuning analysis. PAT is in Keychain, not here.
     var telemetryEnabled: Bool = false
@@ -459,6 +477,18 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Decimal.self, forKey: .mealWindowCOBDecayMultiplier) {
             settings.mealWindowCOBDecayMultiplier = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .liveCarbsEstimatorEnabled) {
+            settings.liveCarbsEstimatorEnabled = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .liveCarbsEstimatorNotificationsEnabled) {
+            settings.liveCarbsEstimatorNotificationsEnabled = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .liveCarbsEstimatorNotificationSound) {
+            settings.liveCarbsEstimatorNotificationSound = v
+        }
+        if let v = try? container.decode(PendingLiveCarbsSuggestion.self, forKey: .pendingLiveCarbsSuggestion) {
+            settings.pendingLiveCarbsSuggestion = v
         }
 
         if let telemetryEnabled = try? container.decode(Bool.self, forKey: .telemetryEnabled) {

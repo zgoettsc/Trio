@@ -146,6 +146,8 @@
 		38A9260525F012D8009E3739 /* CarbRatios.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38A9260425F012D8009E3739 /* CarbRatios.swift */; };
 		38AAF85525FFF846004AF583 /* CurrentGlucoseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38AAF85425FFF846004AF583 /* CurrentGlucoseView.swift */; };
 		38AEE73D25F0200C0013F05B /* TrioSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38AEE73C25F0200C0013F05B /* TrioSettings.swift */; };
+		F2B0C3D40037000000000001 /* PendingLiveCarbsSuggestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40036000000000001 /* PendingLiveCarbsSuggestion.swift */; };
+		F2B0C3D40039000000000001 /* LiveCarbsSuggestionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40038000000000001 /* LiveCarbsSuggestionSheet.swift */; };
 		38AEE75225F022080013F05B /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38AEE75125F022080013F05B /* SettingsManager.swift */; };
 		38AEE75725F0F18E0013F05B /* CarbsStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38AEE75625F0F18E0013F05B /* CarbsStorage.swift */; };
 		38B17B6625DD90E0005CAE3D /* SwiftDate in Frameworks */ = {isa = PBXBuildFile; productRef = 38B17B6525DD90E0005CAE3D /* SwiftDate */; };
@@ -1125,6 +1127,8 @@
 		38A9260425F012D8009E3739 /* CarbRatios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarbRatios.swift; sourceTree = "<group>"; };
 		38AAF85425FFF846004AF583 /* CurrentGlucoseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentGlucoseView.swift; sourceTree = "<group>"; };
 		38AEE73C25F0200C0013F05B /* TrioSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrioSettings.swift; sourceTree = "<group>"; };
+		F2B0C3D40036000000000001 /* PendingLiveCarbsSuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingLiveCarbsSuggestion.swift; sourceTree = "<group>"; };
+		F2B0C3D40038000000000001 /* LiveCarbsSuggestionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCarbsSuggestionSheet.swift; sourceTree = "<group>"; };
 		38AEE75125F022080013F05B /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
 		38AEE75625F0F18E0013F05B /* CarbsStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarbsStorage.swift; sourceTree = "<group>"; };
 		38B4F3AE25E2979F00E76A18 /* IndexedCollection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexedCollection.swift; sourceTree = "<group>"; };
@@ -2772,6 +2776,7 @@
 				3871F39B25ED892B0013ECB5 /* TempTarget.swift */,
 				1935363F28496F7D001E0B16 /* TrioCustomOrefVariables.swift */,
 				38AEE73C25F0200C0013F05B /* TrioSettings.swift */,
+				F2B0C3D40036000000000001 /* PendingLiveCarbsSuggestion.swift */,
 				F2B0C3D40014000000000001 /* MealClassification.swift */,
 				3811DE8E25C9D80400A708ED /* User.swift */,
 				CE82E02628E869DF00473A9C /* AlertEntry.swift */,
@@ -3302,6 +3307,7 @@
 				F2B0C3D40024000000000001 /* SavedMealEditView.swift */,
 				F2B0C3D40026000000000001 /* SavedMealDetailView.swift */,
 				F2B0C3D40034000000000001 /* SavedMealInstanceDetailView.swift */,
+				F2B0C3D40038000000000001 /* LiveCarbsSuggestionSheet.swift */,
 				F2B0C3D4002A000000000001 /* SavedMealAnalytics.swift */,
 				F2B0C3D4002E000000000001 /* SavedMealPickerView.swift */,
 				F2B0C3D40032000000000001 /* SavedMealBackfillPickerView.swift */,
@@ -4766,6 +4772,7 @@
 				F2B0C3D40025000000000001 /* SavedMealEditView.swift in Sources */,
 				F2B0C3D40027000000000001 /* SavedMealDetailView.swift in Sources */,
 				F2B0C3D40035000000000001 /* SavedMealInstanceDetailView.swift in Sources */,
+				F2B0C3D40039000000000001 /* LiveCarbsSuggestionSheet.swift in Sources */,
 				F2B0C3D40029000000000001 /* SavedMealOutcomeCalculator.swift in Sources */,
 				F2B0C3D4002B000000000001 /* SavedMealAnalytics.swift in Sources */,
 				F2B0C3D4002D000000000001 /* SavedMealTelemetryRow.swift in Sources */,
@@ -4794,6 +4801,7 @@
 				19D466A329AA2B80004D5F33 /* MealSettingsDataFlow.swift in Sources */,
 				3811DEB225C9D88300A708ED /* KeychainItemAccessibility.swift in Sources */,
 				38AEE73D25F0200C0013F05B /* TrioSettings.swift in Sources */,
+				F2B0C3D40037000000000001 /* PendingLiveCarbsSuggestion.swift in Sources */,
 				38FCF3FD25E997A80078B0D1 /* PumpHistoryStorage.swift in Sources */,
 				58645BA72CA2D390008AFCE7 /* ChartAxisSetup.swift in Sources */,
 				38D0B3B625EBE24900CB6E88 /* Battery.swift in Sources */,

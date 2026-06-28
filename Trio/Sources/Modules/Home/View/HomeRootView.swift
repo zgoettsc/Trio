@@ -30,6 +30,7 @@ extension Home {
         @State var isConfirmStopOverridePresented = false
         @State var isConfirmStopTempTargetShown = false
         @State var isMenuPresented = false
+        @State var liveCarbsSheetSuggestion: PendingLiveCarbsSuggestion?
         @State var showTreatments = false
         @State var selectedTab: Int = 0
         @State var showPumpSelection: Bool = false
@@ -859,6 +860,44 @@ extension Home {
             }
         }
 
+        /// Banner shown when the live mid-meal carbs estimator has a pending
+        /// suggestion. Tap to open the actionable sheet (add new / edit
+        /// original / dismiss). Hidden when no suggestion exists.
+        @ViewBuilder func liveCarbsBanner() -> some View {
+            if let suggestion = state.pendingLiveCarbsSuggestion {
+                Button {
+                    liveCarbsSheetSuggestion = suggestion
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Meal looking bigger than logged")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                            Text("Tap to add ~\(Int(suggestion.suggestedExtra.rounded())) g or edit")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background {
+                        RoundedRectangle(cornerRadius: 15)
+                            .fill(Color.red.opacity(colorScheme == .dark ? 0.7 : 0.85))
+                    }
+                    .padding(.horizontal, 10)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+
         /// Eating-mode banner — mirrors the Live Activity pill but on the Home screen.
         /// Hidden when no window is active. The countdown is rendered with
         /// `Text(timerInterval:countsDown:)`, which self-ticks via the system and does NOT
@@ -1210,10 +1249,19 @@ extension Home {
                             // Float the eating-mode pill above the adjustment banner so
                             // it doesn't push the adjustment off-screen on smaller devices
                             // (the bottom area isn't scrollable).
-                            mealWindowBanner()
-                                .offset(y: -42)
+                            VStack(spacing: 4) {
+                                liveCarbsBanner()
+                                mealWindowBanner()
+                            }
+                            .offset(y: -42)
                         }
                         .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
+                }
+            }
+            .sheet(item: $liveCarbsSheetSuggestion) { suggestion in
+                LiveCarbsSuggestionSheet(suggestion: suggestion) {
+                    liveCarbsSheetSuggestion = nil
+                    state.refreshMealWindowState()
                 }
             }
             .background(appState.trioBackgroundColor(for: colorScheme))

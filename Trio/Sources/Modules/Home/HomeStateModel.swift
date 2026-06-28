@@ -126,6 +126,9 @@ extension Home {
         var isMealWindowActive: Bool = false
         var mealWindowExpiresAt: Date = .distantPast
         var mealWindowEstimatedCarbs: Decimal = 0
+        /// Mirrored from TrioSettings on every refresh. When non-nil, the
+        /// home screen shows a tappable banner offering to add/edit carbs.
+        var pendingLiveCarbsSuggestion: PendingLiveCarbsSuggestion?
         var mealWindowCarbsConfirmed: Bool = false
 
         private(set) var setupPumpType: PumpConfig.PumpType = .minimed
@@ -880,6 +883,21 @@ extension Home.StateModel {
         mealWindowEstimatedCarbs = s.mealWindowEstimatedCarbs
         mealWindowCarbsConfirmed = s.mealWindowCarbsConfirmed
         isMealWindowActive = expiresAt > Date()
+        // Pending live-carbs suggestion mirror. Cleared if stale (>2h) so
+        // a forgotten suggestion from an earlier meal doesn't keep the
+        // banner up forever.
+        if let p = s.pendingLiveCarbsSuggestion {
+            if Date().timeIntervalSince(p.triggeredAt) > 2 * 3600 {
+                var s2 = s
+                s2.pendingLiveCarbsSuggestion = nil
+                settingsManager.settings = s2
+                pendingLiveCarbsSuggestion = nil
+            } else {
+                pendingLiveCarbsSuggestion = p
+            }
+        } else {
+            pendingLiveCarbsSuggestion = nil
+        }
     }
 
     /// User-initiated cancel from the Home banner. Mirrors AnnounceMealIntentRequest.cancel()

@@ -178,6 +178,30 @@ struct EatingModeTuningView: View {
             }
             .listRowBackground(Color.chart)
 
+            // MARK: Live carbs estimator
+            Section(
+                header: Text("Mid-meal carbs estimator"),
+                footer: Text("During an active meal window, watches BG vs entered carbs and surfaces a suggestion when the meal looks bigger than logged. Always shows as an in-app banner; notifications are optional so it doesn't wake you up.")
+            ) {
+                Toggle("Enable estimator", isOn: Binding(
+                    get: { vm.liveCarbsEnabled },
+                    set: { vm.liveCarbsEnabled = $0; vm.save(\.liveCarbsEstimatorEnabled, $0) }
+                ))
+                if vm.liveCarbsEnabled {
+                    Toggle("Notification", isOn: Binding(
+                        get: { vm.liveCarbsNotifications },
+                        set: { vm.liveCarbsNotifications = $0; vm.save(\.liveCarbsEstimatorNotificationsEnabled, $0) }
+                    ))
+                    if vm.liveCarbsNotifications {
+                        Toggle("Notification sound", isOn: Binding(
+                            get: { vm.liveCarbsSound },
+                            set: { vm.liveCarbsSound = $0; vm.save(\.liveCarbsEstimatorNotificationSound, $0) }
+                        ))
+                    }
+                }
+            }
+            .listRowBackground(Color.chart)
+
             // MARK: Reset to defaults
             Section(footer: Text("Resets all eating-mode tuning toggles and sliders to the shipped defaults. Doesn't affect telemetry settings or other Trio preferences.")) {
                 Button(role: .destructive) {
@@ -210,6 +234,9 @@ private final class ViewModel: ObservableObject {
     @Published var smbMinutesMultiplier: Decimal = 2.0
     @Published var toughMealCapPercent: Decimal = 75
     @Published var cobDecayMultiplier: Decimal = 1.0
+    @Published var liveCarbsEnabled: Bool = true
+    @Published var liveCarbsNotifications: Bool = true
+    @Published var liveCarbsSound: Bool = true
 
     private let resolver: Resolver = TrioApp.resolver
     private lazy var settingsManager: SettingsManager? = resolver.resolve(SettingsManager.self)
@@ -226,6 +253,9 @@ private final class ViewModel: ObservableObject {
         smbMinutesMultiplier = s.mealWindowSMBMinutesMultiplier
         toughMealCapPercent = s.mealWindowToughMealCapPercent
         cobDecayMultiplier = s.mealWindowCOBDecayMultiplier
+        liveCarbsEnabled = s.liveCarbsEstimatorEnabled
+        liveCarbsNotifications = s.liveCarbsEstimatorNotificationsEnabled
+        liveCarbsSound = s.liveCarbsEstimatorNotificationSound
     }
 
     /// Generic setter that writes a single TrioSettings field through SettingsManager.
@@ -248,6 +278,9 @@ private final class ViewModel: ObservableObject {
         s.mealWindowSMBMinutesMultiplier = 2.0
         s.mealWindowToughMealCapPercent = 75
         s.mealWindowCOBDecayMultiplier = 1.0
+        s.liveCarbsEstimatorEnabled = true
+        s.liveCarbsEstimatorNotificationsEnabled = true
+        s.liveCarbsEstimatorNotificationSound = true
         settingsManager?.settings = s
         reload()
     }
