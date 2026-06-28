@@ -184,7 +184,8 @@ import Foundation
                 bgTrendAtActivation: snapshot.bgTrend30m,
                 autosensRatio: snapshot.autosensRatio,
                 smartSenseRatio: snapshot.smartSenseRatio,
-                effectiveISF: snapshot.effectiveISF
+                effectiveISF: snapshot.effectiveISF,
+                carbRatio: snapshot.carbRatio
             )
             var s2 = settingsManager.settings
             s2.mealWindowSavedMealInstanceId = instanceId.uuidString
@@ -202,6 +203,7 @@ import Foundation
             "autosensRatio": .from(snapshot.autosensRatio),
             "smartSenseRatio": .from(snapshot.smartSenseRatio),
             "effectiveISF": .from(snapshot.effectiveISF),
+            "carbRatio": .from(snapshot.carbRatio),
             "durationMinutes": .from(s.mealWindowDurationMinutes)
         ]
         if let mealId = savedMealId {
@@ -334,6 +336,7 @@ import Foundation
         let autosensRatio: Double?
         let smartSenseRatio: Double?
         let effectiveISF: Double?
+        let carbRatio: Double?
     }
 
     private func currentSnapshot() async -> ContextSnapshot {
@@ -345,6 +348,7 @@ import Foundation
         var bgTrend30m: Double?
         var autosensRatio: Double?
         var effectiveISF: Double?
+        var carbRatio: Double?
 
         // Glucose: latest reading + 5-min delta + 30-min trend via CoreData
         // (avoids depending on Nightscout sync queue state). Pulling enough
@@ -392,6 +396,9 @@ import Foundation
                 if let isf = result.insulinSensitivity {
                     effectiveISF = isf.doubleValue
                 }
+                if let cr = result.carbRatio {
+                    carbRatio = cr.doubleValue
+                }
             }
         }
 
@@ -406,7 +413,8 @@ import Foundation
             bgTrend30m: bgTrend30m,
             autosensRatio: autosensRatio,
             smartSenseRatio: smartSenseRatio,
-            effectiveISF: effectiveISF
+            effectiveISF: effectiveISF,
+            carbRatio: carbRatio
         )
     }
 }

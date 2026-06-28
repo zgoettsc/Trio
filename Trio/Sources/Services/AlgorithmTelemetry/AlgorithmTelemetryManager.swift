@@ -551,7 +551,8 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 bgTrendAtActivation: inst.bgTrendAtActivation?.doubleValue,
                 autosensRatioAtActivation: inst.autosensRatioAtActivation?.doubleValue,
                 smartSenseRatioAtActivation: inst.smartSenseRatioAtActivation?.doubleValue,
-                effectiveISFAtActivation: inst.effectiveISFAtActivation?.doubleValue
+                effectiveISFAtActivation: inst.effectiveISFAtActivation?.doubleValue,
+                carbRatioAtActivation: inst.carbRatioAtActivation?.doubleValue
             ),
             buildSchema: 10
         )
@@ -625,7 +626,8 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 bgTrendAtActivation: inst.bgTrendAtActivation?.doubleValue,
                 autosensRatioAtActivation: inst.autosensRatioAtActivation?.doubleValue,
                 smartSenseRatioAtActivation: inst.smartSenseRatioAtActivation?.doubleValue,
-                effectiveISFAtActivation: inst.effectiveISFAtActivation?.doubleValue
+                effectiveISFAtActivation: inst.effectiveISFAtActivation?.doubleValue,
+                carbRatioAtActivation: inst.carbRatioAtActivation?.doubleValue
             ),
             buildSchema: 10
         )

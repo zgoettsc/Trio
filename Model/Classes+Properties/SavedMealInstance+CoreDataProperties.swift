@@ -69,6 +69,11 @@ public extension SavedMealInstance {
     @NSManaged var autosensRatioAtActivation: NSDecimalNumber?
     @NSManaged var smartSenseRatioAtActivation: NSDecimalNumber?
     @NSManaged var effectiveISFAtActivation: NSDecimalNumber?
+    /// CR (g/U) oref was using at activation — needed for the per-instance
+    /// "estimated carbs from BG response" estimator: given total insulin
+    /// delivered and the BG curve, back-calculates what the meal "looked
+    /// like" in carb-equivalents.
+    @NSManaged var carbRatioAtActivation: NSDecimalNumber?
 
     @NSManaged var savedMeal: SavedMeal?
 }

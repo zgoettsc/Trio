@@ -40,7 +40,8 @@ protocol SavedMealStorage {
         bgTrendAtActivation: Double?,
         autosensRatio: Double?,
         smartSenseRatio: Double?,
-        effectiveISF: Double?
+        effectiveISF: Double?,
+        carbRatio: Double?
     ) -> UUID
 
     /// Called when a meal window closes. Backfills instance fields with the
@@ -243,7 +244,8 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
         bgTrendAtActivation: Double? = nil,
         autosensRatio: Double? = nil,
         smartSenseRatio: Double? = nil,
-        effectiveISF: Double? = nil
+        effectiveISF: Double? = nil,
+        carbRatio: Double? = nil
     ) -> UUID {
         let instanceId = UUID()
         context.performAndWait {
@@ -265,6 +267,7 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             inst.autosensRatioAtActivation = autosensRatio.map(NSDecimalNumber.init(value:))
             inst.smartSenseRatioAtActivation = smartSenseRatio.map(NSDecimalNumber.init(value:))
             inst.effectiveISFAtActivation = effectiveISF.map(NSDecimalNumber.init(value:))
+            inst.carbRatioAtActivation = carbRatio.map(NSDecimalNumber.init(value:))
             mealInCtx.addToInstances(inst)
             mealInCtx.updatedAt = startedAt
             try? context.save()

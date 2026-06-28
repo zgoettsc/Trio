@@ -64,6 +64,11 @@ struct SavedMealTelemetryRow: Encodable {
         /// adjusted by Autosens. Useful for comparing dosing pressure across
         /// instances of the same meal at different sensitivity readings.
         let effectiveISFAtActivation: Double?
+        /// CR (g/U) at activation. Needed for the "estimated carbs from BG
+        /// response" back-calculation: 1g carbs raises BG by ISF/CR mg/dL,
+        /// so given observed rise + delivered insulin we can solve for the
+        /// implied carbs the meal "looked like."
+        let carbRatioAtActivation: Double?
     }
 }
 

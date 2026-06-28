@@ -493,7 +493,8 @@ telemetry/meals/
     "bgTrendAtActivation": -4,
     "autosensRatioAtActivation": 1.08,
     "smartSenseRatioAtActivation": 1.14,
-    "effectiveISFAtActivation": 42
+    "effectiveISFAtActivation": 42,
+    "carbRatioAtActivation": 10
   },
   "buildSchema": 10
 }

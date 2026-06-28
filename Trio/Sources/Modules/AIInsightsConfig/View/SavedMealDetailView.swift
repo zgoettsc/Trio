@@ -182,7 +182,9 @@ struct SavedMealDetailView: View {
                     footer: Text("Swipe a row to delete a single instance.")
                 ) {
                     ForEach(filteredInstances, id: \.objectID) { instance in
-                        InstanceRow(instance: instance)
+                        NavigationLink(destination: SavedMealInstanceDetailView(instance: instance)) {
+                            InstanceRow(instance: instance)
+                        }
                     }
                     .onDelete { offsets in
                         for index in offsets {
