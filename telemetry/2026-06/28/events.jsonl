@@ -43,3 +43,4 @@
 {"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":65,"suggestedExtra":26.35533333333335},"timestamp":"2026-06-28T15:01:23.013Z","windowId":"07662F17-DF8B-4217-BE63-FE453843F49F"}
 {"kind":"carbEntry","payload":{"carbs":15,"duringMealWindow":true,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"","protein":0},"timestamp":"2026-06-28T15:41:13.136Z","windowId":"07662F17-DF8B-4217-BE63-FE453843F49F"}
 {"kind":"smbDelivered","payload":{"bg":92,"floorActivated":false,"insulinReq":0.32999999999999996,"iob":0.20600000000000002,"minutesSinceWindowOpen":231.31569455067316,"units":0.2},"timestamp":"2026-06-28T16:32:34.252Z","windowId":"07662F17-DF8B-4217-BE63-FE453843F49F"}
+{"kind":"smbDelivered","payload":{"bg":102,"floorActivated":false,"insulinReq":0.37,"iob":0.095,"minutesSinceWindowOpen":256.36233563423156,"units":0.25},"timestamp":"2026-06-28T16:57:37.050Z","windowId":"07662F17-DF8B-4217-BE63-FE453843F49F"}
