@@ -1,6 +1,6 @@
 # Trio Telemetry — Analysis Methods
 
-A runbook for getting insights out of the telemetry stream. Four analyses are
+A runbook for getting insights out of the telemetry stream. Eight analyses are
 designed-for, plus caveats and snippets.
 
 ## File reference
@@ -31,9 +31,25 @@ One JSON object per line. Common fields: `kind`, `timestamp`, `windowId`,
 | `podChanged` | source (`pumpRewind`) — pod swap (Omnipod) or cartridge change (Medtronic) |
 | `overrideStartedDuringMealWindow` | overrideId, overrideName, smbIsOff, percentage, target — fires when an override starts WHILE a meal window is already active. Separate from regular `overrideStarted` so the new warning path can be filtered |
 | `mealWindowAutoExtended` | oldDurationMinutes, newDurationMinutes, trigger — fires when the classifier upgrades to Complex and the window duration is auto-extended (the `mealWindowClassifierUpgraded` event's `newExtendedDurationMinutes` payload carries the same info today) |
-| `liveCarbsEstimateTriggered` | enteredCarbs, impliedSoFar, extra, suggestedAdd, minutesSinceOpen, bg, bgAtActivation, isf, cr — fires when the mid-meal estimator detects entered carbs were too low. 3-consecutive-loop threshold, 30-min re-fire cooldown |
-| `liveCarbsEstimateAccepted` | added — user tapped "Add Ng" on the suggestion (UI follow-up; event reserved) |
-| `liveCarbsEstimateDismissed` | (no payload) — user dismissed the suggestion (UI follow-up; event reserved) |
+| `liveCarbsEstimateTriggered` | enteredCarbs, impliedSoFar, extra, suggestedAdd, minutesSinceOpen, bg, bgAtActivation, isf, cr — fires when the mid-meal estimator detects entered carbs were too low. 3-consecutive-loop threshold, 30-min re-fire cooldown. NOTE: `enteredCarbs` is the LIVE sum of non-FPU CarbEntryStored rows since window open (v3, commit f4e226b86), not the activation-snapshot. Compare against `mealWindowActivated.estimatedCarbs` for the original logged amount |
+| `liveCarbsEstimateAccepted` | mode (`addNew`/`editOriginal`), acceptedAmount, enteredCarbs, suggestedExtra — user tapped accept on the suggestion sheet |
+| `liveCarbsEstimateDismissed` | enteredCarbs, suggestedExtra — user dismissed the suggestion |
+| `liveCarbsEstimateSuppressed` | reason (`fpGuard`/`trendNotRising`/`loopParked`/`retracted`) plus context. NEW v3. See "Suppression reasons" below |
+| `mealCarbsVerified` | verifiedCarbs, priorVerifiedCarbs, entered, assumedCR, assumedISF, backCalcCR, backCalcISF, deltaCRPercent, deltaISFPercent, isfIndeterminate, confidence — fires when user marks an instance as ground-truth verified via the per-instance detail view. Self-contained so the back-calc can be analyzed without rejoining the meals table |
+| `mealCarbsVerifiedCleared` | priorVerifiedCarbs — fires when user clears a previously-verified amount |
+
+#### Suppression reasons (`liveCarbsEstimateSuppressed`)
+
+Five context guards wrap the estimator's trigger. When a guard fires, this
+event lands with `reason` identifying which guard plus the underlying signal
+values so the suppression behavior can be audited.
+
+| reason | extra payload | what triggered it |
+|---|---|---|
+| `fpGuard` | `fpGramsLogged`, `fpGuardThresholdGrams`, `fpGuardWindowMinutes`, `minutesSinceOpen`, `extra`, `enteredCarbs`, `bg` | Fat+protein ≥ 25g AND window < 60 min — the early plateau on FP meals is the absorption curve, not under-counted carbs. Counter NOT reset (guard releases on its own at 60 min) |
+| `trendNotRising` | `shortAvgDelta`, `delta5m`, `extra`, `enteredCarbs`, `bg`, `minutesSinceOpen` | BG is flat or falling (shortAvgDelta ≤ 0 AND delta5m ≤ 2). No more carbs arriving; suppressing meal-bigger nag |
+| `loopParked` | `eventualBG`, `extra`, `enteredCarbs`, `bg`, `minutesSinceOpen` | eventualBG ≤ 55, loop has shut off insulin at safety floor. Adding more carbs to the model can't help |
+| `retracted` | `nowFalling`, `nowParked`, `shortAvgDelta`, `eventualBG`, `minutesSinceOpen`, `priorSuggestedExtra` | A pending banner was wiped because conditions turned (trend negative OR loop now parked). Emitted at most once per pending suggestion |
 
 ### `loop.jsonl`
 
@@ -112,10 +128,32 @@ at the moment the eating-mode window opened:
   BG by ISF/CR mg/dL) — basis for the in-app per-instance estimated-
   carbs panel and Analysis 6 below.
 
-All six `context` fields are individually optional — nil when the
-source value wasn't available (fresh install, sensor outage,
-Smart-Sense disabled, <30 min of glucose history). Pre-v10 rows
-have no `context` block at all.
+**Estimator interactions (schema v11)** — captured when the live
+estimator's pending suggestion gets resolved:
+
+- `carbsAddedByEstimator` — cumulative grams added via accepted
+  "Add now" suggestions (sums across multiple acceptances)
+- `carbsEditedTo` — final value when the user accepted an
+  "Edit original" suggestion. Mutually exclusive with the field
+  above on most instances; both can be present if both flows were
+  used
+
+`carbsAtActivation` is FROZEN at the user's first decision. The
+true "user-known" carb total for an instance is computed in the app
+as `(carbsEditedTo ?? carbsAtActivation) + (carbsAddedByEstimator ?? 0)`.
+
+**Verification fields (schema v12)** — set when the user attests
+ground-truth carbs via the per-instance detail "Verified carbs"
+section. Drives the inverse-calibration math (Analysis 8):
+
+- `userVerifiedCarbsAmount` — grams the user attests to (label-read,
+  weighed, etc.). NOT a dosing change, just a calibration record
+- `verifiedAt` — when the attestation was recorded
+
+All six `context` fields, both estimator fields, and both verified
+fields are individually optional — nil when the value wasn't
+available. Pre-v10 rows have no `context` block at all; pre-v11 lack
+estimator fields; pre-v12 lack verified fields.
 
 ### `settings.json`
 
@@ -710,6 +748,181 @@ print(multiplier_in_window.value_counts())
 - WATCH FOR HYPOS: lower multiplier = more sustained dosing past the
   natural absorption window. If `timeBelowRangeMinutes` rises, dial
   the multiplier back UP.
+
+---
+
+## Analysis 8 — Inverse calibration: back-calc CR/ISF from verified meals
+
+**Goal:** when the user has flagged a meal as verified (label-read,
+weighed — `userVerifiedCarbsAmount` is set on the instance), back-
+calculate what CR or ISF the BG response actually implied. Use the
+median across verified meals to validate the user's profile settings.
+The in-app per-instance detail page and SavedMeal aggregator do this
+live; this recipe is the offline / cross-user version.
+
+**Identity used.** Same as Analysis 6, solved in the other direction:
+
+```
+CR  = carbs_verified / (peak_rise / ISF + insulin)
+ISF = peak_rise × CR / (carbs_verified − insulin × CR)
+```
+
+ISF is **indeterminate** when `carbs_verified − insulin × CR ≤ 0` —
+the loop already covered everything; no rise budget remains for ISF
+to explain. CR back-calc still produces a value.
+
+**Recipe:**
+
+```python
+# Filter to verified instances only
+v = meals[meals.userVerifiedCarbsAmount.notna()].copy()
+for c in ["bgAtActivation", "carbRatioAtActivation",
+          "effectiveISFAtActivation"]:
+    v[c] = v.context.apply(lambda d: (d or {}).get(c))
+v["peakBG"] = v.metrics.apply(lambda d: d.get("peakBG"))
+v["insulinU"] = v.metrics.apply(lambda d: d.get("totalInsulinDeliveredU"))
+
+# Same legacy-row handling as the in-app calibrator: if stored insulin
+# is implausibly negative (pre-fix temp-basal overlap bug), substitute
+# the SMB sum.
+def insulin_resolved(row):
+    stored = row.insulinU or 0
+    smb_sum = sum(s["units"] for s in (row.smbsJSON or []))
+    if stored < 0 and abs(stored) > smb_sum:
+        return smb_sum
+    return stored
+v["insulin"] = v.apply(insulin_resolved, axis=1)
+v["rise"] = (v.peakBG - v.bgAtActivation).clip(lower=0)
+
+# CR back-calc
+v["cr_denom"] = v.rise / v.effectiveISFAtActivation + v.insulin
+v["backCalcCR"] = v.userVerifiedCarbsAmount / v.cr_denom.where(v.cr_denom > 0.01)
+
+# ISF back-calc — drop indeterminate rows
+v["isf_denom"] = v.userVerifiedCarbsAmount - v.insulin * v.carbRatioAtActivation
+v["isfIndeterminate"] = (v.isf_denom <= 0.5) | (v.rise < 5)
+v["backCalcISF"] = (v.rise * v.carbRatioAtActivation / v.isf_denom).where(
+    ~v.isfIndeterminate
+)
+
+# Per-meal aggregation (n ≥ 3 to be actionable)
+summary = v.groupby("savedMealName").agg(
+    n=("backCalcCR", "size"),
+    median_backCR=("backCalcCR", "median"),
+    median_assumedCR=("carbRatioAtActivation", "median"),
+    median_backISF=("backCalcISF", "median"),
+    median_assumedISF=("effectiveISFAtActivation", "median"),
+    isf_indeterminate_count=("isfIndeterminate", "sum"),
+).query("n >= 3")
+summary["cr_delta_pct"] = (
+    (summary.median_backCR - summary.median_assumedCR)
+    / summary.median_assumedCR * 100
+)
+summary["isf_delta_pct"] = (
+    (summary.median_backISF - summary.median_assumedISF)
+    / summary.median_assumedISF * 100
+)
+print(summary)
+
+# Cross-meal hour-of-day aggregation — true calibration target
+v["hour"] = pd.to_datetime(v.startedAt).dt.hour
+hourly = v.groupby(v.hour // 4 * 4).agg(  # bucket into 4-hour blocks
+    n=("backCalcCR", "size"),
+    median_backCR=("backCalcCR", "median"),
+    median_backISF=("backCalcISF", "median"),
+).query("n >= 3")
+print(hourly)
+```
+
+**Cross-reference with `mealCarbsVerified` events:** the event
+payload carries `assumedCR`, `assumedISF`, `backCalcCR`,
+`backCalcISF`, and `confidence` at the moment of verification.
+Comparing across events for the same instance lets you see what the
+in-app calc surfaced to the user vs what offline recomputation shows
+later (e.g. if profile has changed since).
+
+**Caveats:**
+- Single verified meal = one data point. Treat with low confidence
+  until n ≥ 3 per hour-block.
+- The in-app aggregator labels its delta as "vs profile-at-meal-time"
+  (compared against `*AtActivation` snapshots, not today's profile).
+  This recipe inherits that semantic — to compare against today's
+  profile, join with `settings.json` and re-compute the delta.
+- Override-affected, didn't-return-to-baseline, and backfilled rows
+  inherit the same caveats as Analysis 6.
+- Verified amount itself is a user attestation — garbage-in if the
+  user attested confidently to a wrong value.
+
+---
+
+## Analysis 9 — Live estimator suppression behavior
+
+**Goal:** audit the five-piece guard stack on the live mid-meal
+estimator (v3 hardening). Quantify how often each guard fires, what
+signal values trigger it, and whether real-world meals would have
+fired without it — i.e. is the guard removing noise or also blocking
+legitimate suggestions?
+
+**Inputs:** `events.jsonl` with `kind == "liveCarbsEstimateSuppressed"`,
+joined against `liveCarbsEstimateTriggered` for the same window.
+
+**Recipe:**
+
+```python
+suppressed = events[events.kind == "liveCarbsEstimateSuppressed"].copy()
+for col in ["reason", "extra", "enteredCarbs", "bg", "minutesSinceOpen"]:
+    suppressed[col] = suppressed.payload.apply(lambda p: p.get(col))
+
+# Per-reason counts
+print(suppressed.reason.value_counts())
+
+# fpGuard distribution: what FP totals get suppressed?
+fp = suppressed[suppressed.reason == "fpGuard"]
+fp["fpGramsLogged"] = fp.payload.apply(lambda p: p.get("fpGramsLogged"))
+print(fp.fpGramsLogged.describe())
+
+# loopParked: confirm guard fires while loop is at floor
+parked = suppressed[suppressed.reason == "loopParked"]
+parked["eventualBG"] = parked.payload.apply(lambda p: p.get("eventualBG"))
+print(parked.eventualBG.describe())  # should cluster near 39
+
+# Per-window: how many suppression events vs trigger events?
+triggered = events[events.kind == "liveCarbsEstimateTriggered"]
+trigger_by_window = triggered.groupby("windowId").size()
+suppress_by_window = suppressed.groupby("windowId").size()
+combined = pd.DataFrame({
+    "triggered": trigger_by_window, "suppressed": suppress_by_window,
+}).fillna(0)
+print(combined.sort_values("suppressed", ascending=False).head(20))
+
+# Did suppression precede a trigger that ended up being useful?
+# Pair each window with its outcome row
+window_outcomes = outcomes.set_index("windowId")
+for window_id, grp in suppressed.groupby("windowId"):
+    if window_id not in window_outcomes.index: continue
+    o = window_outcomes.loc[window_id]
+    reasons = grp.reason.unique().tolist()
+    print(f"{window_id[:8]}: suppressed={reasons} peakBG={o.peakBG} tabove180={o.minutesAbove180}")
+```
+
+**What to look for:**
+- `retracted` events should follow real BG turn-downs (verify
+  `nowFalling=true` in the payload). A high count means the original
+  trigger logic is firing on tail signals; if the same window
+  triggers, then immediately retracts, the trigger threshold may be
+  too loose.
+- `fpGuard` suppression rate should be high on the first hour of any
+  meal logged with substantial fat/protein (>25g combined). If the
+  suppressed meals later end up over-counted (compare `enteredCarbs`
+  at suppression time vs final meal entries), the guard is doing its
+  job. If they end up correctly counted on their own, no harm done.
+- `loopParked` should only fire when `eventualBG` is genuinely at the
+  39 floor (within ±15 mg/dL). Higher values mean the threshold (≤55)
+  may need narrowing.
+- A window with many `suppressed` events but no `triggered` events
+  means the guards are catching everything — and the underlying
+  trigger math has high false-positive rate that the guards mask.
+  Worth investigating the trigger logic itself.
 
 ---
 
