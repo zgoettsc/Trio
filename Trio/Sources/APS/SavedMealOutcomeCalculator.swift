@@ -108,10 +108,14 @@ struct SavedMealOutcomeCalculator {
             }
         }
 
-        // Insulin "above baseline" = SMBs + integral of (temp basal rate -
-        // scheduled basal) over the window. Captures the full algorithm
-        // response, not just SMBs. A meal where the loop ran a 3 U/h temp
-        // for 90 minutes adds ~3.5U of insulin that pure-SMB-counting misses.
+        // Insulin "above baseline" = SMBs + integral of POSITIVE (temp -
+        // scheduled) delta over the window. Captures the loop's positive
+        // contribution to the meal. We deliberately ignore basal
+        // suppression (temp < scheduled) because that's a separate loop
+        // behavior — reacting to a falling-BG-risk prediction, not
+        // "negative meal coverage." Including it would mean a well-bolused
+        // meal that briefly crashed BG would have a negative metric, which
+        // is meaningless. Result is always ≥ 0 for any real meal.
         let smbContribution = smbs.reduce(0) { $0 + $1.units }
         let tempBasalContribution = integrateTempBasalDelta(from: activatedAt, to: closedAt)
         let insulinAboveBaseline = smbContribution + tempBasalContribution
@@ -252,7 +256,16 @@ struct SavedMealOutcomeCalculator {
                 let durationHours = stepEnd.timeIntervalSince(cursor) / 3600
                 let scheduledRate = scheduledBasalRate(at: cursor, profile: basalProfile)
                 let actualRate = Double(truncating: tb.rate)
-                total += (actualRate - scheduledRate) * durationHours
+                // Only POSITIVE deltas count toward meal coverage. A loop
+                // suspension below scheduled basal is a falling-BG-risk
+                // reaction, not negative meal dosing — counting it here
+                // would let a meal with a brief BG crash come out with a
+                // negative "insulin above baseline" metric, which is
+                // meaningless. See the F-21 follow-up in FINDINGS.md.
+                let delta = actualRate - scheduledRate
+                if delta > 0 {
+                    total += delta * durationHours
+                }
                 cursor = stepEnd
             }
         }
