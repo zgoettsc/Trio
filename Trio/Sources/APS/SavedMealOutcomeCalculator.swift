@@ -220,26 +220,38 @@ struct SavedMealOutcomeCalculator {
         let tempBasals = fetchTempBasals(from: start, to: end)
         guard !basalProfile.isEmpty else { return 0 }
 
-        // Compute slice-by-slice contribution. We walk through each temp
-        // basal that overlapped the window; for the no-temp periods between
-        // them, actual = scheduled so contribution is 0.
+        // CRITICAL — Trio writes a NEW temp basal on every loop pass
+        // (every 5 min), each with a 30-min nominal duration. Each new
+        // temp implicitly CANCELS the prior one on the pump. The naive
+        // "integrate each over its full duration" approach double-counts
+        // by ~6× because every clock-minute is covered by multiple
+        // overlapping records. Clip each temp basal's effective end to
+        // the start of the next one. The last one runs to its nominal
+        // end or the window end, whichever is sooner.
+        let sorted = tempBasals
+            .compactMap { tb -> (start: Date, rate: NSDecimalNumber, nominalEnd: Date)? in
+                guard let s = tb.start, let r = tb.rate else { return nil }
+                return (s, r, s.addingTimeInterval(Double(tb.duration) * 60))
+            }
+            .sorted { $0.start < $1.start }
+
         var total: Double = 0
-        for tempBasal in tempBasals {
-            guard let tempStart = tempBasal.start, let rate = tempBasal.rate else { continue }
-            let tempEnd = tempStart.addingTimeInterval(Double(tempBasal.duration) * 60)
-            let sliceStart = max(tempStart, start)
-            let sliceEnd = min(tempEnd, end)
+        for i in 0 ..< sorted.count {
+            let tb = sorted[i]
+            // Effective end = min(nominal end, next temp's start). Beyond
+            // the last entry there's no next-start; nominal end stands.
+            let nextStart: Date = (i + 1) < sorted.count ? sorted[i + 1].start : .distantFuture
+            let effectiveEnd = min(tb.nominalEnd, nextStart)
+            let sliceStart = max(tb.start, start)
+            let sliceEnd = min(effectiveEnd, end)
             guard sliceEnd > sliceStart else { continue }
-            // Within this slice the scheduled rate may change at hour
-            // boundaries. Integrate at 5-min granularity (sufficient — basal
-            // schedule entries are aligned to whole-minute offsets-of-day).
             let stepSeconds: TimeInterval = 5 * 60
             var cursor = sliceStart
             while cursor < sliceEnd {
                 let stepEnd = min(cursor.addingTimeInterval(stepSeconds), sliceEnd)
                 let durationHours = stepEnd.timeIntervalSince(cursor) / 3600
                 let scheduledRate = scheduledBasalRate(at: cursor, profile: basalProfile)
-                let actualRate = Double(truncating: rate)
+                let actualRate = Double(truncating: tb.rate)
                 total += (actualRate - scheduledRate) * durationHours
                 cursor = stepEnd
             }

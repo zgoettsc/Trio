@@ -511,7 +511,26 @@ enum CarbsEstimator {
             )
         }
 
-        let insulin = max(0, inst.totalInsulinDeliveredU)
+        // Historical rows from before the temp-basal-integration bug fix
+        // may have negative or zero totalInsulinDeliveredU. When the stored
+        // value is implausibly low (< the raw SMB sum on smbsJSON), fall
+        // back to the SMB sum so the estimator produces sensible numbers.
+        // SMB sum is a conservative lower bound — doesn't include temp
+        // basal effects, but at least represents the loop's bolus response.
+        let smbSumFromJSON: Double = {
+            guard let json = inst.smbsJSON,
+                  let data = json.data(using: .utf8),
+                  let arr = try? JSONDecoder().decode([SMBPointDecode].self, from: data)
+            else { return 0 }
+            return arr.reduce(0) { $0 + $1.units }
+        }()
+        let insulin: Double = {
+            let stored = inst.totalInsulinDeliveredU
+            if stored >= smbSumFromJSON { return stored }
+            // Stored is suspect — at minimum we delivered the SMBs in
+            // smbsJSON. Use that as the floor.
+            return smbSumFromJSON
+        }()
 
         let rise = max(0, peak - bgStart)
         let carbsForRise = rise * cr / isf
@@ -556,6 +575,13 @@ enum CarbsEstimator {
             confidence = min(confidence, .low)
             caveats.append("using fallback values for: " + fallbacksUsed.joined(separator: ", "))
         }
+        if inst.totalInsulinDeliveredU < smbSumFromJSON {
+            // The stored insulin metric is implausible (likely a row
+            // emitted before the temp-basal-integration bug fix). We
+            // substituted the SMB sum as a lower bound.
+            confidence = min(confidence, .low)
+            caveats.append("stored insulin total was implausible (\(String(format: "%.2f", inst.totalInsulinDeliveredU)) U); using SMB sum (\(String(format: "%.2f", smbSumFromJSON)) U) as lower bound — temp basal contribution missing")
+        }
         let footnote: String = {
             var parts = [
                 "Back-calculated from peak BG rise (\(Int(rise.rounded())) mg/dL) + insulin delivered (\(String(format: "%.2f", insulin)) U), against ISF \(Int(isf)) mg/dL/U and CR \(String(format: "%.1f", cr)) g/U. Range reflects ±15% ISF/CR uncertainty."
@@ -576,6 +602,14 @@ enum CarbsEstimator {
             footnote: footnote
         )
     }
+}
+
+/// Local Decodable mirror of the smbsJSON entries so the estimator can
+/// parse them as a fallback when totalInsulinDeliveredU is suspect (the
+/// view's nested private struct of the same name isn't visible here).
+private struct SMBPointDecode: Decodable {
+    let t: Double
+    let units: Double
 }
 
 private func min(_ a: CarbsEstimator.Confidence, _ b: CarbsEstimator.Confidence) -> CarbsEstimator.Confidence {
