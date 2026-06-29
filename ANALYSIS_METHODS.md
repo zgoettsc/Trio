@@ -41,6 +41,7 @@ One JSON object per line. Common fields: `kind`, `timestamp`, `windowId`,
 | `mealWindowAutoPhantomCOBInjected` | injectedThisLoop, newCumulative, unmodeledImplied, impliedSoFar, priorInjected, bg, shortAvgDelta, iob, isf, cr, classification, minutesSinceOpen — fires ONLY when the master switch is ON and a real injection happened. Shadow-mode data lives on the loop sample, not as events. NEW v3 |
 | `mealWindowAutoPhantomCOBToggled` | enabled — paired event when the user flips the master switch via the ALL-CAPS confirmation sheet. Marks the pre/post boundary for baseline analysis |
 | `rescueCarbsLogged` | carbs, fat (optional, nil ≠ 0), protein (optional, nil ≠ 0), presetName (null when custom), custom (bool), bgAtLog, duringMealWindow. NEW v3. Rescue entries are excluded from oref's meal.json — see `MEAL_INTELLIGENCE_v3_SPEC.md §5` and `Analysis 11` below |
+| `mealWindowActivated` payload extension (v3) | adds `pumpSiteAgeHours` (always) and `garmin_*` flat fields (when `telemetryIncludeGarmin` ON): garmin_restingHeartRateInBeatsPerMinute, garmin_averageStressLevel, garmin_currentBodyBattery, garmin_bodyBatteryAtWake, garmin_sleepDurationInSeconds, garmin_sleepScoreValue, garmin_lastNightAvg (HRV), garmin_vigorousIntensityDurationInSeconds, garmin_yesterdayVigorousIntensityDurationInSeconds, garmin_vo2Max. See `MEAL_INTELLIGENCE_v3_SPEC.md §7` and `Analysis 12` |
 
 #### Suppression reasons (`liveCarbsEstimateSuppressed`)
 
@@ -77,6 +78,26 @@ One row per `determineBasal` pass. Always written (continuous), with
   `effectiveCOBDecayMultiplier` (1.0 = normal, <1.0 = oref's per-loop COB
   consumption was slowed; nil outside meal windows)
 - **Profile-at-this-loop:** `target`, `isf`, `carbRatio`, `maxIOB`
+- **Activation context (v3, schema v13):** the `context` block on
+  `meals.jsonl` rows gains:
+  - `pumpSiteAgeHours` — hours since the most recent pump rewind /
+    pod swap at activation. Nil when no rewind history available.
+  - `garminContextAtActivationJSON` — JSON-encoded
+    `GarminContextSnapshot` captured at activation. Whole snapshot
+    preserved so future Garmin fields don't require a schema bump.
+    Nil when `telemetryIncludeGarmin` is off or Garmin didn't
+    respond within the 1s activation timeout.
+
+### `garmin.jsonl`
+
+One row per day, written from `maintainDailySnapshot` when the
+privacy gate (`telemetryIncludeGarmin`) is on. Each row:
+`{ timestamp, deviceTimeZone, snapshot: <GarminContextSnapshot> }`.
+The snapshot's structure matches the activation-time blob — same
+fields, same nullability rules. Useful for long-term trending
+(sleep, HRV, training load) decoupled from meal-window timing.
+
+### loop.jsonl carries shadow data (v15+)
 - **Auto-phantom-COB shadow (v3, schema v15):** populated every
   meal-window pass regardless of master switch. Lets you assess what
   the injector WOULD have done before flipping it on.
@@ -1141,6 +1162,113 @@ print(overcorrect)
   during exercise will recover differently than one at rest;
   treat the recovery numbers as population averages until that
   context lands.
+
+---
+
+## Analysis 12 — Garmin context + pod-site age vs per-meal outcomes
+
+**Goal:** quantify how much extrinsic context — sleep, HRV, stress,
+recent intense exercise, body battery, pod day — predicts per-meal
+excursion. The features we already had (Autosens, BG-at-activation,
+trend) explain ~half the variance in our 5-meal sample; the rest is
+in here.
+
+**Inputs:**
+- `meals.jsonl` schema v13+ with `context.garminContextAtActivationJSON`
+  (full snapshot) and `context.pumpSiteAgeHours`
+- `events.jsonl` with `mealWindowActivated.garmin_*` flat fields +
+  `pumpSiteAgeHours` (when on the new build)
+- `garmin.jsonl` daily snapshots (long-term trending, independent
+  of meal timing)
+
+**Recipe — per-meal regression on Garmin context + pod age:**
+
+```python
+meals = load_jsonl("telemetry/*/*/meals.jsonl")
+# Decode the JSON blob into columns
+import json
+def parse_garmin(row):
+    s = row.get("context", {}).get("garminContextAtActivationJSON")
+    if not s: return {}
+    try: return json.loads(s)
+    except: return {}
+meals["g"] = meals.apply(parse_garmin, axis=1)
+for k in ["restingHeartRateInBeatsPerMinute",
+          "averageStressLevel", "currentBodyBattery",
+          "bodyBatteryAtWake", "sleepDurationInSeconds",
+          "sleepScoreValue", "lastNightAvg",
+          "vigorousIntensityDurationInSeconds",
+          "yesterdayVigorousIntensityDurationInSeconds",
+          "vo2Max"]:
+    meals[f"g_{k}"] = meals.g.apply(lambda d: d.get(k))
+meals["podAgeHours"] = meals.context.apply(lambda d: d.get("pumpSiteAgeHours"))
+meals["peakDelta"] = meals.metrics.apply(lambda d: d.get("peakBG")) \
+                    - meals.context.apply(lambda d: d.get("bgAtActivation"))
+
+# Univariate correlation with peakDelta
+import numpy as np
+features = [c for c in meals.columns if c.startswith("g_")] + ["podAgeHours"]
+for f in features:
+    s = meals.dropna(subset=[f, "peakDelta"])
+    if len(s) < 10: continue
+    r = np.corrcoef(s[f], s.peakDelta)[0, 1]
+    print(f"{f:50s} r={r:+.2f}  n={len(s)}")
+
+# Pod-day bucketing
+meals["podDay"] = (meals.podAgeHours // 24).fillna(-1).astype(int)
+print(meals.groupby("podDay").agg(
+    n=("peakDelta", "size"),
+    median_peak=("peakDelta", "median"),
+    median_smb=("metrics", lambda s: pd.Series(s.tolist())
+                .apply(lambda m: m.get("smbCount")).median())
+))
+```
+
+**What to look for:**
+
+- **Sleep < 6h the night before correlates with bigger excursions**
+  — well-documented effect in T1D literature; if your data confirms,
+  fold sleep into the predictor.
+- **HRV-suppressed mornings** (`lastNightAvg` < `hrvWeeklyAvg − 10%`)
+  often show insulin resistance — bigger meal rises.
+- **Yesterday's vigorous activity** has a delayed sensitivity effect
+  (peaks ~24h later). High vigorous-minutes yesterday → smaller
+  excursion today (and risk of unexpected lows).
+- **Body battery at meal time** tracks fatigue. Low BB → resistant.
+- **Pod day 3-4 vs day 1-2** — if median peakBG climbs and median
+  SMB count climbs together as pod ages, that's site degradation.
+  Action: shorten pod-change interval, or surface a "consider
+  changing pod" notification when day-3 outcomes drift.
+
+**Long-term trending from garmin.jsonl:**
+
+```python
+garmin = load_jsonl("telemetry/*/*/garmin.jsonl")
+garmin["d"] = pd.to_datetime(garmin.timestamp).dt.date
+g = garmin.snapshot.apply(pd.Series)
+g["d"] = garmin.d
+# Rolling 14d averages
+g_sorted = g.sort_values("d")
+for col in ["restingHeartRateInBeatsPerMinute", "sleepScoreValue",
+            "lastNightAvg", "averageStressLevel"]:
+    g_sorted[f"{col}_14d"] = g_sorted[col].rolling(14).mean()
+```
+
+**Caveats:**
+
+- Garmin fields are individually nullable. Any given day's data may
+  be incomplete (device off, sleep not tracked, HRV requires the
+  watch worn overnight). Treat all features as optional in any
+  regression.
+- The Garmin fetch has a 1s timeout at activation. If your network
+  is slow, fields will be missing more often. Cross-reference with
+  `garmin.jsonl` (no timeout pressure) for ground truth.
+- Pod age = nil when no rewind events are in the local pump-history
+  window. Fresh installs + non-pod pumps (Medtronic with manual
+  cartridge change) may show nil; not a bug.
+- The privacy gate (`telemetryIncludeGarmin`) hides Garmin from
+  telemetry. When OFF: `garmin_*` keys absent, `garminContextAtActivationJSON`
+  nil. Pod age still flows.
 
 ---
 
