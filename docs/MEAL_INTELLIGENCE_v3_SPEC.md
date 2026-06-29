@@ -599,14 +599,26 @@ The recipe in `ANALYSIS_METHODS.md §Analysis 11` joins
 - `Model/Classes+Properties/CarbEntryStored+CoreDataProperties.swift`
 - `Model/Helper/NSPredicates.swift` (new `predicateForOneDayAgoExcludingRescue`)
 - `Trio/Sources/Models/CarbsEntry.swift` (new fields + `Trio-RescueCarbs` tag)
-- `Trio/Sources/Models/RescuePreset.swift` (NEW)
+- `Trio/Sources/Models/RescuePreset.swift` (NEW; defaults == [], user seeds the library)
 - `Trio/Sources/Models/TrioSettings.swift` (`rescuePresets` field)
 - `Trio/Sources/APS/Storage/CarbsStorage.swift` (persist new fields)
 - `Trio/Sources/APS/OpenAPS/OpenAPS.swift` (exclusion predicate)
 - `Trio/Sources/APS/APSManager.swift` (estimator helpers filter rescues)
-- `Trio/Sources/Modules/Treatments/View/RescueCarbsSheet.swift` (NEW)
+- `Trio/Sources/Modules/Treatments/View/RescueCarbsSheet.swift` (NEW; empty-state + "Manage rescue presets" link into the nav stack)
 - `Trio/Sources/Modules/Treatments/View/TreatmentsRootView.swift` (Rescue toolbar button)
+- `Trio/Sources/Modules/AIInsightsConfig/View/RescuePresetsConfigView.swift` (NEW — settings UI for add / edit / delete / reorder; pushed from both AI Insights nav and the Rescue picker)
+- `Trio/Sources/Modules/AIInsightsConfig/View/SavedMealPickerView.swift` ("Manage saved meals" link into the same nav stack as the picker)
+- `Trio/Sources/Modules/AIInsightsConfig/View/AIInsightsConfigRootView.swift` (Rescue Presets nav entry)
 - `Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryEvent.swift` (new event kind)
+
+### Picker CRUD (user-discoverability)
+
+Both the Treatments → Meals picker (`SavedMealPickerView`) and the
+Treatments → Rescue picker (`RescueCarbsSheet`) have a **"Manage …"**
+row that pushes the corresponding full-CRUD config view into the
+sheet's existing `NavigationView` stack. Saves the user from
+dismissing the sheet, navigating into Settings, editing, and
+re-opening. Used right where the friction actually lives.
 
 ---
 
