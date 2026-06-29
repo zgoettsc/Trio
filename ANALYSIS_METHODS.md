@@ -37,6 +37,9 @@ One JSON object per line. Common fields: `kind`, `timestamp`, `windowId`,
 | `liveCarbsEstimateSuppressed` | reason (`fpGuard`/`trendNotRising`/`loopParked`/`retracted`) plus context. NEW v3. See "Suppression reasons" below |
 | `mealCarbsVerified` | verifiedCarbs, priorVerifiedCarbs, entered, assumedCR, assumedISF, backCalcCR, backCalcISF, deltaCRPercent, deltaISFPercent, isfIndeterminate, confidence — fires when user marks an instance as ground-truth verified via the per-instance detail view. Self-contained so the back-calc can be analyzed without rejoining the meals table |
 | `mealCarbsVerifiedCleared` | priorVerifiedCarbs — fires when user clears a previously-verified amount |
+| `mealWindowClosedByExitRule` | reason (`peakDropConfirmed`/`loopIdleAtBaseline`/`maxDurationCap`), plus rule-specific signals (peakBG, dropFromPeak, minutesSincePeak, minutesSinceLastSMB, eventualBG, shortAvgDelta). NEW v3. See `MEAL_INTELLIGENCE_v3_SPEC.md §3` |
+| `mealWindowAutoPhantomCOBInjected` | injectedThisLoop, newCumulative, unmodeledImplied, impliedSoFar, priorInjected, bg, shortAvgDelta, iob, isf, cr, classification, minutesSinceOpen — fires ONLY when the master switch is ON and a real injection happened. Shadow-mode data lives on the loop sample, not as events. NEW v3 |
+| `mealWindowAutoPhantomCOBToggled` | enabled — paired event when the user flips the master switch via the ALL-CAPS confirmation sheet. Marks the pre/post boundary for baseline analysis |
 
 #### Suppression reasons (`liveCarbsEstimateSuppressed`)
 
@@ -73,6 +76,16 @@ One row per `determineBasal` pass. Always written (continuous), with
   `effectiveCOBDecayMultiplier` (1.0 = normal, <1.0 = oref's per-loop COB
   consumption was slowed; nil outside meal windows)
 - **Profile-at-this-loop:** `target`, `isf`, `carbRatio`, `maxIOB`
+- **Auto-phantom-COB shadow (v3, schema v15):** populated every
+  meal-window pass regardless of master switch. Lets you assess what
+  the injector WOULD have done before flipping it on.
+  - `autoPhantomShadowGramsThisLoop` — what the math says to inject
+    this loop after all gates and caps. 0 when a gate blocked.
+  - `autoPhantomShadowCumulativeGrams` — running total since window
+    open (in-memory accumulator; resets on window flip or app restart).
+  - `autoPhantomGateStatus` — `"wouldFire"` / `"notRising"` /
+    `"classifierBelowMedium"` / `"perWindowCap"` / `"perLoopCap"` /
+    `"noResidual"` / `"noContext"`. See Analysis 10.
 - **Full oref reason:** `reason` (string — invaluable for understanding why)
 
 ### `summary.jsonl`
@@ -923,6 +936,109 @@ for window_id, grp in suppressed.groupby("windowId"):
   means the guards are catching everything — and the underlying
   trigger math has high false-positive rate that the guards mask.
   Worth investigating the trigger logic itself.
+
+---
+
+## Analysis 10 — Auto-phantom-COB shadow-mode assessment (2-week baseline)
+
+**Goal:** evaluate the real-time phantom-COB auto-injector
+*without turning it on*. Three fields on every meal-window loop
+sample (`autoPhantomShadowGramsThisLoop`,
+`autoPhantomShadowCumulativeGrams`, `autoPhantomGateStatus`) carry
+what the injector *would have done* this loop pass, even with the
+master switch off. Two weeks of these in shadow mode → flip the
+toggle on with eyes open.
+
+**Inputs:** `loop.jsonl` (schema v15+), `meals.jsonl`,
+`events.jsonl` (carbEntry rows).
+
+**Per-meal summary recipe:**
+
+```python
+loops = load_jsonl("telemetry/*/*/loop.jsonl")
+loops["ts"] = pd.to_datetime(loops.timestamp)
+# Keep only meal-window passes
+mw = loops[loops.mealWindowActive == True].copy()
+
+# Per-window shadow stats
+summary = mw.groupby("windowId").agg(
+    n_loops=("ts", "size"),
+    n_would_fire=("autoPhantomShadowGramsThisLoop",
+                  lambda s: (s > 0.1).sum()),
+    n_blocked_rising=("autoPhantomGateStatus",
+                      lambda s: (s == "notRising").sum()),
+    n_blocked_classifier=("autoPhantomGateStatus",
+                          lambda s: (s == "classifierBelowMedium").sum()),
+    n_blocked_window_cap=("autoPhantomGateStatus",
+                          lambda s: (s == "perWindowCap").sum()),
+    n_blocked_loop_cap=("autoPhantomGateStatus",
+                        lambda s: (s == "perLoopCap").sum()),
+    n_no_residual=("autoPhantomGateStatus",
+                   lambda s: (s == "noResidual").sum()),
+    final_shadow_cumulative=("autoPhantomShadowCumulativeGrams", "max"),
+    bg_peak=("bg", "max"),
+    bg_start=("bg", "first"),
+)
+summary["rise"] = summary.bg_peak - summary.bg_start
+```
+
+**What to look for over 2 weeks:**
+
+1. **Total shadow grams per window vs logged carbs.** Join against
+   per-window `mealWindowCarbsConfirmed` payload. If shadow says
+   "would have injected 60g" and the user actually ate ~60g and
+   logged it correctly, the injector would have been a no-op
+   (already modeled). If shadow says 60g and user logged 0g, that's
+   exactly the case the injector exists to solve.
+2. **Gate distribution.** Healthy distribution:
+   - `wouldFire`: 10-40% of meal-window loops on real meals
+   - `classifierBelowMedium`: high early in window, drops as
+     classifier upgrades
+   - `notRising`: dominates late in window (post-peak); the
+     central safety. Should be HIGH (means we'd stop injecting).
+   - `perWindowCap`: rare. If common, raise the per-window cap.
+   - `perLoopCap`: occasional spikes. If common, lower the
+     damping or raise the per-loop cap.
+3. **Cumulative ceiling per window.** Distribution of
+   `final_shadow_cumulative` across all closed windows. Most
+   should land 20-80g for normal meals. If you see 150g+
+   regularly, the per-window cap (200g) is borderline.
+4. **What would the injector have changed?** Forward-simulate:
+   for each meal where shadow cumulative > 30g AND logged carbs
+   were 0, project the alternate insulin delivery using
+   `(shadow_cumulative / CR)` extra units distributed across the
+   loops where injection would have fired. Compare projected peak
+   BG vs actual peak BG.
+
+**Decision criteria for flipping the toggle on:**
+
+- ≥ 10 meal-window samples with shadow cumulative > 20g
+- Gate distribution shows `notRising` is the dominant
+  suppression reason post-peak (means the safety would have held)
+- No windows with shadow cumulative > 150g (means cap behavior is
+  bounded)
+- Forward-projection shows the would-have-injected insulin
+  would have reduced peak BG by ≥ 20 mg/dL on at least 50% of
+  un-logged meals
+
+If those hold: type ENABLE in the app, monitor the FIRST 5 windows
+closely, expect minor over-correction artifacts as oref's model
+adjusts to seeing COB that wasn't there before.
+
+**Caveats:**
+- Shadow cumulative uses an IN-MEMORY accumulator. App restart
+  mid-window resets it. Don't trust per-window finals across an
+  app-restart event — filter via `buildSchema` and check for time
+  gaps in the meal window's loop samples.
+- The shadow math assumes the existing CR/ISF profile is correct.
+  If `Analysis 8` reveals the profile is off, shadow values will
+  be skewed by the same factor — useful for "did the SHAPE of
+  injection look right" but not "did the AMOUNT look right."
+- `shortAvgDelta` may be unavailable in current loop samples (the
+  field exists on the sample type but isn't always populated). The
+  shadow code falls back to `delta5m` when `shortAvgDelta` is nil —
+  delta5m is noisier, so notRising-gate suppression may be slightly
+  less than what the live injector would produce.
 
 ---
 
