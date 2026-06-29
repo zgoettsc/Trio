@@ -68,3 +68,4 @@
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":3.85},"timestamp":"2026-06-29T21:45:42.942Z","windowId":"1EFB41D1-86D7-48CA-AE55-D1FCE4B02B71"}
 {"kind":"mealWindowClassifierPhase","payload":{"activationBG":122,"bg":125,"minutesSinceActivation":1.985645600159963,"phase":"phase1","trigger":"sustainedDelta"},"timestamp":"2026-06-29T21:47:36.739Z","windowId":"1EFB41D1-86D7-48CA-AE55-D1FCE4B02B71"}
 {"kind":"smbDelivered","payload":{"bg":115,"floorActivated":false,"insulinReq":0.9099999999999999,"iob":3.893,"minutesSinceWindowOpen":16.947960831721623,"units":0.65},"timestamp":"2026-06-29T22:02:34.477Z","windowId":"1EFB41D1-86D7-48CA-AE55-D1FCE4B02B71"}
+{"kind":"smbDelivered","payload":{"bg":116,"floorActivated":false,"insulinReq":0.44000000000000006,"iob":4.3839999999999995,"minutesSinceWindowOpen":21.991452115774155,"units":0.3},"timestamp":"2026-06-29T22:07:37.087Z","windowId":"1EFB41D1-86D7-48CA-AE55-D1FCE4B02B71"}
