@@ -102,6 +102,21 @@ public extension SavedMealInstance {
     /// track when calibration data accumulated and aging out old reads.
     @NSManaged var verifiedAt: Date?
 
+    /// JSON-encoded snapshot of GarminContextSnapshot captured at
+    /// meal-window activation. Nullable — Garmin may be unavailable
+    /// for any given meal (Firestore down, user hasn't synced, device
+    /// offline, or telemetryIncludeGarmin toggled off). Stored as JSON
+    /// rather than columns so future Garmin fields don't require
+    /// schema migration.
+    @NSManaged var garminContextAtActivationJSON: String?
+    /// Hours since the most recent pump rewind event (PumpEventStored
+    /// type == "rewind"), computed at meal-window activation.
+    /// Lets analytics correlate cannula age with per-meal effective
+    /// CR/ISF — site degradation typically shows up day-2 onward.
+    /// Nullable because there may be no rewind events recorded
+    /// (fresh install, history clipped).
+    @NSManaged var pumpSiteAgeHours: NSNumber?
+
     @NSManaged var savedMeal: SavedMeal?
 }
 

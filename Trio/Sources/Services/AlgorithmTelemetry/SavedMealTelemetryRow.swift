@@ -69,6 +69,19 @@ struct SavedMealTelemetryRow: Encodable {
         /// so given observed rise + delivered insulin we can solve for the
         /// implied carbs the meal "looked like."
         let carbRatioAtActivation: Double?
+        /// Hours since the most recent pump rewind / pod swap event at
+        /// the moment the window opened. Nil when no rewind history is
+        /// available. Site degradation typically appears day-2 onward,
+        /// so this is the prime feature for "did a stale site change
+        /// the loop's effective response on this meal?"
+        let pumpSiteAgeHours: Double?
+        /// JSON-encoded Garmin context (sleep, HR, HRV, stress, body
+        /// battery, recent activity intensity) captured at activation.
+        /// String form so future Garmin schema growth doesn't require
+        /// telemetry-row migration. Nil when `telemetryIncludeGarmin`
+        /// is off, when Garmin is unconfigured, or when Firestore
+        /// didn't respond within the activation-time budget.
+        let garminContextAtActivationJSON: String?
     }
 }
 

@@ -656,7 +656,101 @@ provided them.
 
 ---
 
-## 7. Open v3 items (not built)
+## 7. Garmin + pod-site-age context at meal activation (SHIPPED — commit pending)
+
+Trio already pulls a rich Garmin context (`GarminContextSnapshot`)
+via Firestore — sleep, HR, HRV, stress, body battery, recent activity
+intensity, VO2 max, fitness age — used today by SmartSense for
+dosing. We now capture the same snapshot into telemetry at meal
+activation, plus hours-since-last-pump-rewind (pod site age). Lets
+analysis correlate sensitivity-affecting context with per-meal
+outcomes: does HRV-suppressed-overnight predict bigger excursions?
+does pod day 3 vs day 1 shift effective CR?
+
+### Schema additions
+
+`SavedMealInstance` gets two new fields:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `garminContextAtActivationJSON` | String? | Whole `GarminContextSnapshot` serialized at activation. JSON keeps the schema flexible — future Garmin field additions don't require a Core Data migration |
+| `pumpSiteAgeHours` | NSNumber? | Hours since the most recent `PumpEventStored` row with `type == "rewind"`. Nil when no rewind history available |
+
+`SavedMealTelemetryRow.ActivationContext` (meals.jsonl) gets the same
+two fields. Build schema bumped from 10 → 13.
+
+### Capture path
+
+In `AnnounceMealIntentRequest.announce(...)`:
+
+1. **Pod age** — `PumpSiteAge.hoursSinceLastRewind(now:)`. Synchronous,
+   fast (single CoreData query, fetchLimit=1). Always computed; no
+   privacy gate (not personal health data).
+2. **Garmin** — `fetchGarminContextJSONWithTimeout(seconds: 1.0)`.
+   Async with hard 1-second timeout via `withTaskGroup`. **The dosing
+   path must not block on a slow Firestore round-trip** — if Garmin
+   doesn't respond in 1s, proceed with `garminContextJSON = nil` and
+   the meal window opens on schedule. Gated by `telemetryIncludeGarmin`.
+
+Both values flow into:
+- `SavedMealStorage.startInstance(...)` → stored on the instance row
+- The `mealWindowActivated` event payload (pod age top-level, plus
+  a curated subset of Garmin fields as `garmin_*` keys for grep-
+  friendly analysis)
+
+### Daily Garmin snapshot
+
+New `garmin.jsonl` file in the telemetry tree, one row per day.
+Written from `maintainDailySnapshot` as a fire-and-forget task. Each
+row: `{ timestamp, deviceTimeZone, snapshot: <full GarminContextSnapshot> }`.
+Lets analytics build long-term trends (sleep, HRV, training load)
+independent of meal-window timing. Gated by `telemetryIncludeGarmin`.
+
+### Privacy gate
+
+`TrioSettings.telemetryIncludeGarmin` (Bool, default **ON**). User-
+exposed in `TelemetryConfigView` with an inline explainer about
+what personal health data the gate covers. When off:
+
+- No `garmin_*` keys in `mealWindowActivated` payload
+- `garminContextAtActivationJSON` stays nil on instance rows
+- `garmin.jsonl` writer skips (file isn't created)
+- Pod site age STILL flows (not personal data, direct dosing relevance)
+
+This matches the principle that the user opts in to sharing personal
+health context separately from opting in to operational telemetry.
+
+### Files
+
+- `Trio/Sources/Models/TrioSettings.swift` (`telemetryIncludeGarmin`)
+- `Model/.../contents` (SavedMealInstance fields)
+- `Model/Classes+Properties/SavedMealInstance+CoreDataProperties.swift`
+- `Trio/Sources/APS/PumpSiteAge.swift` (NEW)
+- `Trio/Sources/APS/Storage/SavedMealStorage.swift` (startInstance signature)
+- `Trio/Sources/Shortcuts/Meal/AnnounceMealIntentRequest.swift` (capture + timeout helper)
+- `Trio/Sources/Services/AlgorithmTelemetry/SavedMealTelemetryRow.swift` (ActivationContext fields)
+- `Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryManager.swift` (populate fields, daily Garmin writer)
+- `Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryLogger.swift` (.garmin file kind + writer)
+- `Trio/Sources/Modules/AIInsightsConfig/View/TelemetryConfigView.swift` (privacy toggle)
+
+### Verification path
+
+1. Verify pod-age is in `mealWindowActivated` event payload on the
+   next meal activation — `payload.pumpSiteAgeHours` numeric value
+   (matches `(now - last rewind) / 3600`).
+2. With `telemetryIncludeGarmin` ON: verify `garmin_*` keys are
+   present in the same payload (resting HR, stress level, sleep
+   score, etc.). Verify `garminContextAtActivationJSON` is set on
+   the SavedMealInstance row after activation.
+3. Toggle `telemetryIncludeGarmin` off → next activation should
+   have pod-age but no `garmin_*` fields, and no JSON on the
+   instance row.
+4. After 24h of app usage with the toggle on: `garmin.jsonl` should
+   appear under today's `telemetry/<YYYY-MM>/<DD>/`.
+
+---
+
+## 8. Open v3 items (not built)
 
 ### 3a. Meal tags
 
@@ -691,7 +785,7 @@ values without the SMB-sum fallback path.
 
 ---
 
-## 8. Verification path (inverse calibration + estimator guards)
+## 9. Verification path (inverse calibration + estimator guards)
 
 1. Mark today's Sunday Breakfast as verified at the user's best guess
    (~95g). Check the per-instance Calibration section shows back-calc

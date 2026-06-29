@@ -431,6 +431,12 @@ extension CarbsEntry: Codable {
         enteredBy = try container.decodeIfPresent(String.self, forKey: .enteredBy)
         isFPU = try container.decodeIfPresent(Bool.self, forKey: .isFPU)
         fpuID = try container.decodeIfPresent(String.self, forKey: .fpuID)
+        // v3 — rescue-carbs fields. Optional + nil-default for back-compat
+        // with JSON sources that don't carry them (Nightscout, oref, older
+        // Trio versions). Unknown keys are silently treated as "not a
+        // rescue entry" which matches the dosing-pipeline expectation.
+        isRescueCarbs = try container.decodeIfPresent(Bool.self, forKey: .isRescueCarbs)
+        rescuePresetName = try container.decodeIfPresent(String.self, forKey: .rescuePresetName)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -446,6 +452,8 @@ extension CarbsEntry: Codable {
         try container.encodeIfPresent(enteredBy, forKey: .enteredBy)
         try container.encodeIfPresent(isFPU, forKey: .isFPU)
         try container.encodeIfPresent(fpuID, forKey: .fpuID)
+        try container.encodeIfPresent(isRescueCarbs, forKey: .isRescueCarbs)
+        try container.encodeIfPresent(rescuePresetName, forKey: .rescuePresetName)
     }
 
     private enum CodingKeys: String, CodingKey {

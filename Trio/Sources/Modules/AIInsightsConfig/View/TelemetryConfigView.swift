@@ -115,6 +115,13 @@ struct TelemetryConfigView: View {
             }
             .listRowBackground(Color.chart)
 
+            // MARK: Garmin privacy gate
+            Section(footer: Text("Garmin context is personal health data: sleep, HR, HRV, stress, body battery, fitness age. When ON, a curated subset is included in meal-window activation events + the daily garmin.jsonl snapshot. Doesn't affect SmartSense's use of the same data for dosing — only the export. Pod site age is always included; it's not health data and has direct dosing relevance.")) {
+                Toggle("Include Garmin context in telemetry", isOn: $vm.includeGarmin)
+                    .onChange(of: vm.includeGarmin) { _, new in vm.saveIncludeGarmin(new) }
+            }
+            .listRowBackground(Color.chart)
+
             // MARK: Status + manual push
             Section(header: Text("Status")) {
                 HStack {
@@ -183,6 +190,7 @@ private final class ViewModel: ObservableObject {
     @Published var isPushing: Bool = false
     @Published var lastPushString: String = "—"
     @Published var lastError: String?
+    @Published var includeGarmin: Bool = true
 
     private let resolver: Resolver = TrioApp.resolver
     private lazy var settingsManager: SettingsManager? = resolver.resolve(SettingsManager.self)
@@ -194,6 +202,7 @@ private final class ViewModel: ObservableObject {
         repo = settings.telemetryRepo
         branch = settings.telemetryBranch
         enabled = settings.telemetryEnabled
+        includeGarmin = settings.telemetryIncludeGarmin
         lastError = settings.telemetryLastError
         if let date = settings.telemetryLastSuccessfulPushDate {
             let f = DateFormatter()
@@ -230,6 +239,12 @@ private final class ViewModel: ObservableObject {
     func saveEnabled(_ value: Bool) {
         guard var s = settingsManager?.settings else { return }
         s.telemetryEnabled = value
+        settingsManager?.settings = s
+    }
+
+    func saveIncludeGarmin(_ value: Bool) {
+        guard var s = settingsManager?.settings else { return }
+        s.telemetryIncludeGarmin = value
         settingsManager?.settings = s
     }
 

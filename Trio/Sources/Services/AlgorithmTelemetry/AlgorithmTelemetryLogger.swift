@@ -14,6 +14,7 @@ final class AlgorithmTelemetryLogger {
         case summary
         case settings // not JSONL — daily JSON snapshot, one object per file
         case meals    // daily meals.jsonl, one row per closed SavedMealInstance
+        case garmin   // daily garmin.jsonl, one row per successful fetch
     }
 
     private let queue = DispatchQueue(label: "AlgorithmTelemetryLogger.queue", qos: .utility)
@@ -48,6 +49,14 @@ final class AlgorithmTelemetryLogger {
     /// Append one closed-instance row to the daily meals.jsonl.
     func appendMealInstance<T: Encodable>(_ row: T, on date: Date) {
         write(line: row, kind: .meals, on: date)
+    }
+
+    /// Append a Garmin context snapshot row to the daily garmin.jsonl.
+    /// Written once a day from maintainDailySnapshot when the privacy
+    /// gate is on. Lets analytics build long-term trends (sleep,
+    /// HRV, training load) independent of meal-window timing.
+    func appendGarminSnapshot<T: Encodable>(_ row: T, on date: Date) {
+        write(line: row, kind: .garmin, on: date)
     }
 
     /// Append one closed-instance row to the per-meal history file at

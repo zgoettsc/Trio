@@ -625,9 +625,11 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 autosensRatioAtActivation: inst.autosensRatioAtActivation?.doubleValue,
                 smartSenseRatioAtActivation: inst.smartSenseRatioAtActivation?.doubleValue,
                 effectiveISFAtActivation: inst.effectiveISFAtActivation?.doubleValue,
-                carbRatioAtActivation: inst.carbRatioAtActivation?.doubleValue
+                carbRatioAtActivation: inst.carbRatioAtActivation?.doubleValue,
+                pumpSiteAgeHours: inst.pumpSiteAgeHours?.doubleValue,
+                garminContextAtActivationJSON: inst.garminContextAtActivationJSON
             ),
-            buildSchema: 10
+            buildSchema: 13
         )
         logger.appendMealInstance(row, on: closedAt)
         logger.appendPerMealHistory(row, mealId: mealId)
@@ -700,9 +702,11 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 autosensRatioAtActivation: inst.autosensRatioAtActivation?.doubleValue,
                 smartSenseRatioAtActivation: inst.smartSenseRatioAtActivation?.doubleValue,
                 effectiveISFAtActivation: inst.effectiveISFAtActivation?.doubleValue,
-                carbRatioAtActivation: inst.carbRatioAtActivation?.doubleValue
+                carbRatioAtActivation: inst.carbRatioAtActivation?.doubleValue,
+                pumpSiteAgeHours: inst.pumpSiteAgeHours?.doubleValue,
+                garminContextAtActivationJSON: inst.garminContextAtActivationJSON
             ),
-            buildSchema: 10
+            buildSchema: 13
         )
         logger.appendMealInstance(row, on: closedAt)
         logger.appendPerMealHistory(row, mealId: mealId)
@@ -951,6 +955,33 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
         )
         logger.writeSettingsSnapshot(snapshot)
         detectAndEmitTuningTransitions()
+
+        // v3 — write a daily Garmin snapshot row to garmin.jsonl.
+        // Gated by telemetryIncludeGarmin (privacy switch). Fire-and-
+        // forget — failures here must NOT block settings export.
+        if s.telemetryIncludeGarmin {
+            Task.detached(priority: .utility) { [weak self] in
+                guard let self else { return }
+                let service = GarminFirestoreService()
+                guard service.isConfigured else { return }
+                guard let context = await service.fetchContext() else { return }
+                let row = DailyGarminRow(
+                    timestamp: Date(),
+                    deviceTimeZone: TimeZone.current.identifier,
+                    snapshot: context
+                )
+                self.logger.appendGarminSnapshot(row, on: row.timestamp)
+            }
+        }
+    }
+
+    /// One row in the daily garmin.jsonl file. Wraps the raw snapshot
+    /// with the same timestamp + timezone fields every other telemetry
+    /// row carries so the file is self-consistent in pandas etc.
+    struct DailyGarminRow: Encodable {
+        let timestamp: Date
+        let deviceTimeZone: String?
+        let snapshot: GarminContextSnapshot
     }
 
     // Track each tuning field's last-known value to emit transition events on change.

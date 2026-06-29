@@ -245,7 +245,9 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
         autosensRatio: Double? = nil,
         smartSenseRatio: Double? = nil,
         effectiveISF: Double? = nil,
-        carbRatio: Double? = nil
+        carbRatio: Double? = nil,
+        garminContextJSON: String? = nil,
+        pumpSiteAgeHours: Double? = nil
     ) -> UUID {
         let instanceId = UUID()
         context.performAndWait {
@@ -268,6 +270,8 @@ final class BaseSavedMealStorage: SavedMealStorage, Injectable {
             inst.smartSenseRatioAtActivation = smartSenseRatio.map(NSDecimalNumber.init(value:))
             inst.effectiveISFAtActivation = effectiveISF.map(NSDecimalNumber.init(value:))
             inst.carbRatioAtActivation = carbRatio.map(NSDecimalNumber.init(value:))
+            inst.garminContextAtActivationJSON = garminContextJSON
+            inst.pumpSiteAgeHours = pumpSiteAgeHours.map { NSNumber(value: $0) }
             mealInCtx.addToInstances(inst)
             mealInCtx.updatedAt = startedAt
             try? context.save()

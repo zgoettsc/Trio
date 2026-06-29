@@ -170,6 +170,16 @@ import Foundation
             settingsManager.settings = s2
         }
 
+        // v3 — Garmin + pod-age context capture. Pod age is local +
+        // synchronous; Garmin requires a Firestore round-trip so we
+        // race it against a short timeout. We never block dosing on
+        // slow Firestore — if Garmin doesn't respond in 1s, we proceed
+        // with garmin = nil and the rest of the activation lands on time.
+        let podAgeHours = PumpSiteAge.hoursSinceLastRewind(now: now)
+        let garminContextJSON: String? = settingsManager.settings.telemetryIncludeGarmin
+            ? await fetchGarminContextJSONWithTimeout(seconds: 1.0)
+            : nil
+
         // If we have a saved meal, create the instance row now and link it,
         // capturing the sensitivity/BG context as a one-shot snapshot.
         if let mealId = savedMealId, let meal = savedMealStorage.meal(id: mealId) {
@@ -185,7 +195,9 @@ import Foundation
                 autosensRatio: snapshot.autosensRatio,
                 smartSenseRatio: snapshot.smartSenseRatio,
                 effectiveISF: snapshot.effectiveISF,
-                carbRatio: snapshot.carbRatio
+                carbRatio: snapshot.carbRatio,
+                garminContextJSON: garminContextJSON,
+                pumpSiteAgeHours: podAgeHours
             )
             var s2 = settingsManager.settings
             s2.mealWindowSavedMealInstanceId = instanceId.uuidString
@@ -210,6 +222,36 @@ import Foundation
             activationPayload["savedMealId"] = .string(mealId.uuidString)
             activationPayload["savedMealName"] = .from(resolvedMealName)
             activationPayload["seededClassification"] = .string(s.mealCurrentClassification.rawValue)
+        }
+        // Pod-age always flows (not personal health data, direct dosing
+        // relevance). Garmin context only when the privacy gate is on.
+        if let podAge = podAgeHours {
+            activationPayload["pumpSiteAgeHours"] = .double(podAge)
+        }
+        if settingsManager.settings.telemetryIncludeGarmin,
+           let jsonStr = garminContextJSON,
+           let data = jsonStr.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            // Surface a curated subset of Garmin fields at the top level
+            // of the payload so analysis can grep without parsing JSON.
+            // The full snapshot is preserved on the SavedMealInstance row
+            // (garminContextAtActivationJSON) for instances when joining
+            // back via windowId is needed.
+            let priorityFields = [
+                "restingHeartRateInBeatsPerMinute",
+                "averageStressLevel", "stressQualifier", "currentStressLevel",
+                "currentBodyBattery", "bodyBatteryAtWake",
+                "sleepDurationInSeconds", "sleepScoreValue", "sleepScoreQualifier",
+                "lastNightAvg",
+                "vigorousIntensityDurationInSeconds",
+                "yesterdayVigorousIntensityDurationInSeconds",
+                "vo2Max"
+            ]
+            for field in priorityFields {
+                guard let v = dict[field] else { continue }
+                activationPayload["garmin_" + field] = .from(v)
+            }
         }
         algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
             kind: .mealWindowActivated,
@@ -416,5 +458,28 @@ import Foundation
             effectiveISF: effectiveISF,
             carbRatio: carbRatio
         )
+    }
+
+    /// Fetch Garmin context JSON with a hard timeout. Dosing path
+    /// MUST NOT block on a slow Firestore round-trip — if Garmin
+    /// doesn't respond in `seconds`, return nil and proceed without it.
+    private func fetchGarminContextJSONWithTimeout(seconds: TimeInterval) async -> String? {
+        let service = GarminFirestoreService()
+        guard service.isConfigured else { return nil }
+        return await withTaskGroup(of: String?.self) { group in
+            group.addTask {
+                guard let ctx = await service.fetchContext() else { return nil }
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                guard let data = try? encoder.encode(ctx) else { return nil }
+                return String(data: data, encoding: .utf8)
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            defer { group.cancelAll() }
+            return await group.next() ?? nil
+        }
     }
 }

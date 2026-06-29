@@ -227,6 +227,15 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// edit. Each preset stores name + macros so per-item BG recovery
     /// behavior can be analyzed (granola bar vs jelly beans, etc.).
     var rescuePresets: [RescuePreset] = RescuePreset.defaults
+
+    /// Include Garmin context (sleep, HR, HRV, stress, body battery,
+    /// recent activity) in telemetry exports. Default ON. Disabling
+    /// stops Garmin fields from landing in events.jsonl,
+    /// meals.jsonl, and the daily garmin.jsonl snapshot — but does
+    /// NOT affect SmartSense's use of the same data for dosing. Pod
+    /// site age is always included regardless; it's not personal
+    /// health data and has direct dosing relevance.
+    var telemetryIncludeGarmin: Bool = true
     /// In-flight estimator suggestion that the home view should surface
     /// as a banner / sheet on next foreground. Cleared when the user
     /// acts on it or dismisses. Persists across app restarts so a
@@ -570,6 +579,9 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode([RescuePreset].self, forKey: .rescuePresets) {
             settings.rescuePresets = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .telemetryIncludeGarmin) {
+            settings.telemetryIncludeGarmin = v
         }
         if let v = try? container.decode(PendingLiveCarbsSuggestion.self, forKey: .pendingLiveCarbsSuggestion) {
             settings.pendingLiveCarbsSuggestion = v

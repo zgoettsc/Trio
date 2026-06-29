@@ -362,6 +362,8 @@
         <attribute name="userVerifiedFatAmount" optional="YES" attributeType="Decimal"/>
         <attribute name="userVerifiedProteinAmount" optional="YES" attributeType="Decimal"/>
         <attribute name="verifiedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="garminContextAtActivationJSON" optional="YES" attributeType="String"/>
+        <attribute name="pumpSiteAgeHours" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <relationship name="savedMeal" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="SavedMeal" inverseName="instances" inverseEntity="SavedMeal"/>
         <fetchIndex name="byStartedAt">
             <fetchIndexElement property="startedAt" type="Binary" order="descending"/>
