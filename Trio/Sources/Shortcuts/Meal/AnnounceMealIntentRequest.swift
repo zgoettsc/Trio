@@ -146,11 +146,34 @@ import Foundation
                     s.mealWindowPhantomCOBGrams = g as Decimal
                 }
             }
-            // Per-meal extended duration override.
+            // Per-meal extended duration override — explicit per-meal
+            // setting wins over the classification-derived default below.
             if meal.defaultExtendedDurationMinutes > 0 {
                 s.mealWindowExtendedDurationMinutes = Decimal(meal.defaultExtendedDurationMinutes)
                 // Mark as confirmed so APSManager uses the extended duration
                 // immediately — the user explicitly told us this is a known meal.
+                s.mealWindowCarbsConfirmed = true
+            } else if let seedRaw = meal.defaultClassification,
+                      let seed = MealClassification(rawValue: seedRaw),
+                      seed.rank > MealClassification.simple.rank
+            {
+                // Classification-derived default duration. The user told us
+                // this is a Medium / Complex meal at save time — that's a
+                // statement about absorption shape (more fat / protein /
+                // late-rise) as well as aggression. Make the duration
+                // match the expectation: Medium gets 3h, Complex 6h.
+                // Behavior-based exit (when on) will close earlier if
+                // signals say the meal's done; this is just the cap.
+                // Per-meal `defaultExtendedDurationMinutes` overrides
+                // when set explicitly.
+                switch seed {
+                case .medium:
+                    s.mealWindowExtendedDurationMinutes = 180
+                case .complex:
+                    s.mealWindowExtendedDurationMinutes = 360
+                case .simple:
+                    break // covered by the rank > simple guard above
+                }
                 s.mealWindowCarbsConfirmed = true
             }
         }
