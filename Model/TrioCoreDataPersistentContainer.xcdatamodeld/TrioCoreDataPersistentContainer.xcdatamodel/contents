@@ -314,6 +314,7 @@
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="name" optional="YES" attributeType="String"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="tagIDsJSON" optional="YES" attributeType="String"/>
         <relationship name="instances" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SavedMealInstance" inverseName="savedMeal" inverseEntity="SavedMealInstance"/>
         <fetchIndex name="byUpdatedAt">
             <fetchIndexElement property="updatedAt" type="Binary" order="descending"/>

@@ -151,6 +151,8 @@
 		F2B0C3D40053000000000001 /* RescueCarbsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40052000000000001 /* RescueCarbsSheet.swift */; };
 		F2B0C3D40055000000000001 /* PumpSiteAge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40054000000000001 /* PumpSiteAge.swift */; };
 		F2B0C3D40057000000000001 /* RescuePresetsConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40056000000000001 /* RescuePresetsConfigView.swift */; };
+		F2B0C3D40059000000000001 /* MealTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40058000000000001 /* MealTag.swift */; };
+		F2B0C3D40061000000000001 /* TagsAndCategoriesConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40060000000000001 /* TagsAndCategoriesConfigView.swift */; };
 		F2B0C3D40039000000000001 /* LiveCarbsSuggestionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40038000000000001 /* LiveCarbsSuggestionSheet.swift */; };
 		F2B0C3D40041000000000001 /* InverseCalibrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B0C3D40040000000000001 /* InverseCalibrator.swift */; };
 		38AEE75225F022080013F05B /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38AEE75125F022080013F05B /* SettingsManager.swift */; };
@@ -1137,6 +1139,8 @@
 		F2B0C3D40052000000000001 /* RescueCarbsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RescueCarbsSheet.swift; sourceTree = "<group>"; };
 		F2B0C3D40054000000000001 /* PumpSiteAge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PumpSiteAge.swift; sourceTree = "<group>"; };
 		F2B0C3D40056000000000001 /* RescuePresetsConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RescuePresetsConfigView.swift; sourceTree = "<group>"; };
+		F2B0C3D40058000000000001 /* MealTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealTag.swift; sourceTree = "<group>"; };
+		F2B0C3D40060000000000001 /* TagsAndCategoriesConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagsAndCategoriesConfigView.swift; sourceTree = "<group>"; };
 		F2B0C3D40038000000000001 /* LiveCarbsSuggestionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCarbsSuggestionSheet.swift; sourceTree = "<group>"; };
 		F2B0C3D40040000000000001 /* InverseCalibrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InverseCalibrator.swift; sourceTree = "<group>"; };
 		38AEE75125F022080013F05B /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
@@ -2789,6 +2793,7 @@
 				38AEE73C25F0200C0013F05B /* TrioSettings.swift */,
 				F2B0C3D40036000000000001 /* PendingLiveCarbsSuggestion.swift */,
 				F2B0C3D40050000000000001 /* RescuePreset.swift */,
+				F2B0C3D40058000000000001 /* MealTag.swift */,
 				F2B0C3D40014000000000001 /* MealClassification.swift */,
 				3811DE8E25C9D80400A708ED /* User.swift */,
 				CE82E02628E869DF00473A9C /* AlertEntry.swift */,
@@ -3316,6 +3321,7 @@
 				F2B0C3D40010000000000001 /* EatingModeTuningView.swift */,
 				F2B0C3D40012000000000001 /* MealClassifierRulesView.swift */,
 				F2B0C3D40056000000000001 /* RescuePresetsConfigView.swift */,
+				F2B0C3D40060000000000001 /* TagsAndCategoriesConfigView.swift */,
 				F2B0C3D40022000000000001 /* SavedMealsListView.swift */,
 				F2B0C3D40024000000000001 /* SavedMealEditView.swift */,
 				F2B0C3D40026000000000001 /* SavedMealDetailView.swift */,
@@ -4822,6 +4828,8 @@
 				F2B0C3D40053000000000001 /* RescueCarbsSheet.swift in Sources */,
 				F2B0C3D40055000000000001 /* PumpSiteAge.swift in Sources */,
 				F2B0C3D40057000000000001 /* RescuePresetsConfigView.swift in Sources */,
+				F2B0C3D40059000000000001 /* MealTag.swift in Sources */,
+				F2B0C3D40061000000000001 /* TagsAndCategoriesConfigView.swift in Sources */,
 				38FCF3FD25E997A80078B0D1 /* PumpHistoryStorage.swift in Sources */,
 				58645BA72CA2D390008AFCE7 /* ChartAxisSetup.swift in Sources */,
 				38D0B3B625EBE24900CB6E88 /* Battery.swift in Sources */,

@@ -30,6 +30,12 @@ struct SavedMealTelemetryRow: Encodable {
     /// outage, Smart-Sense disabled, <30 min of glucose history). Enables
     /// "does Autosens/Smart-Sense predict excursion size?" analysis.
     let context: ActivationContext?
+    /// Tag names assigned to the parent SavedMeal at the time the window
+    /// closed. Names (not UUIDs) because the analyst doesn't have the user's
+    /// tag library. Nil/empty when the meal carries no tags. Powers the
+    /// "how do high-fat meals behave?" / "how does this user's `Indian`
+    /// tag perform?" analytics.
+    let tagNames: [String]?
     let buildSchema: Int
 
     struct Macros: Encodable {
@@ -115,5 +121,10 @@ struct SavedMealDefinitionsSnapshot: Encodable {
             let instanceCount: Int
             let recommendedClassification: String?
         }
+
+        /// Tag names assigned to the meal at snapshot time. Nil when the
+        /// meal carries no tags. See SavedMealTelemetryRow.tagNames for
+        /// the matching per-instance field.
+        let tagNames: [String]?
     }
 }

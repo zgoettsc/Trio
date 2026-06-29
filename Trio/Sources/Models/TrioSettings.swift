@@ -236,6 +236,17 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// site age is always included regardless; it's not personal
     /// health data and has direct dosing relevance.
     var telemetryIncludeGarmin: Bool = true
+
+    /// User-owned tag library + categories for meal characterization.
+    /// Seeded on first install with 10 stable-id categories (Protein,
+    /// Carbs, Fats, Cuisine, Style, Form, Meal Size, Format,
+    /// Descriptors, Misc) and ~55 starter tags. Categories AND tags
+    /// are user-editable: add, rename, delete (with confirmation if
+    /// in-use). Tags can belong to multiple categories (beans →
+    /// Protein + Carbs). See `SeededTags` in MealTag.swift for
+    /// initial contents and the stable-UUID convention.
+    var tagCategories: [TagCategory] = SeededTags.defaultCategories
+    var mealTags: [MealTag] = SeededTags.defaultTags
     /// In-flight estimator suggestion that the home view should surface
     /// as a banner / sheet on next foreground. Cleared when the user
     /// acts on it or dismisses. Persists across app restarts so a
@@ -582,6 +593,12 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Bool.self, forKey: .telemetryIncludeGarmin) {
             settings.telemetryIncludeGarmin = v
+        }
+        if let v = try? container.decode([TagCategory].self, forKey: .tagCategories) {
+            settings.tagCategories = v
+        }
+        if let v = try? container.decode([MealTag].self, forKey: .mealTags) {
+            settings.mealTags = v
         }
         if let v = try? container.decode(PendingLiveCarbsSuggestion.self, forKey: .pendingLiveCarbsSuggestion) {
             settings.pendingLiveCarbsSuggestion = v

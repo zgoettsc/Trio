@@ -762,16 +762,134 @@ health context separately from opting in to operational telemetry.
 
 ---
 
-## 8. Open v3 items (not built)
+## 8. Meal tags v3 phase 1 (SHIPPED — commit pending)
 
-### 3a. Meal tags
+Lightweight characterization that doesn't depend on macros. The user
+tags `Sunday Breakfast` with `eggs, bacon, toast, american` and the
+analyst can pivot the entire saved-meal history by tag — "how do my
+high-fat meals behave?", "how does `Mexican` perform vs `Italian`?",
+"does the `large` size tag predict longer windows?". No new
+classifier wiring in phase 1 — tags are pure analytics surface area.
 
-Lightweight characterization without macros — `chicken`, `rice`,
-`large`, `fatty`, etc. Hybrid schema: structured dimensions (Size,
-FatLevel, CarbType, ProteinType) for prediction logic + free-form
-tags for browsing. Per-user aggregation drives carb-equivalent
-predictions on fresh meals. See `MEAL_INTELLIGENCE_BACKLOG.md §5` for
-full design, risks, and phasing.
+### Model
+
+Two stable-UUID structs in `MealTag.swift`:
+
+- `MealTag { id: UUID, name: String, categoryIds: Set<UUID>,
+  notes: String? }` — multi-category membership lets `beans` live in
+  Protein AND Carbs (it's both), `salmon` in Protein AND Fats, etc.
+- `TagCategory { id: UUID, name: String, colorHex: String?,
+  iconSymbol: String? }` — the analytics dimension.
+
+Renames are rename-stable: identity is the UUID, name is mutable.
+Renaming `chicken` → `chicken thigh` cascades through every tagged
+meal automatically (meals store UUIDs, not strings). Deleting a tag
+strips it from every meal that referenced it.
+
+### Seeded library
+
+10 categories with hardcoded UUIDs (`SeededTags.proteinCatID` …
+`miscCatID`) so reinstalls/migrations don't orphan tags: Protein,
+Carbs, Fats, Cuisine, Style, Form, Meal Size, Format, Descriptors,
+Misc. ~55 seeded tags spanning all categories, with multi-membership
+worked examples (`beans` in Protein+Carbs, `salmon` in Protein+Fats,
+`tortilla chips` in Carbs+Fats, `cheese` and `nuts` in Fats+Protein,
+`pizza` in Form+Carbs+Fats, `burger` in Form+Protein+Carbs).
+
+### Schema
+
+- `TrioSettings.tagCategories: [TagCategory]` (initialized from
+  `SeededTags.defaultCategories`).
+- `TrioSettings.mealTags: [MealTag]` (initialized from
+  `SeededTags.defaultTags`).
+- `SavedMeal.tagIDsJSON: String?` (Core Data attribute) — JSON-encoded
+  `[UUID]`. Stored as JSON so future per-meal tag metadata (e.g. a
+  per-meal tag override) can land without a Core Data migration. The
+  computed extension `SavedMeal.tagIDs: [UUID]` does the
+  encode/decode.
+
+### UI
+
+- `Settings → AI Insights → Tags & Categories` — full management
+  screen. DisclosureGroup per category showing nested tags + count,
+  inline "Add tag to {category}" buttons. Multi-select category
+  checkboxes in TagEditSheet (so beans can be in Protein AND Carbs).
+  Per-tag delete shows a confirmation listing the affected saved-meal
+  count. Per-category delete shows the tag count that will lose this
+  category membership — tags are NOT cascaded-deleted, they're
+  orphaned (lose this category, keep the rest). An "Uncategorized"
+  section surfaces tags with empty `categoryIds`.
+- `SavedMealEditView` — Tags section with chip preview + "Edit tags"
+  button opens `SavedMealTagPickerSheet` (search + grouped multi-
+  select + inline "create new tag" that adds it uncategorized).
+- `SavedMealDetailView` — read-only chip flow under the meal name,
+  resolved against the current tag library (unknown UUIDs dropped
+  silently).
+
+### Telemetry
+
+- `SavedMealTelemetryRow.tagNames: [String]?` — names (not UUIDs)
+  because the analyst doesn't have the user's tag library. Resolved
+  per-row at write time; unknown UUIDs dropped. Nil when the meal
+  carries no tags so the JSON row omits the field.
+- `SavedMealDefinitionsSnapshot.MealDef.tagNames: [String]?` — same
+  for the static `meals/definitions.json` snapshot. Two surfaces so
+  analytics can pivot per-instance (in `meals.jsonl`) or per-meal-
+  definition (in `definitions.json`) without rejoining.
+
+### Files
+
+```
+Trio/Sources/Models/MealTag.swift                                       (new)
+Trio/Sources/Models/TrioSettings.swift                                  (+tagCategories, +mealTags)
+Model/Classes+Properties/SavedMeal+CoreDataProperties.swift             (+tagIDsJSON, +tagIDs accessor)
+Model/TrioCoreDataPersistentContainer.xcdatamodeld/.../contents         (+tagIDsJSON attribute)
+Trio/Sources/Modules/AIInsightsConfig/View/TagsAndCategoriesConfigView.swift (new)
+Trio/Sources/Modules/AIInsightsConfig/View/SavedMealEditView.swift      (+Tags section, +picker sheet, +FlowLayoutWrap)
+Trio/Sources/Modules/AIInsightsConfig/View/SavedMealDetailView.swift    (+resolved tag chips)
+Trio/Sources/Modules/AIInsightsConfig/View/AIInsightsConfigRootView.swift (+nav entry)
+Trio/Sources/Services/AlgorithmTelemetry/SavedMealTelemetryRow.swift    (+tagNames on row + def)
+Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryManager.swift (+resolveTagNames helper, wired into both row sites + snapshot)
+```
+
+### Verification path
+
+1. Open Settings → AI Insights → Tags & Categories — verify 10
+   seeded categories and ~55 seeded tags appear, with `beans` /
+   `salmon` / `pizza` / `burger` showing the "· in N categories"
+   badge.
+2. Add a custom category "Holiday" with the + button. Add a tag
+   "stuffing" into Holiday + Carbs (multi-select).
+3. Edit a saved meal, open the tag picker, select 3 tags. Save and
+   reopen — verify chips render and selection persists.
+4. Close a meal window; in `telemetry/<date>/meals.jsonl` verify
+   the row's `tagNames` array contains the assigned tag names.
+5. Rename a tag in the management screen. Verify
+   `telemetry/meals/definitions.json` reflects the new name on the
+   next CRUD action.
+
+### Not in phase 1
+
+- Filtering the saved-meals list / instance history by tag.
+- Carb-equivalent prediction from tags (the original "no-macros
+  meal" path from §3a backlog — needs phase 2 once the analyst has
+  enough per-user tagged data).
+- Per-meal tag overrides (e.g. a one-off "small" override on a
+  large saved meal).
+
+---
+
+## 9. Open v3 items (not built)
+
+### 3a. Meal tags — phase 2 (prediction)
+
+Phase 1 (model + management UI + chip picker + telemetry) shipped —
+see §8. Phase 2 covers carb-equivalent prediction from tags: per-
+user aggregation across tagged history drives an "this tag combo
+historically behaves like ~N grams" suggestion on fresh no-macro
+meals. Also covers filtering the saved-meals list / instance history
+by tag, and per-meal one-off tag overrides. See
+`MEAL_INTELLIGENCE_BACKLOG.md §5` for the full prediction design.
 
 ### 3b. Hypo-aware carb prompt
 
@@ -797,7 +915,7 @@ values without the SMB-sum fallback path.
 
 ---
 
-## 9. Verification path (inverse calibration + estimator guards)
+## 10. Verification path (inverse calibration + estimator guards)
 
 1. Mark today's Sunday Breakfast as verified at the user's best guess
    (~95g). Check the per-instance Calibration section shows back-calc

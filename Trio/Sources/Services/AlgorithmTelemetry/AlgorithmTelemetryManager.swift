@@ -629,6 +629,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 pumpSiteAgeHours: inst.pumpSiteAgeHours?.doubleValue,
                 garminContextAtActivationJSON: inst.garminContextAtActivationJSON
             ),
+            tagNames: resolveTagNames(for: meal),
             buildSchema: 13
         )
         logger.appendMealInstance(row, on: closedAt)
@@ -706,12 +707,25 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 pumpSiteAgeHours: inst.pumpSiteAgeHours?.doubleValue,
                 garminContextAtActivationJSON: inst.garminContextAtActivationJSON
             ),
+            tagNames: resolveTagNames(for: meal),
             buildSchema: 13
         )
         logger.appendMealInstance(row, on: closedAt)
         logger.appendPerMealHistory(row, mealId: mealId)
         // Refresh definitions.json — cachedInstanceCount changed.
         emitMealDefinitionsSnapshot()
+    }
+
+    /// Resolves the meal's `tagIDs` against the user's tag library to
+    /// produce name strings for telemetry. Unknown IDs (tag deleted out
+    /// from under us) are dropped. Returns nil when the meal carries no
+    /// tags so the JSON row omits the field entirely.
+    private func resolveTagNames(for meal: SavedMeal) -> [String]? {
+        let ids = meal.tagIDs
+        guard !ids.isEmpty else { return nil }
+        let lib = settingsManager.settings.mealTags
+        let names = ids.compactMap { id in lib.first(where: { $0.id == id })?.name }
+        return names.isEmpty ? nil : names
     }
 
     func emitMealDefinitionsSnapshot() {
@@ -743,7 +757,8 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
                 createdAt: m.createdAt,
                 updatedAt: m.updatedAt,
                 defaults: defaults,
-                stats: stats
+                stats: stats,
+                tagNames: resolveTagNames(for: m)
             )
         }
         let snapshot = SavedMealDefinitionsSnapshot(

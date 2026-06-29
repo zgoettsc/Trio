@@ -56,6 +56,18 @@ struct SavedMealDetailView: View {
 
     private let resolver: Resolver = TrioApp.resolver
     private var storage: SavedMealStorage? { resolver.resolve(SavedMealStorage.self) }
+    private var settingsManager: SettingsManager? { resolver.resolve(SettingsManager.self) }
+
+    /// Tag UUIDs on this meal resolved against the current TrioSettings.mealTags.
+    /// Unknown UUIDs (tag deleted out from under us) are silently dropped — the
+    /// row still has the id, but the management UI didn't garbage-collect.
+    private var resolvedTags: [MealTag] {
+        let ids = Set(meal.tagIDs)
+        guard !ids.isEmpty, let lib = settingsManager?.settings.mealTags else { return [] }
+        return lib
+            .filter { ids.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
 
     private var instancesArray: [SavedMealInstance] {
         let all = (meal.instances?.allObjects as? [SavedMealInstance]) ?? []
@@ -119,6 +131,18 @@ struct SavedMealDetailView: View {
                     Task { await startMeal() }
                 } label: {
                     Label("Start eating mode with this meal", systemImage: "play.circle.fill")
+                }
+                if !resolvedTags.isEmpty {
+                    FlowLayoutWrap(spacing: 6) {
+                        ForEach(resolvedTags) { tag in
+                            Text(tag.name)
+                                .font(.caption)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(Color.blue.opacity(0.15)))
+                                .foregroundStyle(.primary)
+                        }
+                    }
                 }
             }
             .listRowBackground(Color.chart)

@@ -203,6 +203,14 @@ extension AIInsightsConfig {
                         }
                     }
 
+                    NavigationLink(destination: TagsAndCategoriesConfigView()) {
+                        HStack {
+                            Image(systemName: "tag.fill")
+                                .foregroundColor(.indigo)
+                            Text("Tags & Categories")
+                        }
+                    }
+
                     NavigationLink(destination: SavedMealsListView()) {
                         HStack {
                             Image(systemName: "bookmark.circle.fill")

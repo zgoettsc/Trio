@@ -34,7 +34,38 @@ public extension SavedMeal {
     @NSManaged var cachedInstanceCount: Int32
     @NSManaged var cachedRecommendedClassification: String?
 
+    /// JSON-encoded array of MealTag UUIDs assigned to this meal.
+    /// Looked up against TrioSettings.mealTags for the tag's current
+    /// name / category memberships. Stored as JSON string so future
+    /// per-meal tag metadata (e.g. per-meal overrides on a tag) can
+    /// land without a Core Data migration.
+    @NSManaged var tagIDsJSON: String?
+
     @NSManaged var instances: NSSet?
+}
+
+public extension SavedMeal {
+    /// Decoded tag-ID list. Empty when nil/invalid.
+    var tagIDs: [UUID] {
+        get {
+            guard let json = tagIDsJSON,
+                  let data = json.data(using: .utf8),
+                  let arr = try? JSONDecoder().decode([UUID].self, from: data)
+            else { return [] }
+            return arr
+        }
+        set {
+            guard !newValue.isEmpty else {
+                tagIDsJSON = nil
+                return
+            }
+            if let data = try? JSONEncoder().encode(newValue),
+               let s = String(data: data, encoding: .utf8)
+            {
+                tagIDsJSON = s
+            }
+        }
+    }
 }
 
 public extension SavedMeal {
