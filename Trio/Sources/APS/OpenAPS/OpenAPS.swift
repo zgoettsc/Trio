@@ -669,7 +669,10 @@ final class OpenAPS {
                 mealWindowPhantomCOBGrams: trioSettings.mealWindowPhantomCOBGrams,
                 mealWindowSMBMinutesMultiplier: trioSettings.mealWindowSMBMinutesMultiplier,
                 mealWindowToughMealCapPercent: trioSettings.mealWindowToughMealCapPercent,
-                mealWindowCOBDecayMultiplier: trioSettings.mealWindowCOBDecayMultiplier
+                mealWindowCOBDecayMultiplier: trioSettings.mealWindowCOBDecayMultiplier,
+                mealWindowAutoPhantomCOBLevel: trioSettings.mealWindowAutoPhantomCOBEnabled
+                    ? trioSettings.mealWindowAutoPhantomCOBInjectedGrams
+                    : 0
             )
 
             // Save and return contents of Trio's custom oref variables

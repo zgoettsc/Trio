@@ -498,6 +498,10 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             ns.mealClassifierUpgradedAt = nil
             ns.mealWindowSavedMealId = nil
             ns.mealWindowSavedMealInstanceId = nil
+            // Reset the auto-phantom-COB accumulator so the next window
+            // starts at 0. Stale state would skew the per-window cap on
+            // a fresh activation.
+            ns.mealWindowAutoPhantomCOBInjectedGrams = 0
             self.settingsManager.settings = ns
         }
         return windowId
@@ -549,6 +553,8 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             // Clear pending live-carbs suggestion banner — meal is over,
             // the suggestion is no longer actionable.
             ns.pendingLiveCarbsSuggestion = nil
+            // Reset auto-phantom-COB accumulator (see auditExpiredMealWindow).
+            ns.mealWindowAutoPhantomCOBInjectedGrams = 0
             self.settingsManager.settings = ns
         }
         return windowId

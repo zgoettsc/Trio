@@ -36,6 +36,8 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case mealCarbsVerified // user attested ground-truth carbs for a closed instance — drives inverse calibrator
     case mealCarbsVerifiedCleared // user cleared a previously verified amount
     case mealWindowClosedByExitRule // behavior-based exit detector fired (peakDropConfirmed / loopIdleAtBaseline / maxDurationCap)
+    case mealWindowAutoPhantomCOBInjected // real-time phantom-COB injector added grams this loop
+    case mealWindowAutoPhantomCOBToggled // user enabled or disabled the injector (paired with the ALL-CAPS confirmation)
 }
 
 struct AlgorithmTelemetryEvent: Codable {

@@ -11,6 +11,8 @@ struct EatingModeTuningView: View {
     @Environment(AppState.self) var appState
 
     @StateObject private var vm = ViewModel()
+    @State private var showAutoPhantomConfirm = false
+    @State private var autoPhantomConfirmText = ""
 
     var body: some View {
         Form {
@@ -227,6 +229,36 @@ struct EatingModeTuningView: View {
             }
             .listRowBackground(Color.chart)
 
+            // MARK: Real-time phantom COB auto-injector (EXPERIMENTAL)
+            Section(
+                header: Text("Auto phantom COB (experimental)"),
+                footer: Text("EXPERIMENTAL. When ON, each loop pass infers carb arrival from BG response and silently injects phantom COB so oref doses for what's actually happening — even when no carbs were entered. Designed for the 'tap quick-action, walk away' workflow. Default OFF; flipping ON requires typing ENABLE to confirm. Real insulin will be dosed based on inferred carbs nobody told the loop about — collect data first, then opt in.")
+            ) {
+                Toggle(isOn: Binding(
+                    get: { vm.autoPhantomCOB },
+                    set: { newValue in
+                        if newValue {
+                            // Don't actually flip the setting yet —
+                            // require the typed confirmation first.
+                            autoPhantomConfirmText = ""
+                            showAutoPhantomConfirm = true
+                        } else {
+                            vm.autoPhantomCOB = false
+                            vm.save(\.mealWindowAutoPhantomCOBEnabled, false)
+                            vm.logAutoPhantomToggle(false)
+                        }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Real-time phantom COB injector")
+                        if vm.autoPhantomCOB {
+                            Text("Active — oref will see inferred COB each loop").font(.caption2).foregroundStyle(.orange)
+                        }
+                    }
+                }
+            }
+            .listRowBackground(Color.chart)
+
             // MARK: Reset to defaults
             Section(footer: Text("Resets all eating-mode tuning toggles and sliders to the shipped defaults. Doesn't affect telemetry settings or other Trio preferences.")) {
                 Button(role: .destructive) {
@@ -244,6 +276,93 @@ struct EatingModeTuningView: View {
         .background(appState.trioBackgroundColor(for: colorScheme))
         .navigationTitle("Eating Mode Tuning")
         .onAppear { vm.reload() }
+        .sheet(isPresented: $showAutoPhantomConfirm, onDismiss: {
+            // If user dismissed without confirming, ensure toggle is OFF.
+            if !vm.autoPhantomCOB {
+                // no-op — already off
+            }
+        }) {
+            AutoPhantomCOBConfirmSheet(
+                confirmText: $autoPhantomConfirmText,
+                onCancel: {
+                    showAutoPhantomConfirm = false
+                },
+                onConfirm: {
+                    vm.autoPhantomCOB = true
+                    vm.save(\.mealWindowAutoPhantomCOBEnabled, true)
+                    vm.logAutoPhantomToggle(true)
+                    showAutoPhantomConfirm = false
+                }
+            )
+        }
+    }
+}
+
+/// ALL-CAPS confirmation sheet to enable the auto-phantom-COB injector.
+/// The user must type "ENABLE" (case-sensitive) to confirm. Single
+/// accidental tap on the toggle should never flip a setting that lets
+/// the loop dose real insulin based on inferred carbs.
+private struct AutoPhantomCOBConfirmSheet: View {
+    @Environment(\.colorScheme) var colorScheme
+    @Environment(AppState.self) var appState
+    @Binding var confirmText: String
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    @FocusState private var fieldFocused: Bool
+
+    private let requiredWord = "ENABLE"
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    Label("Real insulin will be dosed based on inferred carbs", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.headline)
+                }
+                .listRowBackground(Color.chart)
+
+                Section(
+                    header: Text("Read before enabling"),
+                    footer: Text("Each loop pass, the injector reads the BG response and silently adds phantom COB to the loop's model. oref then doses for those carbs. If the inference is wrong (sensor noise, unexpected activity, miscalibrated profile) the loop will dose insulin you didn't account for, which can cause delayed lows.\n\nSafety gates (always on): rising-trend only, classifier ≥ Medium, per-loop cap, per-window cap. Recommended: leave OFF for at least two weeks of meals with this build so we can analyze your data and tune before flipping ON.")
+                ) {
+                    EmptyView()
+                }
+                .listRowBackground(Color.chart)
+
+                Section(
+                    header: Text("Type \(requiredWord) (all caps) to confirm"),
+                    footer: Text("Case-sensitive. Mistypes do nothing.")
+                ) {
+                    TextField(requiredWord, text: $confirmText)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .font(.title3.monospaced())
+                        .focused($fieldFocused)
+                }
+                .listRowBackground(Color.chart)
+
+                Section {
+                    Button(role: .destructive) {
+                        onConfirm()
+                    } label: {
+                        Label("Enable auto phantom COB", systemImage: "checkmark.seal")
+                    }
+                    .disabled(confirmText != requiredWord)
+
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                }
+                .listRowBackground(Color.chart)
+            }
+            .scrollContentBackground(.hidden)
+            .background(appState.trioBackgroundColor(for: colorScheme))
+            .navigationTitle("Confirm enable")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear { fieldFocused = true }
+        }
     }
 }
 
@@ -264,6 +383,7 @@ private final class ViewModel: ObservableObject {
     @Published var liveCarbsSound: Bool = true
     @Published var liveCarbsFPGuard: Bool = true
     @Published var behaviorBasedExit: Bool = true
+    @Published var autoPhantomCOB: Bool = false
 
     private let resolver: Resolver = TrioApp.resolver
     private lazy var settingsManager: SettingsManager? = resolver.resolve(SettingsManager.self)
@@ -285,6 +405,7 @@ private final class ViewModel: ObservableObject {
         liveCarbsSound = s.liveCarbsEstimatorNotificationSound
         liveCarbsFPGuard = s.liveCarbsEstimatorFPGuardEnabled
         behaviorBasedExit = s.mealWindowBehaviorBasedExitEnabled
+        autoPhantomCOB = s.mealWindowAutoPhantomCOBEnabled
     }
 
     /// Generic setter that writes a single TrioSettings field through SettingsManager.
@@ -293,6 +414,21 @@ private final class ViewModel: ObservableObject {
         guard var s = settingsManager?.settings else { return }
         s[keyPath: keyPath] = newValue
         settingsManager?.settings = s
+    }
+
+    /// Emit a paired telemetry event when the user enables or disables
+    /// the auto-phantom-COB injector. Visible in events.jsonl so we can
+    /// correlate post-enable behavior with pre-enable baseline.
+    func logAutoPhantomToggle(_ enabled: Bool) {
+        let telemetry = resolver.resolve(AlgorithmTelemetryManager.self)
+        telemetry?.logEvent(AlgorithmTelemetryEvent(
+            kind: .mealWindowAutoPhantomCOBToggled,
+            timestamp: Date(),
+            windowId: settingsManager?.settings.mealWindowId,
+            payload: [
+                "enabled": .bool(enabled)
+            ]
+        ))
     }
 
     func resetToDefaults() {
@@ -312,6 +448,10 @@ private final class ViewModel: ObservableObject {
         s.liveCarbsEstimatorNotificationSound = true
         s.liveCarbsEstimatorFPGuardEnabled = true
         s.mealWindowBehaviorBasedExitEnabled = true
+        // Auto-phantom-COB is intentionally NOT reset to its default by
+        // this button. It requires the ALL-CAPS confirmation to flip on;
+        // resetting "to defaults" without the confirmation would be a
+        // back-door past the safety gate. Leave the user's choice alone.
         settingsManager?.settings = s
         reload()
     }

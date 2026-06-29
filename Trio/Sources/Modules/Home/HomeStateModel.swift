@@ -951,6 +951,9 @@ extension Home.StateModel {
         s.mealClassifierUpgradedAt = nil
         s.mealWindowSavedMealId = nil
         s.mealWindowSavedMealInstanceId = nil
+        // Reset auto-phantom-COB accumulator (parity with the other
+        // window-close paths in AlgorithmTelemetryManager).
+        s.mealWindowAutoPhantomCOBInjectedGrams = 0
         settingsManager.settings = s
         refreshMealWindowState()
 

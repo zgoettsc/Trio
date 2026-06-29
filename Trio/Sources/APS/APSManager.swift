@@ -771,6 +771,18 @@ final class BaseAPSManager: APSManager, Injectable {
         if mealWindowActive && s.mealWindowBehaviorBasedExitEnabled {
             evaluateMealWindowExit(sample: sample, settings: s, at: now)
         }
+
+        // v3 spec — real-time phantom COB auto-injector. EXPERIMENTAL.
+        // Reads the BG-vs-expected residual each loop and accumulates
+        // implied missing carbs into mealWindowAutoPhantomCOBInjectedGrams.
+        // oref reads that as a floor on mealCOB so it doses for the
+        // inferred arrival. DEFAULT OFF; user has to type "ENABLE" in
+        // the UI to flip it on. Multiple gates inside (rising-only,
+        // classifier >= Medium, per-loop cap, per-window cap) — see
+        // the function for full safety model.
+        if mealWindowActive && s.mealWindowAutoPhantomCOBEnabled {
+            evaluateAutoPhantomCOB(sample: sample, settings: s, at: now)
+        }
     }
 
     /// Backing storage for live-estimator dedupe. Re-fires at most once per
@@ -1165,6 +1177,135 @@ final class BaseAPSManager: APSManager, Injectable {
         }
         guard let lastDate else { return 999 }
         return Date().timeIntervalSince(lastDate) / 60
+    }
+
+    /// Per-window state for the auto-phantom-COB injector. Resets on
+    /// window-id change. Held only in memory — lost across app
+    /// restart, which is intentional: on relaunch we re-derive what
+    /// the model already knows from CoreData + settings rather than
+    /// trusting potentially-stale in-memory smoothing state.
+    private var autoPhantomActiveWindowId: String?
+
+    /// Real-time phantom COB auto-injector. Each loop, compute the
+    /// carbs that BG behavior IMPLIES have arrived (forward estimator
+    /// math), subtract carbs already in the model (logged entries +
+    /// previously-injected phantom), and inject the delta as new
+    /// phantom COB. oref sees a higher mealCOB next loop and doses
+    /// for the inferred arrival.
+    ///
+    /// Mental model: "tap quick-action, walk away" — the loop infers
+    /// the meal in real time from BG + insulin response, no carb
+    /// entry required from the user.
+    ///
+    /// Safety gates (all must hold to inject):
+    /// - Master switch on (`mealWindowAutoPhantomCOBEnabled`)
+    /// - Meal window active
+    /// - Classifier ≥ Medium (BG behavior confirms a meal, not noise)
+    /// - `shortAvgDelta > 0` (BG still rising — never inject for carbs
+    ///   that aren't actively arriving; protects against post-peak
+    ///   over-stacking and sensor-noise creep)
+    /// - Per-loop new phantom > 0 and ≤ `mealWindowAutoPhantomCOBMaxGramsPerLoop`
+    /// - Cumulative phantom < `mealWindowAutoPhantomCOBMaxGramsPerWindow`
+    ///
+    /// The "rising-only" gate is the central safety: once BG turns
+    /// down, no more injection. Previously-injected phantom decays
+    /// naturally via oref's own COB model.
+    private func evaluateAutoPhantomCOB(
+        sample: AlgorithmTelemetryLoopSample,
+        settings s: TrioSettings,
+        at now: Date
+    ) {
+        guard let windowId = s.mealWindowId,
+              let activatedAt = s.mealWindowActivationDate,
+              let bg = sample.bg,
+              let isf = sample.isf, isf > 0,
+              let cr = sample.carbRatio, cr > 0
+        else { return }
+
+        // Reset on new window
+        if autoPhantomActiveWindowId != windowId {
+            autoPhantomActiveWindowId = windowId
+            var ss = s
+            ss.mealWindowAutoPhantomCOBInjectedGrams = 0
+            settingsManager.settings = ss
+        }
+
+        // Gate: classifier must be at least Medium. Simple = "no real
+        // meal signal yet" — don't dose for what could still be drift.
+        if s.mealCurrentClassification.rank < MealClassification.medium.rank { return }
+
+        // Gate: rising trend only.
+        let shortAvg = sample.shortAvgDelta ?? 0
+        if shortAvg <= 0 { return }
+
+        // Need activation BG for the residual math.
+        guard let bgAtActivation = s.mealClassifierActivationBG, bgAtActivation > 0 else { return }
+
+        // Total insulin acted on this meal — approximate via current IOB
+        // delta from window open. Same approximation the live carbs
+        // estimator uses; biases toward under-estimating insulin
+        // (because some pre-window IOB has cleared), which biases
+        // toward under-injecting phantom COB — conservative direction.
+        let insulinSinceWindow = max(0, sample.iob ?? 0)
+
+        // Forward-estimator math: total carbs the BG response implies
+        // have arrived so far.
+        let rise = max(0, bg - bgAtActivation)
+        let impliedSoFar = rise * cr / isf + insulinSinceWindow * cr
+
+        // What the model already accounts for: user-logged carbs
+        // (from CarbEntryStored) + previously-injected phantom.
+        let loggedCarbs = sumCarbsSinceWindowOpen(activatedAt: activatedAt)
+        let priorInjected = Double(truncating: s.mealWindowAutoPhantomCOBInjectedGrams as NSDecimalNumber)
+        let alreadyModeled = loggedCarbs + priorInjected
+        let unmodeled = impliedSoFar - alreadyModeled
+        guard unmodeled > 0 else { return }
+
+        let perLoopCap = Double(truncating: s.mealWindowAutoPhantomCOBMaxGramsPerLoop as NSDecimalNumber)
+        let perWindowCap = Double(truncating: s.mealWindowAutoPhantomCOBMaxGramsPerWindow as NSDecimalNumber)
+
+        // Damping — smooth the per-loop response so sensor noise can't
+        // push us to the full per-loop cap on a single spike.
+        let damping = Double(truncating: s.mealWindowAutoPhantomCOBDampingFactor as NSDecimalNumber)
+        let dampedResponse = unmodeled * (1.0 - damping)
+
+        var inject = min(dampedResponse, perLoopCap)
+        // Enforce per-window cap
+        let cumulativeAfter = priorInjected + inject
+        if cumulativeAfter > perWindowCap {
+            inject = max(0, perWindowCap - priorInjected)
+        }
+        guard inject > 0.1 else { return } // sub-0.1g is noise
+
+        let newCumulative = priorInjected + inject
+
+        // Persist new cumulative level — oref reads it via
+        // TrioCustomOrefVariables.mealWindowAutoPhantomCOBLevel
+        var ss = s
+        ss.mealWindowAutoPhantomCOBInjectedGrams = Decimal(newCumulative)
+        settingsManager.settings = ss
+
+        algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
+            kind: .mealWindowAutoPhantomCOBInjected,
+            timestamp: now,
+            windowId: windowId,
+            payload: [
+                "injectedThisLoop": .double(inject),
+                "newCumulative": .double(newCumulative),
+                "unmodeledImplied": .double(unmodeled),
+                "impliedSoFar": .double(impliedSoFar),
+                "loggedCarbs": .double(loggedCarbs),
+                "priorInjected": .double(priorInjected),
+                "bg": .double(bg),
+                "bgAtActivation": .double(bgAtActivation),
+                "shortAvgDelta": .double(shortAvg),
+                "iob": .double(insulinSinceWindow),
+                "isf": .double(isf),
+                "cr": .double(cr),
+                "classification": .string(s.mealCurrentClassification.rawValue),
+                "minutesSinceOpen": .double(now.timeIntervalSince(activatedAt) / 60)
+            ]
+        ))
     }
 
     /// Sum of carbs (g) logged via non-FPU CarbEntryStored rows from

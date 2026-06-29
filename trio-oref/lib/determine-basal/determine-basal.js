@@ -210,6 +210,29 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
         console.error("Meal-window phantom COB: injected " + mwPhantomCOBGrams + "g (BG=" + glucose_status.glucose + ", delta=" + glucose_status.delta + ")");
     }
 
+    // v3 — real-time phantom COB auto-injector. Swift computes the
+    // residual (actual BG vs expected given COB+IOB) each loop and
+    // accumulates implied missing carbs into mealWindowAutoPhantomCOBLevel.
+    // Here we just ensure oref sees a mealCOB floor at that level so the
+    // dosing math anticipates the inferred carb arrival. Independent of
+    // the one-shot mwPhantomCOB above — both can apply, max wins.
+    // Safety surface lives in Swift (rising-only gate, per-loop cap,
+    // per-window cap, ALL-CAPS confirmation toggle). JS just consumes
+    // the level.
+    const mwAutoPhantomLevel = trio_custom_variables.mealWindowAutoPhantomCOBLevel || 0;
+    var mwAutoPhantomApplied = 0;
+    if (mealWindowActive && mealWindowMinutesRemaining > 0 && mwAutoPhantomLevel > 0) {
+        mwAutoPhantomApplied = mwAutoPhantomLevel;
+        meal_data.mealCOB = Math.max(meal_data.mealCOB || 0, mwAutoPhantomLevel);
+        meal_data.carbs = Math.max(meal_data.carbs || 0, mwAutoPhantomLevel);
+        // Reuse mwPhantomApplied for telemetry — "any source put phantom
+        // COB into the meal." Per-source breakdown lives in Swift events.
+        if (mwAutoPhantomLevel > mwPhantomApplied) {
+            mwPhantomApplied = mwAutoPhantomLevel;
+        }
+        console.error("Meal-window auto-phantom COB: level " + mwAutoPhantomLevel + "g (BG=" + glucose_status.glucose + ", delta=" + glucose_status.delta + ")");
+    }
+
     // tdd past 24 hour
     let tdd = trio_custom_variables.currentTDD;
     var logOutPut = "";

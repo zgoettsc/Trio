@@ -42,6 +42,11 @@ struct TrioCustomOrefVariables: JSON, Equatable {
     var mealWindowSMBMinutesMultiplier: Decimal
     var mealWindowToughMealCapPercent: Decimal
     var mealWindowCOBDecayMultiplier: Decimal
+    /// Cumulative phantom COB the auto-injector has added for the active
+    /// meal window. oref uses this as a MAX floor on mealCOB so it doses
+    /// for the inferred carb arrival even when the user logged nothing.
+    /// 0 = injector inactive or no carbs implied yet.
+    var mealWindowAutoPhantomCOBLevel: Decimal
 
     init(
         average_total_data: Decimal,
@@ -83,7 +88,8 @@ struct TrioCustomOrefVariables: JSON, Equatable {
         mealWindowPhantomCOBGrams: Decimal = 20,
         mealWindowSMBMinutesMultiplier: Decimal = 2.0,
         mealWindowToughMealCapPercent: Decimal = 75,
-        mealWindowCOBDecayMultiplier: Decimal = 1.0
+        mealWindowCOBDecayMultiplier: Decimal = 1.0,
+        mealWindowAutoPhantomCOBLevel: Decimal = 0
     ) {
         self.average_total_data = average_total_data
         self.weightedAverage = weightedAverage
@@ -125,6 +131,7 @@ struct TrioCustomOrefVariables: JSON, Equatable {
         self.mealWindowSMBMinutesMultiplier = mealWindowSMBMinutesMultiplier
         self.mealWindowToughMealCapPercent = mealWindowToughMealCapPercent
         self.mealWindowCOBDecayMultiplier = mealWindowCOBDecayMultiplier
+        self.mealWindowAutoPhantomCOBLevel = mealWindowAutoPhantomCOBLevel
     }
 }
 
@@ -170,5 +177,6 @@ extension TrioCustomOrefVariables {
         case mealWindowSMBMinutesMultiplier
         case mealWindowToughMealCapPercent
         case mealWindowCOBDecayMultiplier
+        case mealWindowAutoPhantomCOBLevel
     }
 }

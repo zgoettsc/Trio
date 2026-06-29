@@ -192,6 +192,34 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// signals. Default 10 h; should comfortably exceed the longest
     /// realistic fat-protein meal absorption tail.
     var mealWindowBehaviorExitMaxMinutes: Decimal = 600
+
+    /// Real-time phantom COB auto-injector. EXPERIMENTAL. When ON, each
+    /// loop pass computes the BG-vs-expected residual and injects
+    /// phantom COB proportional to the implied missing carbs. Makes
+    /// quick-action-without-carbs meals behave as if the user had
+    /// logged the carbs — oref doses for what BG says is arriving.
+    /// DEFAULT OFF. Flipping ON requires typing "ENABLE" in the UI
+    /// confirmation sheet — auto-injection dosing real insulin based
+    /// on a phantom carb count nobody told the loop about is a real
+    /// safety surface, and a single accidental tap should not flip it.
+    var mealWindowAutoPhantomCOBEnabled: Bool = false
+    /// Per-window cumulative cap on auto-injected phantom COB. Bounds
+    /// runaway sensor-noise accumulation. 200g comfortably covers any
+    /// realistic single meal.
+    var mealWindowAutoPhantomCOBMaxGramsPerWindow: Decimal = 200
+    /// Per-loop cap on phantom COB added. Prevents one bad sample from
+    /// dominating. 8g per 5-min loop = max ~95g/hour, which still
+    /// exceeds any reasonable carb arrival rate.
+    var mealWindowAutoPhantomCOBMaxGramsPerLoop: Decimal = 8
+    /// EWMA damping factor for residual smoothing. 0.0 = no smoothing
+    /// (instant response, oscillates), 1.0 = no update (never reacts).
+    /// 0.5 = mid: each loop's residual is 50% new, 50% prior.
+    var mealWindowAutoPhantomCOBDampingFactor: Decimal = 0.5
+    /// Cumulative phantom COB auto-injected for the active window.
+    /// Used by oref pipeline to set mealCOB floor, and by the detector
+    /// to enforce the per-window cap. Resets to 0 when a new window
+    /// opens; left as last value at window close (telemetry/audit).
+    var mealWindowAutoPhantomCOBInjectedGrams: Decimal = 0
     /// In-flight estimator suggestion that the home view should surface
     /// as a banner / sheet on next foreground. Cleared when the user
     /// acts on it or dismisses. Persists across app restarts so a
@@ -517,6 +545,21 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Decimal.self, forKey: .mealWindowBehaviorExitMaxMinutes) {
             settings.mealWindowBehaviorExitMaxMinutes = v
+        }
+        if let v = try? container.decode(Bool.self, forKey: .mealWindowAutoPhantomCOBEnabled) {
+            settings.mealWindowAutoPhantomCOBEnabled = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowAutoPhantomCOBMaxGramsPerWindow) {
+            settings.mealWindowAutoPhantomCOBMaxGramsPerWindow = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowAutoPhantomCOBMaxGramsPerLoop) {
+            settings.mealWindowAutoPhantomCOBMaxGramsPerLoop = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowAutoPhantomCOBDampingFactor) {
+            settings.mealWindowAutoPhantomCOBDampingFactor = v
+        }
+        if let v = try? container.decode(Decimal.self, forKey: .mealWindowAutoPhantomCOBInjectedGrams) {
+            settings.mealWindowAutoPhantomCOBInjectedGrams = v
         }
         if let v = try? container.decode(PendingLiveCarbsSuggestion.self, forKey: .pendingLiveCarbsSuggestion) {
             settings.pendingLiveCarbsSuggestion = v
