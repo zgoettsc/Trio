@@ -468,6 +468,12 @@ extension CarbsEntry: Codable {
         case enteredBy
         case isFPU
         case fpuID
+        // v3 — rescue-carbs fields. JSONImporter has its OWN CodingKeys
+        // separate from the one on CarbsEntry itself; both need these
+        // cases so the custom Decodable init in this file can encode /
+        // decode them.
+        case isRescueCarbs
+        case rescuePresetName
     }
 
     /// Helper function to convert `CarbsStored` to `CarbEntryStored` while importing JSON carb entries

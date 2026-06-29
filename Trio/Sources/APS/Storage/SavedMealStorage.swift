@@ -41,7 +41,9 @@ protocol SavedMealStorage {
         autosensRatio: Double?,
         smartSenseRatio: Double?,
         effectiveISF: Double?,
-        carbRatio: Double?
+        carbRatio: Double?,
+        garminContextJSON: String?,
+        pumpSiteAgeHours: Double?
     ) -> UUID
 
     /// Called when a meal window closes. Backfills instance fields with the
