@@ -40,6 +40,7 @@ One JSON object per line. Common fields: `kind`, `timestamp`, `windowId`,
 | `mealWindowClosedByExitRule` | reason (`peakDropConfirmed`/`loopIdleAtBaseline`/`maxDurationCap`), plus rule-specific signals (peakBG, dropFromPeak, minutesSincePeak, minutesSinceLastSMB, eventualBG, shortAvgDelta). NEW v3. See `MEAL_INTELLIGENCE_v3_SPEC.md §3` |
 | `mealWindowAutoPhantomCOBInjected` | injectedThisLoop, newCumulative, unmodeledImplied, impliedSoFar, priorInjected, bg, shortAvgDelta, iob, isf, cr, classification, minutesSinceOpen — fires ONLY when the master switch is ON and a real injection happened. Shadow-mode data lives on the loop sample, not as events. NEW v3 |
 | `mealWindowAutoPhantomCOBToggled` | enabled — paired event when the user flips the master switch via the ALL-CAPS confirmation sheet. Marks the pre/post boundary for baseline analysis |
+| `rescueCarbsLogged` | carbs, fat (optional, nil ≠ 0), protein (optional, nil ≠ 0), presetName (null when custom), custom (bool), bgAtLog, duringMealWindow. NEW v3. Rescue entries are excluded from oref's meal.json — see `MEAL_INTELLIGENCE_v3_SPEC.md §5` and `Analysis 11` below |
 
 #### Suppression reasons (`liveCarbsEstimateSuppressed`)
 
@@ -1039,6 +1040,107 @@ adjusts to seeing COB that wasn't there before.
   shadow code falls back to `delta5m` when `shortAvgDelta` is nil —
   delta5m is noisier, so notRising-gate suppression may be slightly
   less than what the live injector would produce.
+
+---
+
+## Analysis 11 — Rescue carbs: per-preset BG recovery curves
+
+**Goal:** answer "which rescue item gives the most durable
+recovery?" — does a granola bar (fat + protein) yield a longer
+plateau than jelly beans (pure sugar)? How often does each preset
+over-correct? At what BG does each typically get logged?
+
+**Inputs:** `events.jsonl` (`rescueCarbsLogged`), `loop.jsonl` (BG
+trajectory after each rescue), per-event payload carries the
+preset's effective macros at the moment of logging.
+
+**Recipe:**
+
+```python
+rescue = events[events.kind == "rescueCarbsLogged"].copy()
+for col in ["carbs", "fat", "protein", "presetName", "bgAtLog",
+            "duringMealWindow", "custom"]:
+    rescue[col] = rescue.payload.apply(lambda p: p.get(col))
+
+# 1) Distribution: which presets fire most?
+print(rescue.presetName.value_counts())
+
+# 2) Per-preset stats — when do they fire?
+per_preset = rescue.groupby("presetName").agg(
+    n=("carbs", "size"),
+    median_bg_at_log=("bgAtLog", "median"),
+    median_carbs=("carbs", "median"),
+    n_during_meal=("duringMealWindow", lambda s: s.sum()),
+)
+print(per_preset)
+
+# 3) Forward BG trajectory per rescue
+def post_rescue_trajectory(rescue_ts, hours=2):
+    ts = pd.to_datetime(rescue_ts)
+    loops["ts"] = pd.to_datetime(loops.timestamp)
+    window = loops[(loops.ts >= ts) & (loops.ts <= ts + pd.Timedelta(hours=hours))]
+    return window[["ts", "bg", "iob", "smbDelivered"]].assign(
+        minutes_after=(window.ts - ts).dt.total_seconds() / 60
+    )
+
+# 4) Recovery curve per preset — median BG at +15 / +30 / +60 / +90 min
+trajectories = []
+for _, row in rescue.iterrows():
+    traj = post_rescue_trajectory(row.timestamp)
+    if traj.empty: continue
+    bg_at = {}
+    for minute in [15, 30, 60, 90]:
+        nearest = traj.iloc[(traj.minutes_after - minute).abs().argsort()[:1]]
+        if not nearest.empty:
+            bg_at[f"bg_at_{minute}"] = nearest.bg.iloc[0]
+    trajectories.append({
+        "preset": row.presetName, "bg_at_log": row.bgAtLog,
+        "carbs": row.carbs, **bg_at
+    })
+recovery = pd.DataFrame(trajectories)
+print(recovery.groupby("preset").median(numeric_only=True))
+
+# 5) Over-correction rate per preset (BG > 180 within 2h of rescue)
+overcorrect = recovery.assign(
+    overcorrected=lambda r: r.filter(like="bg_at_").max(axis=1) > 180
+).groupby("preset").overcorrected.mean()
+print("Fraction of rescues that bounced past 180:")
+print(overcorrect)
+```
+
+**What to look for:**
+
+- **Median BG at log per preset** tells you "what BG made me reach
+  for this." Tabs/juice tend to fire at lower BG (active rescue);
+  granola bars sometimes at slightly higher BG (preemptive).
+- **Recovery curve shape** — pure-sugar items should show a sharp
+  +60-90 mg/dL rise at +30 min then plateau or drop. FP items
+  should show a smaller initial rise but maintained longer.
+- **Over-correction rate** — high rate on a preset = the dose is
+  too big or onset too fast for typical usage. Adjust the preset's
+  carb value down.
+- **`duringMealWindow == true`** rescues are a red flag pattern:
+  meal-mode aggression dragged BG too low. Cross-reference with
+  the meal window's bolus + estimator-add history to identify the
+  over-bolus root cause.
+
+**Caveats:**
+
+- Rescue carb entries are FILTERED OUT of `meal.json` — they don't
+  appear in oref's COB. They do live in `events.jsonl` (`carbEntry`
+  with `enteredBy: "Trio-RescueCarbs"`) AND in the dedicated
+  `rescueCarbsLogged` event with richer payload. Use the dedicated
+  event for analysis.
+- The preset macros embedded in the event are the values at the
+  moment of logging. If the user later edits the preset, old
+  events are still self-consistent — what they describe is what
+  was actually eaten then.
+- Custom rescues (`custom == true`, `presetName == null`) can be
+  grouped separately or excluded.
+- Activity / exercise context isn't captured today. A rescue
+  during exercise will recover differently than one at rest;
+  treat the recovery numbers as population averages until that
+  context lands.
 
 ---
 

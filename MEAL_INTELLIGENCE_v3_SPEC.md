@@ -508,7 +508,155 @@ becomes a problem, suppress when auto-injector is on.
 
 ---
 
-## 5. Open v3 items (not built)
+## 5. Rescue carbs — "I'm low, don't dose for this" (SHIPPED — commit pending)
+
+The pattern: BG drops → user eats juice → user logs the carbs (so
+analytics stays accurate) → oref sees new COB → dosed insulin against
+the rescue → BG over-corrects → low again → eat more juice → cycle.
+
+The workaround until now was "don't log the carbs," which protects
+the loop but destroys the record of what you actually ate. This
+feature lets you log AND tell the loop to ignore.
+
+### Schema
+
+`CarbEntryStored` gets two new fields:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `isRescueCarbs` | Bool (default NO) | Excludes the row from oref's meal.json + estimator math |
+| `rescuePresetName` | String? | Name of the preset used (nil if custom) — lets analytics stratify recovery curves by what was eaten |
+
+`CarbsEntry` struct mirrors both fields with backward-compatible
+optional defaults. New `enteredBy` tag: `"Trio-RescueCarbs"`.
+
+### Filtering — where the exclusion fires
+
+| Site | Behavior |
+|---|---|
+| `OpenAPS.fetchAndProcessCarbs` | Uses new `predicateForOneDayAgoExcludingRescue` so rescue rows never reach `meal.json` → oref's COB calculation is blind to them |
+| `APSManager.sumCarbsSinceWindowOpen` | Filters `isRescueCarbs == YES` so the live-estimator's "carbs already modeled" baseline + the auto-phantom-COB shadow accumulator both exclude rescues |
+| `APSManager.sumFatProteinSinceWindowOpen` | Same filter — keeps the FP-guard math clean |
+
+Rescue rows stay in CoreData. They flow into telemetry's `events.jsonl`
+via `carbEntry` AND a dedicated `rescueCarbsLogged` event. They show
+in History. They're just hidden from the dosing pipeline.
+
+### Curated presets
+
+`RescuePreset` struct stored as a user-customizable array on
+`TrioSettings.rescuePresets`. Defaults shipped: juice box, glucose tabs
+(×4 and ×3), Skittles, jelly beans, granola bar, banana, honey, apple
+juice, Smarties roll. Each entry has name + carbs + optional fat +
+optional protein + emoji + notes.
+
+### UI
+
+New **Rescue** button on the Treatments toolbar (red tint, shield icon).
+Tap → `RescueCarbsSheet` opens:
+
+1. **Picker** — list of presets. Tap one → preview with editable
+   carbs/fat/protein → confirm.
+2. **Custom** path at bottom — type macros directly.
+
+Save writes the carb entry with `isRescueCarbs = true`, fires
+`rescueCarbsLogged` telemetry, triggers a fresh `determineBasal` so
+the loop's state refreshes immediately.
+
+### Telemetry
+
+New event kind `rescueCarbsLogged`. Payload:
+
+| Field | Notes |
+|---|---|
+| `carbs` | grams logged |
+| `fat` / `protein` | only present if user entered (nil ≠ 0) |
+| `presetName` | string if from preset, null if custom |
+| `custom` | bool — convenience flag |
+| `bgAtLog` | latest BG at the moment of logging |
+| `duringMealWindow` | true if a meal window was active when rescue fired (signals likely over-bolus context) |
+
+Because the payload carries the preset's effective macros at the
+moment of logging, the row is self-contained — even if the user
+later edits or deletes the preset, the event still describes what
+was actually eaten. No need to snapshot the full preset library.
+
+### Per-preset analytics (the long-term payoff)
+
+With enough events, analysis can answer:
+- Does a granola bar produce a longer, more durable recovery than
+  jelly beans? (FP delay benefit)
+- Do glucose tabs over-correct more often than juice?
+- What's the median BG-recovery curve per preset (BG at +15 / +30 / +60 min)?
+
+The recipe in `ANALYSIS_METHODS.md §Analysis 11` joins
+`rescueCarbsLogged` events to subsequent BG samples and groups by
+`presetName`.
+
+### Files
+
+- `Model/.../contents` (CarbEntryStored: `isRescueCarbs` + `rescuePresetName`)
+- `Model/Classes+Properties/CarbEntryStored+CoreDataProperties.swift`
+- `Model/Helper/NSPredicates.swift` (new `predicateForOneDayAgoExcludingRescue`)
+- `Trio/Sources/Models/CarbsEntry.swift` (new fields + `Trio-RescueCarbs` tag)
+- `Trio/Sources/Models/RescuePreset.swift` (NEW)
+- `Trio/Sources/Models/TrioSettings.swift` (`rescuePresets` field)
+- `Trio/Sources/APS/Storage/CarbsStorage.swift` (persist new fields)
+- `Trio/Sources/APS/OpenAPS/OpenAPS.swift` (exclusion predicate)
+- `Trio/Sources/APS/APSManager.swift` (estimator helpers filter rescues)
+- `Trio/Sources/Modules/Treatments/View/RescueCarbsSheet.swift` (NEW)
+- `Trio/Sources/Modules/Treatments/View/TreatmentsRootView.swift` (Rescue toolbar button)
+- `Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryEvent.swift` (new event kind)
+
+---
+
+## 6. Verified macros — fat + protein (SHIPPED — commit pending)
+
+The inverse calibrator's math today uses carbs only, but verified
+macro composition is high-value data for future work — does effective
+CR vary with FP load? does Trio's FPU expansion match real BG impact?
+Capturing it now (cheap) lets those analyses run as soon as enough
+verified meals accumulate.
+
+### Schema
+
+`SavedMealInstance` gets two new optional fields:
+
+| Field | Purpose |
+|---|---|
+| `userVerifiedFatAmount` | grams; nil means "did not verify" — NOT zero |
+| `userVerifiedProteinAmount` | grams; nil = "did not verify" |
+
+The nil-vs-zero distinction matters: a meal with zero fat IS NOT the
+same as a meal whose fat content the user didn't verify. Telemetry +
+analytics must preserve that distinction.
+
+### UI
+
+`VerifyCarbsSheet` gets a new "Other macros (optional)" section with
+two empty fields. Defaults blank, NOT 0. Inline footnote:
+> Leave blank if you don't know — blank means "unverified", NOT zero.
+> Inverse-calibration math only uses carbs today, but these get stored
+> so future analysis can study how macro composition shapes BG response.
+
+When fat/protein are verified, they show in the verified-summary
+section beneath the verified carb amount.
+
+### Telemetry
+
+`mealCarbsVerified` event payload extended with optional
+`verifiedFat` and `verifiedProtein` fields. Only included when user
+provided them.
+
+### Files
+
+- `Model/.../contents` (`userVerifiedFatAmount`, `userVerifiedProteinAmount`)
+- `Model/Classes+Properties/SavedMealInstance+CoreDataProperties.swift`
+- `Trio/Sources/Modules/AIInsightsConfig/View/SavedMealInstanceDetailView.swift` (sheet + display)
+
+---
+
+## 7. Open v3 items (not built)
 
 ### 3a. Meal tags
 
@@ -543,7 +691,7 @@ values without the SMB-sum fallback path.
 
 ---
 
-## 6. Verification path (inverse calibration + estimator guards)
+## 8. Verification path (inverse calibration + estimator guards)
 
 1. Mark today's Sunday Breakfast as verified at the user's best guess
    (~95g). Check the per-instance Calibration section shows back-calc
