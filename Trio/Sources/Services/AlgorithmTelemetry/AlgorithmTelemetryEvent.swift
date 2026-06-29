@@ -38,6 +38,7 @@ enum AlgorithmTelemetryEventKind: String, Codable {
     case mealWindowClosedByExitRule // behavior-based exit detector fired (peakDropConfirmed / loopIdleAtBaseline / maxDurationCap)
     case mealWindowAutoPhantomCOBInjected // real-time phantom-COB injector added grams this loop
     case mealWindowAutoPhantomCOBToggled // user enabled or disabled the injector (paired with the ALL-CAPS confirmation)
+    case rescueCarbsLogged // user logged rescue carbs via Treatments → Rescue; carbs are excluded from oref's meal.json
 }
 
 struct AlgorithmTelemetryEvent: Codable {

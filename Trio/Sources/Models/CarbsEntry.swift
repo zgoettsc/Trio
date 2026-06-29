@@ -12,6 +12,17 @@ struct CarbsEntry: JSON, Equatable, Hashable, Identifiable {
     let enteredBy: String?
     let isFPU: Bool?
     let fpuID: String?
+    /// Rescue-carbs flag. When true the carb entry was logged by the user
+    /// to TREAT A LOW (juice, glucose tabs, granola bar, etc.) rather
+    /// than as meal fuel. Excluded from oref's COB calculation so the
+    /// loop doesn't dose extra insulin against the very carbs the user
+    /// ate to recover. All defaults `false` when nil for back-compat.
+    let isRescueCarbs: Bool?
+    /// Free-text preset name when the rescue was logged via the curated
+    /// preset picker (e.g. "Juice box", "Glucose tabs", "Granola bar").
+    /// Nil when typed as custom. Lets analytics group BG-recovery curves
+    /// by what was eaten.
+    let rescuePresetName: String?
 
     static let local = "Trio"
     static let appleHealth = "applehealth"
@@ -23,6 +34,41 @@ struct CarbsEntry: JSON, Equatable, Hashable, Identifiable {
     /// Carbs from the "Edit original to N g" path — replaces the original
     /// entry at its original timestamp with the new larger amount.
     static let liveEstimatorEdit = "Trio-LiveEstimator-Edit"
+    /// Carbs logged via the Treatments → Rescue path to recover from a low.
+    /// These do NOT enter oref's COB calculation; tag lets the meal.json
+    /// builder filter them out.
+    static let rescueCarbs = "Trio-RescueCarbs"
+
+    /// Memberwise init that defaults the rescue-carbs fields to nil so
+    /// existing call sites don't have to be updated. Rescue path passes
+    /// them explicitly.
+    init(
+        id: String?,
+        createdAt: Date,
+        actualDate: Date?,
+        carbs: Decimal,
+        fat: Decimal?,
+        protein: Decimal?,
+        note: String?,
+        enteredBy: String?,
+        isFPU: Bool?,
+        fpuID: String?,
+        isRescueCarbs: Bool? = nil,
+        rescuePresetName: String? = nil
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.actualDate = actualDate
+        self.carbs = carbs
+        self.fat = fat
+        self.protein = protein
+        self.note = note
+        self.enteredBy = enteredBy
+        self.isFPU = isFPU
+        self.fpuID = fpuID
+        self.isRescueCarbs = isRescueCarbs
+        self.rescuePresetName = rescuePresetName
+    }
 
     static func == (lhs: CarbsEntry, rhs: CarbsEntry) -> Bool {
         lhs.createdAt == rhs.createdAt
@@ -45,6 +91,8 @@ extension CarbsEntry {
         case enteredBy
         case isFPU
         case fpuID
+        case isRescueCarbs
+        case rescuePresetName
     }
 }
 

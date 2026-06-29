@@ -220,6 +220,13 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// to enforce the per-window cap. Resets to 0 when a new window
     /// opens; left as last value at window close (telemetry/audit).
     var mealWindowAutoPhantomCOBInjectedGrams: Decimal = 0
+
+    /// User-customizable list of rescue-carbs presets shown in the
+    /// Treatments → Rescue picker. Defaults to a curated starter list
+    /// (see RescuePreset.defaults). Users can add, remove, reorder, or
+    /// edit. Each preset stores name + macros so per-item BG recovery
+    /// behavior can be analyzed (granola bar vs jelly beans, etc.).
+    var rescuePresets: [RescuePreset] = RescuePreset.defaults
     /// In-flight estimator suggestion that the home view should surface
     /// as a banner / sheet on next foreground. Cleared when the user
     /// acts on it or dismisses. Persists across app restarts so a
@@ -560,6 +567,9 @@ extension TrioSettings: Decodable {
         }
         if let v = try? container.decode(Decimal.self, forKey: .mealWindowAutoPhantomCOBInjectedGrams) {
             settings.mealWindowAutoPhantomCOBInjectedGrams = v
+        }
+        if let v = try? container.decode([RescuePreset].self, forKey: .rescuePresets) {
+            settings.rescuePresets = v
         }
         if let v = try? container.decode(PendingLiveCarbsSuggestion.self, forKey: .pendingLiveCarbsSuggestion) {
             settings.pendingLiveCarbsSuggestion = v

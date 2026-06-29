@@ -159,6 +159,17 @@ struct SavedMealInstanceDetailView: View {
                         Text(when, style: .date).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if instance.userVerifiedFatAmount != nil || instance.userVerifiedProteinAmount != nil {
+                    HStack(spacing: 10) {
+                        if let f = instance.userVerifiedFatAmount?.doubleValue {
+                            Text("\(Int(f.rounded()))f").font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let p = instance.userVerifiedProteinAmount?.doubleValue {
+                            Text("\(Int(p.rounded()))p").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                }
                 Button {
                     showVerifySheet = true
                 } label: {
@@ -264,6 +275,8 @@ struct SavedMealInstanceDetailView: View {
         ctx.perform {
             if let row = try? ctx.existingObject(with: id) as? SavedMealInstance {
                 row.userVerifiedCarbsAmount = nil
+                row.userVerifiedFatAmount = nil
+                row.userVerifiedProteinAmount = nil
                 row.verifiedAt = nil
                 try? ctx.save()
             }
@@ -796,6 +809,8 @@ struct VerifyCarbsSheet: View {
     @ObservedObject var instance: SavedMealInstance
 
     @State private var amountText: String = ""
+    @State private var fatText: String = ""
+    @State private var proteinText: String = ""
     @FocusState private var amountFocused: Bool
 
     private let resolver: Resolver = TrioApp.resolver
@@ -805,6 +820,7 @@ struct VerifyCarbsSheet: View {
             Form {
                 summarySection
                 amountSection
+                macrosSection
                 guidanceSection
             }
             .scrollContentBackground(.hidden)
@@ -829,6 +845,8 @@ struct VerifyCarbsSheet: View {
             }
             .onAppear {
                 amountText = defaultAmountText()
+                fatText = defaultFatText()
+                proteinText = defaultProteinText()
                 amountFocused = true
             }
         }
@@ -887,6 +905,34 @@ struct VerifyCarbsSheet: View {
     }
 
     @ViewBuilder
+    private var macrosSection: some View {
+        Section(
+            header: Text("Other macros (optional)"),
+            footer: Text("Leave blank if you don't know — blank means \"unverified\", NOT zero. Inverse-calibration math only uses carbs today, but these get stored so future analysis can study how macro composition shapes BG response.")
+        ) {
+            HStack {
+                Text("Fat")
+                Spacer()
+                TextField("", text: $fatText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 80)
+                Text("g").foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("Protein")
+                Spacer()
+                TextField("", text: $proteinText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 80)
+                Text("g").foregroundStyle(.secondary)
+            }
+        }
+        .listRowBackground(Color.chart)
+    }
+
+    @ViewBuilder
     private var guidanceSection: some View {
         Section {
             Label("This does not change dosing. It records your verified carb count so the app can back-calculate what CR / ISF the BG response actually implied.", systemImage: "info.circle")
@@ -898,6 +944,35 @@ struct VerifyCarbsSheet: View {
 
     private var parsedAmount: Double {
         Double(amountText.replacingOccurrences(of: ",", with: ".")) ?? 0
+    }
+
+    private var parsedFat: Double? {
+        let trimmed = fatText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return Double(trimmed.replacingOccurrences(of: ",", with: "."))
+    }
+
+    private var parsedProtein: Double? {
+        let trimmed = proteinText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return Double(trimmed.replacingOccurrences(of: ",", with: "."))
+    }
+
+    private func defaultFatText() -> String {
+        if let v = instance.userVerifiedFatAmount?.doubleValue {
+            // Show prior verified fat. Even 0 is meaningful if user
+            // explicitly verified "this meal has no fat" — but blank
+            // by default for unverified.
+            return v.rounded() == v ? "\(Int(v))" : String(format: "%.1f", v)
+        }
+        return ""
+    }
+
+    private func defaultProteinText() -> String {
+        if let v = instance.userVerifiedProteinAmount?.doubleValue {
+            return v.rounded() == v ? "\(Int(v))" : String(format: "%.1f", v)
+        }
+        return ""
     }
 
     private func defaultAmountText() -> String {
@@ -916,6 +991,8 @@ struct VerifyCarbsSheet: View {
     private func save() {
         let amount = parsedAmount
         guard amount > 0 else { return }
+        let fatToSave = parsedFat
+        let proteinToSave = parsedProtein
         let id = instance.objectID
         let ctx = CoreDataStack.shared.newTaskContext()
         let windowId = instance.windowId
@@ -923,6 +1000,10 @@ struct VerifyCarbsSheet: View {
         ctx.perform {
             if let row = try? ctx.existingObject(with: id) as? SavedMealInstance {
                 row.userVerifiedCarbsAmount = NSDecimalNumber(value: amount)
+                // nil — NOT zero — when the user left the field blank.
+                // Distinguishes "didn't verify" from "verified as zero".
+                row.userVerifiedFatAmount = fatToSave.map { NSDecimalNumber(value: $0) }
+                row.userVerifiedProteinAmount = proteinToSave.map { NSDecimalNumber(value: $0) }
                 row.verifiedAt = Date()
                 try? ctx.save()
             }
@@ -937,6 +1018,8 @@ struct VerifyCarbsSheet: View {
             "priorVerifiedCarbs": .double(priorAmount),
             "entered": .double(instance.carbsAtActivation?.doubleValue ?? 0)
         ]
+        if let f = fatToSave { payload["verifiedFat"] = .double(f) }
+        if let p = proteinToSave { payload["verifiedProtein"] = .double(p) }
         if let r = result {
             payload["assumedCR"] = .double(r.assumedCR)
             payload["assumedISF"] = .double(r.assumedISF)

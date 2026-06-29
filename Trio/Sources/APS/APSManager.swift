@@ -1418,19 +1418,23 @@ final class BaseAPSManager: APSManager, Injectable {
         ))
     }
 
-    /// Sum of carbs (g) logged via non-FPU CarbEntryStored rows from
-    /// window activation through now. Includes the initial meal entry
-    /// AND any subsequent additions (estimator add, estimator edit,
-    /// manual carb entries during the window). FPU-derived chunks are
-    /// excluded — they're absorption-curve fictional carbs, not user
-    /// macros, and counting them would double-credit the meal.
+    /// Sum of carbs (g) logged via non-FPU, non-rescue CarbEntryStored
+    /// rows from window activation through now. Includes the initial
+    /// meal entry AND any subsequent additions (estimator add, estimator
+    /// edit, manual carb entries during the window). EXCLUDES:
+    /// - FPU-derived chunks (isFPU == YES) — absorption-curve fictional
+    ///   carbs, not user macros; counting them double-credits the meal
+    /// - Rescue-tagged entries (isRescueCarbs == YES) — carbs the user
+    ///   ate to treat a low; not meal fuel, must not pollute the
+    ///   live-estimator's "carbs known" baseline or the shadow-COB
+    ///   accumulator's "already modeled" subtraction
     private func sumCarbsSinceWindowOpen(activatedAt: Date) -> Double {
         let ctx = CoreDataStack.shared.persistentContainer.viewContext
         var total: Double = 0
         ctx.performAndWait {
             let req = CarbEntryStored.fetchRequest()
             req.predicate = NSPredicate(
-                format: "date >= %@ AND isFPU == NO",
+                format: "date >= %@ AND isFPU == NO AND (isRescueCarbs == NO OR isRescueCarbs == nil)",
                 activatedAt as NSDate
             )
             let rows = (try? ctx.fetch(req)) ?? []
@@ -1439,17 +1443,18 @@ final class BaseAPSManager: APSManager, Injectable {
         return total
     }
 
-    /// Sum of fat + protein grams logged via non-FPU carb entries from
-    /// window activation through now. FPU-derived rows (isFPU == YES) are
-    /// the auto-generated late-carb-equivalent chunks, NOT the user's
-    /// macros — including them double-counts.
+    /// Sum of fat + protein grams logged via non-FPU, non-rescue carb
+    /// entries from window activation through now. FPU-derived rows
+    /// (isFPU == YES) are auto-generated late-carb-equivalent chunks,
+    /// NOT user macros — including them double-counts. Rescue entries
+    /// are excluded for the same reason as in sumCarbsSinceWindowOpen.
     private func sumFatProteinSinceWindowOpen(activatedAt: Date) -> Double {
         let ctx = CoreDataStack.shared.persistentContainer.viewContext
         var total: Double = 0
         ctx.performAndWait {
             let req = CarbEntryStored.fetchRequest()
             req.predicate = NSPredicate(
-                format: "date >= %@ AND isFPU == NO",
+                format: "date >= %@ AND isFPU == NO AND (isRescueCarbs == NO OR isRescueCarbs == nil)",
                 activatedAt as NSDate
             )
             let rows = (try? ctx.fetch(req)) ?? []

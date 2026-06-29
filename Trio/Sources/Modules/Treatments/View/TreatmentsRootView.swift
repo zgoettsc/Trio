@@ -21,6 +21,7 @@ extension Treatments {
 
         @State private var showPresetSheet = false
         @State private var showSavedMealSheet = false
+        @State private var showRescueSheet = false
         @State private var autofocus: Bool = true
         @State private var calculatorDetent = PresentationDetent.large
         @State private var pushed: Bool = false
@@ -612,6 +613,17 @@ extension Treatments {
                         }
                     })
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: {
+                        showRescueSheet = true
+                    }, label: {
+                        HStack {
+                            Text("Rescue")
+                            Image(systemName: "shield.fill")
+                        }
+                    })
+                    .tint(.red)
+                }
             })
             .onAppear {
                 configureView {
@@ -645,6 +657,9 @@ extension Treatments {
                     state.selectSavedMeal(meal)
                     handleDebouncedInput()
                 }
+            }
+            .sheet(isPresented: $showRescueSheet) {
+                RescueCarbsSheet()
             }
             .alert("Error while processing Treatment", isPresented: $state.showDeterminationFailureAlert) {
                 Button("OK", role: .cancel) {

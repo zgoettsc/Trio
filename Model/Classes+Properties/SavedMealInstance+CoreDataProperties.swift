@@ -91,6 +91,13 @@ public extension SavedMealInstance {
     /// the BG response we observed, what CR/ISF would explain it? Reserved
     /// for meals where the user is certain — never auto-filled.
     @NSManaged var userVerifiedCarbsAmount: NSDecimalNumber?
+    /// User-verified fat (grams). Optional — nil means "didn't verify",
+    /// NOT zero. Captures fat composition for offline analysis even
+    /// though the current inverse calibrator only uses carbs.
+    @NSManaged var userVerifiedFatAmount: NSDecimalNumber?
+    /// User-verified protein (grams). Optional — nil means "didn't verify",
+    /// NOT zero. Same role as fat above.
+    @NSManaged var userVerifiedProteinAmount: NSDecimalNumber?
     /// Timestamp the user marked this instance verified. Lets analytics
     /// track when calibration data accumulated and aging out old reads.
     @NSManaged var verifiedAt: Date?

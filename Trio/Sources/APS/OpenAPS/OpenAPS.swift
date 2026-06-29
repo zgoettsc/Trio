@@ -183,10 +183,14 @@ final class OpenAPS {
     }
 
     private func fetchAndProcessCarbs(additionalCarbs: Decimal? = nil, carbsDate: Date? = nil) async throws -> String {
+        // Rescue-tagged carb entries (isRescueCarbs == YES) are FILTERED
+        // out here so they never reach oref's meal.json. They're still
+        // in CoreData for telemetry / verify-math / history; we just
+        // hide them from the dosing model. See v3 spec §5.
         let results = try await CoreDataStack.shared.fetchEntitiesAsync(
             ofType: CarbEntryStored.self,
             onContext: context,
-            predicate: NSPredicate.predicateForOneDayAgo,
+            predicate: NSPredicate.predicateForOneDayAgoExcludingRescue,
             key: "date",
             ascending: false
         )

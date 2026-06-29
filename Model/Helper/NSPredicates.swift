@@ -71,6 +71,17 @@ extension NSPredicate {
         return NSPredicate(format: "date >= %@ AND carbs > 0", date as NSDate)
     }
 
+    /// CarbEntryStored within the last 24h that should flow into oref's
+    /// meal.json. EXCLUDES rescue-tagged entries (carbs logged to treat a
+    /// low) — including those would cause the loop to dose against the
+    /// very carbs the user ate to recover, creating the low → eat-juice
+    /// → dose → low-again cycle. Rescue entries still live in CoreData
+    /// for telemetry and analytics, just hidden from the dosing pipeline.
+    static var predicateForOneDayAgoExcludingRescue: NSPredicate {
+        let date = Date.oneDayAgo
+        return NSPredicate(format: "date >= %@ AND (isRescueCarbs == NO OR isRescueCarbs == nil)", date as NSDate)
+    }
+
     static var predicateForOneHourAgo: NSPredicate {
         let date = Date.oneHourAgo
         return NSPredicate(format: "date >= %@", date as NSDate)

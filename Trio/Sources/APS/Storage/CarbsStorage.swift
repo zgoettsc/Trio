@@ -352,6 +352,8 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
             newItem.isUploadedToNS = areFetchedFromRemote ? true : false
             newItem.isUploadedToHealth = false
             newItem.isUploadedToTidepool = false
+            newItem.isRescueCarbs = entry.isRescueCarbs ?? false
+            newItem.rescuePresetName = entry.rescuePresetName
 
             if entry.fat != nil, entry.protein != nil, let fpuId = entry.fpuID {
                 newItem.fpuID = UUID(uuidString: fpuId)
