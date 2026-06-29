@@ -323,7 +323,173 @@ FP meals.
 
 ---
 
-## 4. Open v3 items (not built)
+## 4. Real-time phantom COB auto-injector (SHIPPED — DEFAULT OFF — commit pending)
+
+**Status: EXPERIMENTAL.** Default OFF. Flipping ON requires typing
+`ENABLE` in an in-app confirmation sheet. This is a real safety
+surface: when active, the loop doses real insulin based on inferred
+carb arrival that nobody explicitly told it about.
+
+### Why
+
+The quick-action meal mode is meant to be a flag — "I'm eating, deal
+with it" — without forcing the user to enter macros. Current
+behavior on a no-carbs-logged window: classifier upgrades, SMB
+ratio boost fires, but oref's eventualBG model has no COB anchor,
+so it stays conservative on dosing. Observed today's lunch
+(2026-06-28 17:44, BG 120→174, only 4.15U of SMBs over 90 min for
+what was clearly a ~75g meal). Loop wasn't failing; it was correctly
+being cautious without a meal signal in its model.
+
+### Mental model
+
+Each loop pass, infer how many carbs BG behavior says have arrived
+since window open. Subtract carbs already in the model
+(logged + previously-injected phantom). The remainder is the unmodeled
+arrival — inject it. oref's mealCOB now reflects the inferred meal
+and doses for the arrival without the user having to type anything.
+
+### Math
+
+```
+implied_so_far = max(0, current_bg - bg_at_activation) × CR/ISF
+                 + insulin_since_window × CR
+already_modeled = logged_carbs + previously_injected_phantom
+unmodeled = implied_so_far - already_modeled
+inject_this_loop = clamp(unmodeled × (1 - damping), 0, per_loop_cap)
+new_cumulative = min(prior_injected + inject_this_loop, per_window_cap)
+```
+
+Same forward-estimator identity as the post-hoc CarbsEstimator and
+the live-carbs notification — repurposed to drive phantom COB
+instead of a banner.
+
+### Safety gates (all must hold to inject this loop)
+
+| Gate | Why |
+|---|---|
+| Master switch on | User has explicitly opted in via the typed confirmation |
+| Meal window active | No injection outside an active window |
+| Classifier ≥ Medium | BG pattern confirms a meal, not drift / noise |
+| `shortAvgDelta > 0` | Only inject while BG is actively rising — never inject for carbs that aren't actively arriving. Central safety; protects against post-peak over-stacking and sensor-noise creep |
+| Per-loop new phantom > 0.1g | Sub-noise sized increments don't fire |
+| Cumulative < per-window cap | Bounds runaway accumulation |
+
+When `shortAvgDelta ≤ 0` or other gates fail, we simply **don't add
+more**. We never **withdraw** previously-injected phantom — withdrawal
+would cause a sudden oref behavior change (sees big drop in COB, halts
+dosing aggressively) and risks over-correction. Let oref's natural
+COB decay handle the wind-down.
+
+### Damping
+
+`mealWindowAutoPhantomCOBDampingFactor` (default 0.5) scales the
+per-loop new phantom by `(1 - damping)`. Smooths the closed-loop
+feedback so a single noisy sample can't push us to the per-loop cap.
+
+### Caps
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `mealWindowAutoPhantomCOBMaxGramsPerLoop` | 8g | Per 5-min loop — caps single-sample dominance |
+| `mealWindowAutoPhantomCOBMaxGramsPerWindow` | 200g | Per-window total — bounds runaway accumulation. Covers any realistic single meal |
+
+### Per-window state
+
+`mealWindowAutoPhantomCOBInjectedGrams` (settings field) holds the
+running cumulative. Reset to 0 on all window-close paths
+(user cancel, natural expiry, behavior-based exit) and on detection
+of a new window-id by the per-loop function.
+
+### oref integration
+
+New `TrioCustomOrefVariables.mealWindowAutoPhantomCOBLevel` field
+carries the current cumulative to determine-basal.js. JS reads it as:
+
+```js
+const mwAutoPhantomLevel = trio_custom_variables.mealWindowAutoPhantomCOBLevel || 0;
+if (mealWindowActive && mealWindowMinutesRemaining > 0 && mwAutoPhantomLevel > 0) {
+    meal_data.mealCOB = Math.max(meal_data.mealCOB || 0, mwAutoPhantomLevel);
+    meal_data.carbs   = Math.max(meal_data.carbs   || 0, mwAutoPhantomLevel);
+}
+```
+
+Independent of the legacy one-shot `mwPhantomCOB` path (per-saved-meal
+phantom at activation). Both can apply; MAX wins. The
+`rT.mealWindowApplied.phantomCOBGrams` telemetry field carries the
+combined effective level.
+
+### UI — ALL-CAPS confirmation
+
+Toggle row in Eating Mode Tuning → "Auto phantom COB (experimental)".
+Tapping it does NOT flip the setting; it presents a sheet:
+
+- Title: "Confirm enable"
+- Orange "Real insulin will be dosed based on inferred carbs" header
+- Educational paragraph about gates + risks
+- Text field requesting the literal word `ENABLE` (case-sensitive)
+- "Enable" button (destructive role) disabled until exact match
+- "Cancel" button
+
+Mistypes do nothing. Case-sensitive. Single accidental tap on the
+toggle is not enough — only the typed confirmation flips it.
+Reset-to-defaults intentionally does NOT touch this setting.
+
+### Telemetry
+
+Two new event kinds:
+
+| kind | when | payload |
+|---|---|---|
+| `mealWindowAutoPhantomCOBInjected` | Every loop pass that injects | injectedThisLoop, newCumulative, unmodeledImplied, impliedSoFar, loggedCarbs, priorInjected, bg, bgAtActivation, shortAvgDelta, iob, isf, cr, classification, minutesSinceOpen |
+| `mealWindowAutoPhantomCOBToggled` | User flips master switch on or off (paired with the typed confirmation on enable) | enabled |
+
+Per-loop injection events let us audit gate behavior offline. The
+toggle event marks the boundary so pre-enable vs post-enable behavior
+can be compared.
+
+### Interaction with the live-carbs notification
+
+The live-carbs notification ("your meal looks bigger") computes the
+same residual but surfaces it as a user prompt. With the auto-injector
+on, that suggestion is largely redundant — the system is already
+acting on the residual silently. For v1 they coexist: notification
+keeps firing (gated by FP/trend/loop-parked/retract guards) as an
+advisory, since seeing "+25g auto-injected" in real time may help
+the user develop trust in the auto path. If notification noise
+becomes a problem, suppress when auto-injector is on.
+
+### Files
+
+- `Trio/Sources/Models/TrioSettings.swift` (five new settings + Decodable)
+- `Trio/Sources/Models/TrioCustomOrefVariables.swift` (mealWindowAutoPhantomCOBLevel passthrough)
+- `Trio/Sources/APS/OpenAPS/OpenAPS.swift` (gate the level on enabled, populate from settings)
+- `trio-oref/lib/determine-basal/determine-basal.js` + bundle (consume the level)
+- `Trio/Sources/APS/APSManager.swift` (evaluateAutoPhantomCOB per-loop detector)
+- `Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryEvent.swift` (two new event kinds)
+- `Trio/Sources/Services/AlgorithmTelemetry/AlgorithmTelemetryManager.swift` (reset cumulative on window-close)
+- `Trio/Sources/Modules/Home/HomeStateModel.swift` (reset cumulative on user-cancel)
+- `Trio/Sources/Modules/AIInsightsConfig/View/EatingModeTuningView.swift` (toggle + AutoPhantomCOBConfirmSheet)
+
+### Verification path
+
+1. Build, enable telemetry, leave the toggle OFF for at least two
+   weeks of normal meal usage.
+2. Pull the daily events.jsonl and grep for `mealWindowAutoPhantomCOBInjected`
+   — should be **zero rows**.
+3. After baseline data accumulates: enable via the ALL-CAPS sheet.
+4. On the next quick-action meal without carbs logged, watch for
+   `mealWindowAutoPhantomCOBInjected` events in real-time telemetry.
+   Verify `shortAvgDelta` is positive in every payload, cumulative
+   monotonically increases, per-loop caps respected.
+5. Verify oref's mealCOB matches the injected level on the next
+   loop sample after each injection.
+6. Compare peak BG / time-above-180 for next 5 quick-action meals
+   vs pre-enable baseline.
+
+---
+
+## 5. Open v3 items (not built)
 
 ### 3a. Meal tags
 
@@ -358,7 +524,7 @@ values without the SMB-sum fallback path.
 
 ---
 
-## 5. Verification path
+## 6. Verification path (inverse calibration + estimator guards)
 
 1. Mark today's Sunday Breakfast as verified at the user's best guess
    (~95g). Check the per-instance Calibration section shows back-calc
