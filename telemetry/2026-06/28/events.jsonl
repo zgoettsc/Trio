@@ -117,3 +117,4 @@
 {"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-06-29T03:24:40.036Z"}
 {"kind":"smbDelivered","payload":{"bg":111,"floorActivated":false,"insulinReq":0.35,"iob":-0.087,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-06-29T03:37:35.096Z"}
 {"kind":"smbDelivered","payload":{"bg":119,"floorActivated":false,"insulinReq":0.19,"iob":0.146,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-06-29T03:42:38.279Z"}
+{"kind":"smbDelivered","payload":{"bg":125,"floorActivated":false,"insulinReq":0.16999999999999998,"iob":0.178,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-06-29T03:47:34.557Z"}
