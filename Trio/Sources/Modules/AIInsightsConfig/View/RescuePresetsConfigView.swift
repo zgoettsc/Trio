@@ -112,9 +112,13 @@ private struct RescuePresetEditSheet: View {
         self.onSave = onSave
         _name = State(initialValue: preset?.name ?? "")
         _emoji = State(initialValue: preset?.emoji ?? "")
-        _carbsText = State(initialValue: preset.map { format($0.carbs) } ?? "")
-        _fatText = State(initialValue: preset?.fat.map(format) ?? "")
-        _proteinText = State(initialValue: preset?.protein.map(format) ?? "")
+        // Disambiguate from the instance method of the same name —
+        // calling `format(...)` here would resolve to self.format(...)
+        // which the compiler rejects because stored properties aren't
+        // initialized yet.
+        _carbsText = State(initialValue: preset.map { Self.format($0.carbs) } ?? "")
+        _fatText = State(initialValue: preset?.fat.map(Self.format) ?? "")
+        _proteinText = State(initialValue: preset?.protein.map(Self.format) ?? "")
         _notes = State(initialValue: preset?.notes ?? "")
     }
 
