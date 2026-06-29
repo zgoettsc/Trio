@@ -77,35 +77,47 @@ struct RescueCarbsSheet: View {
             }
             .listRowBackground(Color.chart)
 
-            Section(header: Text("Quick picks")) {
-                ForEach(presets) { preset in
-                    Button {
-                        select(preset: preset)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Text(preset.emoji ?? "🍬").font(.title2)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(preset.name).foregroundStyle(.primary)
-                                HStack(spacing: 6) {
-                                    Text("\(format(preset.carbs)) g")
-                                    if let f = preset.fat { Text("· \(format(f))f").foregroundStyle(.secondary) }
-                                    if let p = preset.protein { Text("· \(format(p))p").foregroundStyle(.secondary) }
+            if presets.isEmpty {
+                Section(
+                    header: Text("No presets yet"),
+                    footer: Text("Add your own rescue items (juice box, glucose tabs, granola bar, etc.) in Settings → AI Insights → Rescue Presets. Once added, they'll show here for one-tap logging.")
+                ) {
+                    Label("Use the Custom path below to log this time", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.chart)
+            } else {
+                Section(header: Text("Quick picks")) {
+                    ForEach(presets) { preset in
+                        Button {
+                            select(preset: preset)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text(preset.emoji ?? "🍬").font(.title2)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(preset.name).foregroundStyle(.primary)
+                                    HStack(spacing: 6) {
+                                        Text("\(format(preset.carbs)) g")
+                                        if let f = preset.fat { Text("· \(format(f))f").foregroundStyle(.secondary) }
+                                        if let p = preset.protein { Text("· \(format(p))p").foregroundStyle(.secondary) }
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    if let notes = preset.notes {
+                                        Text(notes)
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                            .lineLimit(2)
+                                    }
                                 }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                if let notes = preset.notes {
-                                    Text(notes)
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                        .lineLimit(2)
-                                }
+                                Spacer()
                             }
-                            Spacer()
                         }
                     }
                 }
+                .listRowBackground(Color.chart)
             }
-            .listRowBackground(Color.chart)
 
             Section(header: Text("Custom")) {
                 Button {

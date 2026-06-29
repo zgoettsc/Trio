@@ -221,12 +221,12 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// opens; left as last value at window close (telemetry/audit).
     var mealWindowAutoPhantomCOBInjectedGrams: Decimal = 0
 
-    /// User-customizable list of rescue-carbs presets shown in the
-    /// Treatments → Rescue picker. Defaults to a curated starter list
-    /// (see RescuePreset.defaults). Users can add, remove, reorder, or
-    /// edit. Each preset stores name + macros so per-item BG recovery
-    /// behavior can be analyzed (granola bar vs jelly beans, etc.).
-    var rescuePresets: [RescuePreset] = RescuePreset.defaults
+    /// User-owned list of rescue-carbs presets shown in the
+    /// Treatments → Rescue picker. **Starts empty** — the user seeds
+    /// and maintains the list themselves via the settings UI. Each
+    /// preset stores name + macros so per-item BG recovery behavior
+    /// can be analyzed downstream (granola bar vs jelly beans, etc.).
+    var rescuePresets: [RescuePreset] = []
 
     /// Include Garmin context (sleep, HR, HRV, stress, body battery,
     /// recent activity) in telemetry exports. Default ON. Disabling

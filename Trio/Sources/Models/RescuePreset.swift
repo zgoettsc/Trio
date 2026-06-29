@@ -43,59 +43,12 @@ struct RescuePreset: Codable, Equatable, Identifiable {
         self.notes = notes
     }
 
-    /// Curated default list shipped with the app. Covers the common
-    /// rescue items most T1D users keep on hand. Users can edit / add
-    /// to this in settings; the defaults are just a starting point.
-    static let defaults: [RescuePreset] = [
-        RescuePreset(
-            name: "Juice box (4 oz)", carbs: 15, fat: 0, protein: 0,
-            emoji: "🧃",
-            notes: "Fast onset, ~15-20 min absorption. Classic first-line rescue."
-        ),
-        RescuePreset(
-            name: "Glucose tabs (×4)", carbs: 16, fat: 0, protein: 0,
-            emoji: "💊",
-            notes: "Predictable absorption, no fat/protein lag."
-        ),
-        RescuePreset(
-            name: "Glucose tabs (×3)", carbs: 12, fat: 0, protein: 0,
-            emoji: "💊",
-            notes: "Mild rescue when only slightly low."
-        ),
-        RescuePreset(
-            name: "Skittles (small handful)", carbs: 15, fat: 0, protein: 0,
-            emoji: "🍬",
-            notes: "Fast sugar; some users find these absorb quicker than tabs."
-        ),
-        RescuePreset(
-            name: "Jelly beans (~10)", carbs: 15, fat: 0, protein: 0,
-            emoji: "🫘",
-            notes: "Fast onset, can over-correct."
-        ),
-        RescuePreset(
-            name: "Granola bar", carbs: 22, fat: 6, protein: 3,
-            emoji: "🍫",
-            notes: "Slower, more durable recovery thanks to fat + protein. Worse for rapid rescue."
-        ),
-        RescuePreset(
-            name: "Banana (small)", carbs: 23, fat: 0, protein: 1,
-            emoji: "🍌",
-            notes: "Mid-speed; good for moderate lows that aren't crashing."
-        ),
-        RescuePreset(
-            name: "Honey (1 tbsp)", carbs: 17, fat: 0, protein: 0,
-            emoji: "🍯",
-            notes: "Very fast onset."
-        ),
-        RescuePreset(
-            name: "Apple juice (4 oz)", carbs: 15, fat: 0, protein: 0,
-            emoji: "🍎",
-            notes: "Fast onset, similar profile to juice box."
-        ),
-        RescuePreset(
-            name: "Smarties (1 roll)", carbs: 6, fat: 0, protein: 0,
-            emoji: "🍬",
-            notes: "Small precise dose for mild lows."
-        )
-    ]
+    /// Empty by design. The rescue-preset list is user-owned — the
+    /// user adds their own items via Settings (knowing their own
+    /// stash and what works for their physiology). Shipping curated
+    /// defaults would presume what the user keeps on hand and would
+    /// pollute the per-preset BG-recovery analytics with items that
+    /// never get used. Fresh installs see an empty list and the
+    /// RescueCarbsSheet's custom-entry path until presets are added.
+    static let defaults: [RescuePreset] = []
 }

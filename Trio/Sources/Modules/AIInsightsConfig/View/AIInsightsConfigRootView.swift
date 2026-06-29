@@ -195,6 +195,14 @@ extension AIInsightsConfig {
                         }
                     }
 
+                    NavigationLink(destination: RescuePresetsConfigView()) {
+                        HStack {
+                            Image(systemName: "shield.fill")
+                                .foregroundColor(.red)
+                            Text("Rescue Presets")
+                        }
+                    }
+
                     NavigationLink(destination: SavedMealsListView()) {
                         HStack {
                             Image(systemName: "bookmark.circle.fill")
