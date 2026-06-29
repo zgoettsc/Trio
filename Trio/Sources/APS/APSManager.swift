@@ -599,7 +599,20 @@ final class BaseAPSManager: APSManager, Injectable {
             let durationMinutes: Decimal = s.mealWindowCarbsConfirmed
                 ? s.mealWindowExtendedDurationMinutes
                 : s.mealWindowDurationMinutes
-            let cappedDuration = min(durationMinutes, 360)
+            // When behavior-based exit is on, the timer becomes a
+            // *safety cap*, not the primary close mechanism — the
+            // window's actual life is driven by signals
+            // (peak-passed-and-dropping OR loop quiet in range; see
+            // evaluateMealWindowExit). The display + the
+            // mealWindowActive gate below must reflect the bigger cap,
+            // otherwise the classifier / estimators / exit detector
+            // all stop firing at the old 90/240 mark even though the
+            // window is still meant to be running. Mirrors the cap
+            // logic in AlgorithmTelemetryManager.auditExpiredMealWindow.
+            let hardCap: Decimal = s.mealWindowBehaviorBasedExitEnabled
+                ? s.mealWindowBehaviorExitMaxMinutes
+                : 360
+            let cappedDuration = min(durationMinutes, hardCap)
             return max(
                 0,
                 Double(truncating: cappedDuration as NSDecimalNumber) - now.timeIntervalSince(activatedAt) / 60
