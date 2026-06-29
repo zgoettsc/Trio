@@ -626,6 +626,39 @@ final class BaseAPSManager: APSManager, Injectable {
                 tempTargetTargetMgdL: nil, tempTargetDuration: nil, tempTargetMinutesRemaining: nil
             )
         let applied = determination?.mealWindowApplied
+
+        // Shadow-mode compute for the auto-phantom-COB injector. Runs
+        // every loop pass while a meal window is active, regardless of
+        // whether the user has enabled the live injector. Stashed in
+        // lastAutoPhantomShadow so the live evaluator (after sample
+        // logging) can reuse the result without re-computing.
+        let bgForShadow = determination?.bg.map { Double(truncating: $0 as NSNumber) }
+        let isfForShadow = determination?.isf.map { Double(truncating: $0 as NSNumber) }
+        let crForShadow = determination?.carbRatio.map { Double(truncating: $0 as NSNumber) }
+        let iobForShadow = determination?.iob.map { Double(truncating: $0 as NSNumber) }
+        let delta5mForShadow = determination?.minDelta.map { Double(truncating: $0 as NSNumber) }
+        let shortAvgForShadow: Double? = nil // Not available on Determination today; field reserved
+        let shadow: AutoPhantomComputation? = {
+            guard mealWindowActive,
+                  let windowId = s.mealWindowId,
+                  let activatedAt = s.mealWindowActivationDate,
+                  let bgAtActivation = s.mealClassifierActivationBG, bgAtActivation > 0
+            else { return nil }
+            return computeAutoPhantomShadow(
+                windowId: windowId,
+                activatedAt: activatedAt,
+                bgAtActivation: bgAtActivation,
+                bg: bgForShadow,
+                isf: isfForShadow,
+                cr: crForShadow,
+                iob: iobForShadow,
+                shortAvgDelta: shortAvgForShadow ?? delta5mForShadow,
+                classification: s.mealCurrentClassification,
+                settings: s
+            )
+        }()
+        lastAutoPhantomShadow = shadow
+
         let sample = AlgorithmTelemetryLoopSample(
             timestamp: now,
             windowId: s.mealWindowId,
@@ -683,7 +716,10 @@ final class BaseAPSManager: APSManager, Injectable {
                 openAPS.lastRawMealWindowAppliedSnippet,
                 as: MealWindowAppliedData.self
             ).1 : nil,
-            buildSchema: 14,
+            buildSchema: 15,
+            autoPhantomShadowGramsThisLoop: mealWindowActive ? (shadow?.gramsThisLoop ?? 0) : nil,
+            autoPhantomShadowCumulativeGrams: mealWindowActive ? (shadow?.cumulativeAfter ?? 0) : nil,
+            autoPhantomGateStatus: mealWindowActive ? (shadow?.gateStatus ?? "noContext") : nil,
             classification: mealWindowActive ? s.mealCurrentClassification.rawValue : nil,
             classifierPhase1Confirmed: mealWindowActive ? (s.mealClassifierPhase1ConfirmedAt != nil) : nil,
             classifierPhase2Confirmed: mealWindowActive ? (s.mealClassifierPhase2ConfirmedAt != nil) : nil,
@@ -780,10 +816,21 @@ final class BaseAPSManager: APSManager, Injectable {
         // the UI to flip it on. Multiple gates inside (rising-only,
         // classifier >= Medium, per-loop cap, per-window cap) — see
         // the function for full safety model.
+        // Shadow result is precomputed in the loop-sample builder for
+        // every meal-window pass (so toggle-off windows still log the
+        // would-have data); here we just persist + emit the triggered
+        // event when the master switch is on.
         if mealWindowActive && s.mealWindowAutoPhantomCOBEnabled {
-            evaluateAutoPhantomCOB(sample: sample, settings: s, at: now)
+            evaluateAutoPhantomCOB(sample: sample, settings: s, at: now, precomputed: lastAutoPhantomShadow)
         }
     }
+
+    /// Shadow result from the most recent computeAutoPhantomShadow call,
+    /// captured during loop-sample construction so the live injector
+    /// (evaluateAutoPhantomCOB) can reuse the math without re-running
+    /// the residual computation. Nil outside meal windows or when
+    /// inputs were insufficient.
+    private var lastAutoPhantomShadow: AutoPhantomComputation?
 
     /// Backing storage for live-estimator dedupe. Re-fires at most once per
     /// 30 min per window. (windowId, last fire time).
@@ -1185,6 +1232,103 @@ final class BaseAPSManager: APSManager, Injectable {
     /// the model already knows from CoreData + settings rather than
     /// trusting potentially-stale in-memory smoothing state.
     private var autoPhantomActiveWindowId: String?
+    /// Shadow-mode cumulative: what the injector WOULD have totaled if
+    /// it were enabled. Lives independently of the actual injected
+    /// total (in settings) so we can collect "what would have happened"
+    /// data while the master switch is OFF — letting the user evaluate
+    /// the injector before flipping it on. Reset on window-id change.
+    private var autoPhantomShadowCumulative: Double = 0
+    private var autoPhantomShadowActiveWindowId: String?
+
+    /// Pure compute pass for the auto-phantom-COB math. Runs every loop
+    /// while a meal window is active, regardless of whether the user has
+    /// the master switch enabled. Returns the per-loop shadow result so
+    /// the loop sample can carry it for offline assessment.
+    ///
+    /// When the master switch IS enabled, the caller (evaluateAutoPhantomCOB)
+    /// uses the same result to actually persist the injection + emit the
+    /// triggered event.
+    struct AutoPhantomComputation {
+        let gramsThisLoop: Double      // what the math says to inject this loop
+        let cumulativeAfter: Double    // shadow running total after this loop
+        let gateStatus: String         // "wouldFire" / one of the suppression reasons
+        let impliedSoFar: Double       // total carbs the residual math implies
+        let unmodeled: Double          // implied - already_modeled
+    }
+
+    /// Primitive-typed compute so it can run BEFORE the loop sample is
+    /// built (the sample itself carries the shadow fields). Caller
+    /// stashes the result in `lastAutoPhantomShadow` for reuse by the
+    /// live evaluator after the sample is logged.
+    private func computeAutoPhantomShadow(
+        windowId: String,
+        activatedAt: Date,
+        bgAtActivation: Double,
+        bg: Double?,
+        isf: Double?,
+        cr: Double?,
+        iob: Double?,
+        shortAvgDelta: Double?,
+        classification: MealClassification,
+        settings s: TrioSettings
+    ) -> AutoPhantomComputation? {
+        guard let bg = bg, let isf = isf, isf > 0, let cr = cr, cr > 0 else { return nil }
+
+        // Reset shadow cumulative when window flips.
+        if autoPhantomShadowActiveWindowId != windowId {
+            autoPhantomShadowActiveWindowId = windowId
+            autoPhantomShadowCumulative = 0
+        }
+
+        let insulinSinceWindow = max(0, iob ?? 0)
+        let rise = max(0, bg - bgAtActivation)
+        let impliedSoFar = rise * cr / isf + insulinSinceWindow * cr
+        let loggedCarbs = sumCarbsSinceWindowOpen(activatedAt: activatedAt)
+        let alreadyModeled = loggedCarbs + autoPhantomShadowCumulative
+        let unmodeled = impliedSoFar - alreadyModeled
+
+        let perLoopCap = Double(truncating: s.mealWindowAutoPhantomCOBMaxGramsPerLoop as NSDecimalNumber)
+        let perWindowCap = Double(truncating: s.mealWindowAutoPhantomCOBMaxGramsPerWindow as NSDecimalNumber)
+        let damping = Double(truncating: s.mealWindowAutoPhantomCOBDampingFactor as NSDecimalNumber)
+
+        var gate: String = "wouldFire"
+        var grams: Double = 0
+
+        if classification.rank < MealClassification.medium.rank {
+            gate = "classifierBelowMedium"
+        } else if (shortAvgDelta ?? 0) <= 0 {
+            gate = "notRising"
+        } else if unmodeled <= 0 {
+            gate = "noResidual"
+        } else if autoPhantomShadowCumulative >= perWindowCap {
+            gate = "perWindowCap"
+        } else {
+            let damped = unmodeled * (1.0 - damping)
+            let proposed = min(damped, perLoopCap)
+            let cumulativeAfter = autoPhantomShadowCumulative + proposed
+            grams = cumulativeAfter > perWindowCap
+                ? max(0, perWindowCap - autoPhantomShadowCumulative)
+                : proposed
+            if grams < 0.1 {
+                gate = "noResidual"
+                grams = 0
+            } else if grams < proposed {
+                gate = "perWindowCap"
+            } else if damped >= perLoopCap {
+                gate = "perLoopCap"
+            }
+        }
+
+        autoPhantomShadowCumulative += grams
+
+        return AutoPhantomComputation(
+            gramsThisLoop: grams,
+            cumulativeAfter: autoPhantomShadowCumulative,
+            gateStatus: gate,
+            impliedSoFar: impliedSoFar,
+            unmodeled: unmodeled
+        )
+    }
 
     /// Real-time phantom COB auto-injector. Each loop, compute the
     /// carbs that BG behavior IMPLIES have arrived (forward estimator
@@ -1213,16 +1357,15 @@ final class BaseAPSManager: APSManager, Injectable {
     private func evaluateAutoPhantomCOB(
         sample: AlgorithmTelemetryLoopSample,
         settings s: TrioSettings,
-        at now: Date
+        at now: Date,
+        precomputed: AutoPhantomComputation?
     ) {
+        // Reset settings-side cumulative on window flip so it doesn't
+        // leak across windows when the toggle was off then on. The
+        // shadow accumulator is reset inside computeAutoPhantomShadow.
         guard let windowId = s.mealWindowId,
-              let activatedAt = s.mealWindowActivationDate,
-              let bg = sample.bg,
-              let isf = sample.isf, isf > 0,
-              let cr = sample.carbRatio, cr > 0
+              let activatedAt = s.mealWindowActivationDate
         else { return }
-
-        // Reset on new window
         if autoPhantomActiveWindowId != windowId {
             autoPhantomActiveWindowId = windowId
             var ss = s
@@ -1230,57 +1373,26 @@ final class BaseAPSManager: APSManager, Injectable {
             settingsManager.settings = ss
         }
 
-        // Gate: classifier must be at least Medium. Simple = "no real
-        // meal signal yet" — don't dose for what could still be drift.
-        if s.mealCurrentClassification.rank < MealClassification.medium.rank { return }
+        // Reuse the shadow math result. If the shadow couldn't compute
+        // (missing context), nothing to do here.
+        guard let result = precomputed else { return }
+        guard result.gramsThisLoop > 0, result.gateStatus == "wouldFire" || result.gateStatus == "perLoopCap" || result.gateStatus == "perWindowCap" else {
+            return
+        }
 
-        // Gate: rising trend only.
-        let shortAvg = sample.shortAvgDelta ?? 0
-        if shortAvg <= 0 { return }
-
-        // Need activation BG for the residual math.
-        guard let bgAtActivation = s.mealClassifierActivationBG, bgAtActivation > 0 else { return }
-
-        // Total insulin acted on this meal — approximate via current IOB
-        // delta from window open. Same approximation the live carbs
-        // estimator uses; biases toward under-estimating insulin
-        // (because some pre-window IOB has cleared), which biases
-        // toward under-injecting phantom COB — conservative direction.
-        let insulinSinceWindow = max(0, sample.iob ?? 0)
-
-        // Forward-estimator math: total carbs the BG response implies
-        // have arrived so far.
-        let rise = max(0, bg - bgAtActivation)
-        let impliedSoFar = rise * cr / isf + insulinSinceWindow * cr
-
-        // What the model already accounts for: user-logged carbs
-        // (from CarbEntryStored) + previously-injected phantom.
-        let loggedCarbs = sumCarbsSinceWindowOpen(activatedAt: activatedAt)
         let priorInjected = Double(truncating: s.mealWindowAutoPhantomCOBInjectedGrams as NSDecimalNumber)
-        let alreadyModeled = loggedCarbs + priorInjected
-        let unmodeled = impliedSoFar - alreadyModeled
-        guard unmodeled > 0 else { return }
-
-        let perLoopCap = Double(truncating: s.mealWindowAutoPhantomCOBMaxGramsPerLoop as NSDecimalNumber)
         let perWindowCap = Double(truncating: s.mealWindowAutoPhantomCOBMaxGramsPerWindow as NSDecimalNumber)
-
-        // Damping — smooth the per-loop response so sensor noise can't
-        // push us to the full per-loop cap on a single spike.
-        let damping = Double(truncating: s.mealWindowAutoPhantomCOBDampingFactor as NSDecimalNumber)
-        let dampedResponse = unmodeled * (1.0 - damping)
-
-        var inject = min(dampedResponse, perLoopCap)
-        // Enforce per-window cap
-        let cumulativeAfter = priorInjected + inject
-        if cumulativeAfter > perWindowCap {
+        // Mirror the cap math against the ACTUAL (settings-side)
+        // cumulative — the shadow cumulative may differ if the toggle
+        // was off for some loops mid-window. Use the settings-side
+        // value as the source of truth for live injection.
+        var inject = result.gramsThisLoop
+        if priorInjected + inject > perWindowCap {
             inject = max(0, perWindowCap - priorInjected)
         }
-        guard inject > 0.1 else { return } // sub-0.1g is noise
+        guard inject > 0.1 else { return }
 
         let newCumulative = priorInjected + inject
-
-        // Persist new cumulative level — oref reads it via
-        // TrioCustomOrefVariables.mealWindowAutoPhantomCOBLevel
         var ss = s
         ss.mealWindowAutoPhantomCOBInjectedGrams = Decimal(newCumulative)
         settingsManager.settings = ss
@@ -1292,16 +1404,14 @@ final class BaseAPSManager: APSManager, Injectable {
             payload: [
                 "injectedThisLoop": .double(inject),
                 "newCumulative": .double(newCumulative),
-                "unmodeledImplied": .double(unmodeled),
-                "impliedSoFar": .double(impliedSoFar),
-                "loggedCarbs": .double(loggedCarbs),
+                "unmodeledImplied": .double(result.unmodeled),
+                "impliedSoFar": .double(result.impliedSoFar),
                 "priorInjected": .double(priorInjected),
-                "bg": .double(bg),
-                "bgAtActivation": .double(bgAtActivation),
-                "shortAvgDelta": .double(shortAvg),
-                "iob": .double(insulinSinceWindow),
-                "isf": .double(isf),
-                "cr": .double(cr),
+                "bg": .double(sample.bg ?? 0),
+                "shortAvgDelta": .double(sample.shortAvgDelta ?? 0),
+                "iob": .double(sample.iob ?? 0),
+                "isf": .double(sample.isf ?? 0),
+                "cr": .double(sample.carbRatio ?? 0),
                 "classification": .string(s.mealCurrentClassification.rawValue),
                 "minutesSinceOpen": .double(now.timeIntervalSince(activatedAt) / 60)
             ]

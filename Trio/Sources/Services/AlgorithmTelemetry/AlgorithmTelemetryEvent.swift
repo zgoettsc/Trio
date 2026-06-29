@@ -124,6 +124,28 @@ struct AlgorithmTelemetryLoopSample: Codable {
     /// Diagnostic — schema marker so we can prove which build produced this row.
     let buildSchema: Int?
 
+    /// Real-time phantom-COB auto-injector telemetry. v3. Three fields,
+    /// populated EVERY loop pass while a meal window is active —
+    /// regardless of whether the user has actually enabled the injector.
+    /// This is the "shadow mode" data: lets us measure for two weeks
+    /// what the injector WOULD have done with the toggle off, then
+    /// flip the toggle on with eyes open. All nil outside meal windows.
+    ///
+    /// - `autoPhantomShadowGramsThisLoop`: what the math would inject
+    ///   this loop pass after all gates and caps. 0 when a gate blocked
+    ///   firing (rising / classifier / cap) but the math still ran.
+    /// - `autoPhantomShadowCumulativeGrams`: running shadow total since
+    ///   window open. Compares directly against the true logged carb
+    ///   total at window close.
+    /// - `autoPhantomGateStatus`: which gate was the binding constraint
+    ///   this loop — "wouldFire" / "notRising" / "classifierBelowMedium"
+    ///   / "perWindowCap" / "perLoopCap" / "noResidual" / "noContext"
+    ///   / "disabled". Lets analysis count how often each gate fires
+    ///   and tune thresholds.
+    let autoPhantomShadowGramsThisLoop: Double?
+    let autoPhantomShadowCumulativeGrams: Double?
+    let autoPhantomGateStatus: String?
+
     /// Live classifier state at this loop pass — string form of MealClassification.
     /// Nil when window inactive or classifier disabled. Set even when no upgrade
     /// has occurred (carries the current value of mealCurrentClassification).

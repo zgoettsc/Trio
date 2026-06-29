@@ -435,18 +435,32 @@ Mistypes do nothing. Case-sensitive. Single accidental tap on the
 toggle is not enough — only the typed confirmation flips it.
 Reset-to-defaults intentionally does NOT touch this setting.
 
-### Telemetry
+### Telemetry — and shadow mode
 
-Two new event kinds:
+**Three loop-sample fields populate every meal-window pass regardless
+of the master switch**, so two weeks of toggle-OFF data tells you
+exactly what the injector would have done before you turn it on.
+Schema v15:
+
+| field | populated | what it carries |
+|---|---|---|
+| `autoPhantomShadowGramsThisLoop` | every meal-window pass | what the math says to inject this loop after gates + caps. 0 when a gate blocked |
+| `autoPhantomShadowCumulativeGrams` | every meal-window pass | running shadow total since window open. In-memory accumulator; resets on window flip or app restart |
+| `autoPhantomGateStatus` | every meal-window pass | `wouldFire` / `notRising` / `classifierBelowMedium` / `perWindowCap` / `perLoopCap` / `noResidual` / `noContext` |
+
+These three are the **assessment surface**. See `ANALYSIS_METHODS.md
+§Analysis 10` on the telemetry branch for the two-week baseline recipe
+and the decision criteria for flipping the toggle on.
+
+Plus two real-time events (only fire when switch is on):
 
 | kind | when | payload |
 |---|---|---|
-| `mealWindowAutoPhantomCOBInjected` | Every loop pass that injects | injectedThisLoop, newCumulative, unmodeledImplied, impliedSoFar, loggedCarbs, priorInjected, bg, bgAtActivation, shortAvgDelta, iob, isf, cr, classification, minutesSinceOpen |
+| `mealWindowAutoPhantomCOBInjected` | Every loop pass that actually injects | injectedThisLoop, newCumulative, unmodeledImplied, impliedSoFar, priorInjected, bg, shortAvgDelta, iob, isf, cr, classification, minutesSinceOpen |
 | `mealWindowAutoPhantomCOBToggled` | User flips master switch on or off (paired with the typed confirmation on enable) | enabled |
 
-Per-loop injection events let us audit gate behavior offline. The
-toggle event marks the boundary so pre-enable vs post-enable behavior
-can be compared.
+Per-loop injection events let us audit live behavior. The
+toggle event marks the pre/post boundary for baseline analysis.
 
 ### Interaction with the live-carbs notification
 
@@ -475,9 +489,14 @@ becomes a problem, suppress when auto-injector is on.
 
 1. Build, enable telemetry, leave the toggle OFF for at least two
    weeks of normal meal usage.
-2. Pull the daily events.jsonl and grep for `mealWindowAutoPhantomCOBInjected`
-   — should be **zero rows**.
-3. After baseline data accumulates: enable via the ALL-CAPS sheet.
+2. Pull `loop.jsonl` for the period. Every meal-window pass should
+   carry the three shadow fields. Aggregate per `windowId` and apply
+   the decision criteria in `ANALYSIS_METHODS.md §Analysis 10`:
+   ≥10 windows with shadow cumulative > 20g, healthy gate
+   distribution, no run-away cumulatives > 150g.
+3. Grep `events.jsonl` for `mealWindowAutoPhantomCOBInjected` —
+   should be **zero rows** during baseline (master switch off).
+4. After baseline passes the criteria: enable via the ALL-CAPS sheet.
 4. On the next quick-action meal without carbs logged, watch for
    `mealWindowAutoPhantomCOBInjected` events in real-time telemetry.
    Verify `shortAvgDelta` is positive in every payload, cumulative
