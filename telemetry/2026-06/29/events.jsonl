@@ -22,3 +22,4 @@
 {"kind":"mealWindowCancelled","payload":{"minutesSinceActivation":0.023742266496022544,"source":"homeBanner"},"timestamp":"2026-06-29T11:32:59.073Z","windowId":"4BF574C7-A9EA-4735-96F6-2B1B8842D598"}
 {"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-06-29T11:33:01.856Z"}
 {"kind":"smbDelivered","payload":{"bg":122,"floorActivated":false,"insulinReq":0.2,"iob":0.079,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-06-29T11:42:34.768Z"}
+{"kind":"smbDelivered","payload":{"bg":126,"floorActivated":false,"insulinReq":0.1,"iob":-0.040999999999999995,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-06-29T12:17:34.641Z"}
