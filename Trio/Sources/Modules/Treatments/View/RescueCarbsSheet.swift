@@ -131,6 +131,16 @@ struct RescueCarbsSheet: View {
                 }
             }
             .listRowBackground(Color.chart)
+
+            // Always-visible management entry — add / edit / delete
+            // presets without leaving the rescue flow. Pushes into the
+            // same nav stack; user comes back to pick after editing.
+            Section {
+                NavigationLink(destination: RescuePresetsConfigView()) {
+                    Label("Manage rescue presets", systemImage: "slider.horizontal.3")
+                }
+            }
+            .listRowBackground(Color.chart)
         }
     }
 

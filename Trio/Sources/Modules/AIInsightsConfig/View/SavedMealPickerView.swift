@@ -62,12 +62,23 @@ struct SavedMealPickerView: View {
                     .listRowBackground(Color.chart)
 
                     Section(
-                        footer: Text("Picking a meal fills carbs/fat/protein with its defaults and seeds the eating-mode window with the meal's classification when you submit. Edit defaults in Settings → Saved Meals.")
+                        footer: Text("Picking a meal fills carbs/fat/protein with its defaults and seeds the eating-mode window with the meal's classification when you submit.")
                     ) {
                         EmptyView()
                     }
                     .listRowBackground(Color.clear)
                 }
+
+                // Always show management entry — add / edit / delete
+                // happens in SavedMealsListView. Pushes into the same
+                // nav stack so the user can manage and come back to
+                // pick without re-opening the sheet.
+                Section {
+                    NavigationLink(destination: SavedMealsListView()) {
+                        Label("Manage saved meals", systemImage: "slider.horizontal.3")
+                    }
+                }
+                .listRowBackground(Color.chart)
             }
             .scrollContentBackground(.hidden)
             .background(appState.trioBackgroundColor(for: colorScheme))
