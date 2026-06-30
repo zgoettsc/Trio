@@ -104,13 +104,25 @@ struct TagsAndCategoriesConfigView: View {
         ForEach(tagsInCategory) { tag in
             tagRowButton(tag)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
+                    // NO `role: .destructive`. With role .destructive, iOS
+                    // pre-animates the row's removal the instant the user
+                    // taps the swipe button — treating it as a real delete
+                    // action — and then our confirmation dialog appears
+                    // AFTER the visual delete has already happened. When
+                    // the user confirms, vm.deleteTag mutates the data,
+                    // and UIKit's internal table model (which thought the
+                    // row was already gone) no longer matches the new
+                    // diff. That mismatch is the crash. Plain Button with
+                    // a red tint gets the same visual without the
+                    // auto-delete behavior.
+                    Button {
                         pendingTagDeletion = tag
                         pendingTagDeletionMealCount = vm.mealsUsingTag(tag.id)
                         showTagDeleteConfirm = true
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .tint(.red)
                 }
         }
 
