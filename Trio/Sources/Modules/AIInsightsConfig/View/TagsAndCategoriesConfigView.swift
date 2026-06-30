@@ -29,9 +29,6 @@ struct TagsAndCategoriesConfigView: View {
             .background(appState.trioBackgroundColor(for: colorScheme))
             .navigationTitle("Tags & Categories")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { EditButton() }
-            }
             .modifier(SheetsModifier(
                 vm: vm,
                 addingTagInCategory: $addingTagInCategory,
@@ -63,11 +60,13 @@ struct TagsAndCategoriesConfigView: View {
         ) {
             ForEach(vm.categories) { category in
                 categoryRow(category)
-            }
-            .onDelete { offsets in
-                for off in offsets {
-                    pendingCategoryDeletion = vm.categories[off]
-                }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            pendingCategoryDeletion = category
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
             }
 
             Button {
@@ -96,11 +95,13 @@ struct TagsAndCategoriesConfigView: View {
         } else {
             ForEach(tagsInCategory) { tag in
                 tagRowButton(tag)
-            }
-            .onDelete { offsets in
-                for off in offsets {
-                    pendingTagDeletion = tagsInCategory[off]
-                }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            pendingTagDeletion = tag
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
             }
         }
 
@@ -169,10 +170,12 @@ struct TagsAndCategoriesConfigView: View {
                             Image(systemName: "chevron.right").foregroundStyle(.tertiary).font(.caption)
                         }
                     }
-                }
-                .onDelete { offsets in
-                    for off in offsets {
-                        pendingTagDeletion = uncategorized[off]
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            pendingTagDeletion = tag
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
                     }
                 }
             }
