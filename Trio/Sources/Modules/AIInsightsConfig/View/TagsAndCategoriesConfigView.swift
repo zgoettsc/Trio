@@ -21,7 +21,11 @@ struct TagsAndCategoriesConfigView: View {
     @State private var editingCategory: TagCategory?
     @State private var showAddCategory = false
     @State private var pendingTagDeletion: MealTag?
+    @State private var pendingTagDeletionMealCount: Int = 0
     @State private var pendingCategoryDeletion: TagCategory?
+    @State private var pendingCategoryDeletionTagCount: Int = 0
+    @State private var showTagDeleteConfirm = false
+    @State private var showCategoryDeleteConfirm = false
 
     var body: some View {
         formContent
@@ -39,7 +43,11 @@ struct TagsAndCategoriesConfigView: View {
             .modifier(ConfirmDialogsModifier(
                 vm: vm,
                 pendingTagDeletion: $pendingTagDeletion,
-                pendingCategoryDeletion: $pendingCategoryDeletion
+                pendingTagDeletionMealCount: pendingTagDeletionMealCount,
+                pendingCategoryDeletion: $pendingCategoryDeletion,
+                pendingCategoryDeletionTagCount: pendingCategoryDeletionTagCount,
+                showTagDeleteConfirm: $showTagDeleteConfirm,
+                showCategoryDeleteConfirm: $showCategoryDeleteConfirm
             ))
             .onAppear { vm.reload() }
     }
@@ -63,6 +71,8 @@ struct TagsAndCategoriesConfigView: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
                             pendingCategoryDeletion = category
+                            pendingCategoryDeletionTagCount = vm.tags(in: category).count
+                            showCategoryDeleteConfirm = true
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -98,6 +108,8 @@ struct TagsAndCategoriesConfigView: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
                             pendingTagDeletion = tag
+                            pendingTagDeletionMealCount = vm.mealsUsingTag(tag.id)
+                            showTagDeleteConfirm = true
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -173,6 +185,8 @@ struct TagsAndCategoriesConfigView: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
                             pendingTagDeletion = tag
+                            pendingTagDeletionMealCount = vm.mealsUsingTag(tag.id)
+                            showTagDeleteConfirm = true
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -231,76 +245,67 @@ private struct SheetsModifier: ViewModifier {
     }
 }
 
-/// Bundles the two confirmation-dialog modifiers off the main body.
+/// Confirmation-dialog wiring. Uses the simple Bool `isPresented` variant
+/// (NOT the `presenting:` variant) — a custom `Binding(get:set:)` reading
+/// an optional during view diffing was crashing on dismissal. Mirrors the
+/// stable pattern used in SavedMealDetailView.
 private struct ConfirmDialogsModifier: ViewModifier {
     @ObservedObject var vm: ViewModel
     @Binding var pendingTagDeletion: MealTag?
+    let pendingTagDeletionMealCount: Int
     @Binding var pendingCategoryDeletion: TagCategory?
+    let pendingCategoryDeletionTagCount: Int
+    @Binding var showTagDeleteConfirm: Bool
+    @Binding var showCategoryDeleteConfirm: Bool
 
     func body(content: Content) -> some View {
         content
             .confirmationDialog(
-                pendingTagDeletion.map { "Delete tag \"\($0.name)\"?" } ?? "",
-                isPresented: Binding(
-                    get: { pendingTagDeletion != nil },
-                    set: { if !$0 { pendingTagDeletion = nil } }
-                ),
-                titleVisibility: .visible,
-                presenting: pendingTagDeletion
-            ) { tag in
-                let usage = vm.mealsUsingTag(tag.id)
-                Button(
-                    usage > 0
-                        ? "Delete and remove from \(usage) meal\(usage == 1 ? "" : "s")"
-                        : "Delete",
-                    role: .destructive
-                ) {
-                    // Dismiss the dialog FIRST so SwiftUI tears down its
-                    // presenting state before the data mutation publishes.
-                    // Then perform the actual delete on the next runloop
-                    // tick — otherwise a state mutation inside the button
-                    // closure can crash SwiftUI's view update cycle.
-                    let toDelete = tag
-                    pendingTagDeletion = nil
-                    DispatchQueue.main.async {
-                        vm.deleteTag(toDelete)
+                pendingTagDeletion.map { "Delete tag \"\($0.name)\"?" } ?? "Delete tag?",
+                isPresented: $showTagDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                if let tag = pendingTagDeletion {
+                    Button(
+                        pendingTagDeletionMealCount > 0
+                            ? "Delete and remove from \(pendingTagDeletionMealCount) meal\(pendingTagDeletionMealCount == 1 ? "" : "s")"
+                            : "Delete",
+                        role: .destructive
+                    ) {
+                        let toDelete = tag
+                        DispatchQueue.main.async {
+                            vm.deleteTag(toDelete)
+                            pendingTagDeletion = nil
+                        }
                     }
                 }
-                Button("Cancel", role: .cancel) {
-                    pendingTagDeletion = nil
-                }
-            } message: { tag in
-                let usage = vm.mealsUsingTag(tag.id)
+                Button("Cancel", role: .cancel) {}
+            } message: {
                 Text(
-                    usage > 0
-                        ? "This tag is on \(usage) saved meal\(usage == 1 ? "" : "s"). Deleting it removes the tag from those meals."
+                    pendingTagDeletionMealCount > 0
+                        ? "This tag is on \(pendingTagDeletionMealCount) saved meal\(pendingTagDeletionMealCount == 1 ? "" : "s"). Deleting it removes the tag from those meals."
                         : "This tag is not currently assigned to any meal."
                 )
             }
             .confirmationDialog(
-                pendingCategoryDeletion.map { "Delete category \"\($0.name)\"?" } ?? "",
-                isPresented: Binding(
-                    get: { pendingCategoryDeletion != nil },
-                    set: { if !$0 { pendingCategoryDeletion = nil } }
-                ),
-                titleVisibility: .visible,
-                presenting: pendingCategoryDeletion
-            ) { category in
-                Button("Delete category", role: .destructive) {
-                    let toDelete = category
-                    pendingCategoryDeletion = nil
-                    DispatchQueue.main.async {
-                        vm.deleteCategory(toDelete)
+                pendingCategoryDeletion.map { "Delete category \"\($0.name)\"?" } ?? "Delete category?",
+                isPresented: $showCategoryDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                if let category = pendingCategoryDeletion {
+                    Button("Delete category", role: .destructive) {
+                        let toDelete = category
+                        DispatchQueue.main.async {
+                            vm.deleteCategory(toDelete)
+                            pendingCategoryDeletion = nil
+                        }
                     }
                 }
-                Button("Cancel", role: .cancel) {
-                    pendingCategoryDeletion = nil
-                }
-            } message: { category in
-                let count = vm.tags(in: category).count
+                Button("Cancel", role: .cancel) {}
+            } message: {
                 Text(
-                    count > 0
-                        ? "\(count) tag\(count == 1 ? "" : "s") currently in this category will lose this membership. They are NOT deleted — they remain in any other categories they belong to, or become Uncategorized."
+                    pendingCategoryDeletionTagCount > 0
+                        ? "\(pendingCategoryDeletionTagCount) tag\(pendingCategoryDeletionTagCount == 1 ? "" : "s") currently in this category will lose this membership. They are NOT deleted — they remain in any other categories they belong to, or become Uncategorized."
                         : "This category has no tags."
                 )
             }
@@ -556,17 +561,18 @@ private final class ViewModel: ObservableObject {
         return count
     }
 
+    /// Route the per-meal cleanup through SavedMealStorage so we share its
+    /// background context. An ad-hoc newTaskContext() here would create a
+    /// second writer for the same SavedMeal entities and race with any
+    /// concurrent updateMeal/createMeal call — historically the cause of
+    /// hard-to-diagnose Core Data crashes.
     private func removeTagFromAllMeals(id: UUID) {
-        let ctx = CoreDataStack.shared.newTaskContext()
-        ctx.perform {
-            let req = SavedMeal.fetchRequest()
-            let meals = (try? ctx.fetch(req)) ?? []
-            var changed = false
-            for m in meals where m.tagIDs.contains(id) {
-                m.tagIDs = m.tagIDs.filter { $0 != id }
-                changed = true
+        guard let storage = resolver.resolve(SavedMealStorage.self) else { return }
+        let allMeals = storage.allMeals()
+        for meal in allMeals where meal.tagIDs.contains(id) {
+            storage.updateMeal(meal) { writable in
+                writable.tagIDs = writable.tagIDs.filter { $0 != id }
             }
-            if changed { try? ctx.save() }
         }
     }
 }
