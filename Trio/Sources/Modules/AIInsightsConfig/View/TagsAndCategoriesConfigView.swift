@@ -91,21 +91,29 @@ struct TagsAndCategoriesConfigView: View {
     @ViewBuilder
     private func categoryContent(_ category: TagCategory) -> some View {
         let tagsInCategory = vm.tags(in: category)
+
+        // ForEach is ALWAYS present. Deleting the last tag inside a
+        // DisclosureGroup used to flip an if/else branch from ForEach to
+        // Text — @ViewBuilder turned that into _ConditionalContent, a
+        // whole-view-type replacement that collided with the just-removed
+        // row's swipeActions teardown and crashed. Keep the ForEach as
+        // the stable type; let it diff from 1 → 0 rows cleanly. Show the
+        // empty-state Text as a sibling, not as a branch swap.
+        ForEach(tagsInCategory) { tag in
+            tagRowButton(tag)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        pendingTagDeletion = tag
+                        pendingTagDeletionMealCount = vm.mealsUsingTag(tag.id)
+                        showTagDeleteConfirm = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+        }
+
         if tagsInCategory.isEmpty {
             Text("No tags yet").font(.caption).foregroundStyle(.secondary)
-        } else {
-            ForEach(tagsInCategory) { tag in
-                tagRowButton(tag)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            pendingTagDeletion = tag
-                            pendingTagDeletionMealCount = vm.mealsUsingTag(tag.id)
-                            showTagDeleteConfirm = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-            }
         }
 
         Button {
