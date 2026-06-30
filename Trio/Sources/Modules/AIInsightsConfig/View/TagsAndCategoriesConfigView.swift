@@ -22,10 +22,7 @@ struct TagsAndCategoriesConfigView: View {
     @State private var showAddCategory = false
     @State private var pendingTagDeletion: MealTag?
     @State private var pendingTagDeletionMealCount: Int = 0
-    @State private var pendingCategoryDeletion: TagCategory?
-    @State private var pendingCategoryDeletionTagCount: Int = 0
     @State private var showTagDeleteConfirm = false
-    @State private var showCategoryDeleteConfirm = false
 
     var body: some View {
         formContent
@@ -44,10 +41,7 @@ struct TagsAndCategoriesConfigView: View {
                 vm: vm,
                 pendingTagDeletion: $pendingTagDeletion,
                 pendingTagDeletionMealCount: pendingTagDeletionMealCount,
-                pendingCategoryDeletion: $pendingCategoryDeletion,
-                pendingCategoryDeletionTagCount: pendingCategoryDeletionTagCount,
-                showTagDeleteConfirm: $showTagDeleteConfirm,
-                showCategoryDeleteConfirm: $showCategoryDeleteConfirm
+                showTagDeleteConfirm: $showTagDeleteConfirm
             ))
             .onAppear { vm.reload() }
     }
@@ -66,17 +60,14 @@ struct TagsAndCategoriesConfigView: View {
             header: Text("Categories"),
             footer: Text("Tags belong to one or more categories. Renaming cascades through every tagged meal. Deleting a category doesn't delete its tags — they just lose that membership.")
         ) {
+            // Category rows DO NOT carry a .swipeActions trash. The
+            // DisclosureGroup propagates its row's swipeActions onto every
+            // child row inside the expanded content — so a tag row would
+            // render TWO identical trash buttons (one for tag delete, one
+            // for category delete) and one would crash the row layout on
+            // tap. Category deletion lives inside CategoryEditSheet.
             ForEach(vm.categories) { category in
                 categoryRow(category)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            pendingCategoryDeletion = category
-                            pendingCategoryDeletionTagCount = vm.tags(in: category).count
-                            showCategoryDeleteConfirm = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
             }
 
             Button {
@@ -233,9 +224,12 @@ private struct SheetsModifier: ViewModifier {
                 }
             }
             .sheet(item: $editingCategory) { category in
-                CategoryEditSheet(category: category) { updated in
-                    vm.updateCategory(updated)
-                }
+                CategoryEditSheet(
+                    category: category,
+                    tagsInCategoryCount: vm.tags(in: category).count,
+                    onSave: { updated in vm.updateCategory(updated) },
+                    onDelete: { toDelete in vm.deleteCategory(toDelete) }
+                )
             }
             .sheet(isPresented: $showAddCategory) {
                 CategoryEditSheet(category: nil) { newCategory in
@@ -253,10 +247,7 @@ private struct ConfirmDialogsModifier: ViewModifier {
     @ObservedObject var vm: ViewModel
     @Binding var pendingTagDeletion: MealTag?
     let pendingTagDeletionMealCount: Int
-    @Binding var pendingCategoryDeletion: TagCategory?
-    let pendingCategoryDeletionTagCount: Int
     @Binding var showTagDeleteConfirm: Bool
-    @Binding var showCategoryDeleteConfirm: Bool
 
     func body(content: Content) -> some View {
         content
@@ -285,28 +276,6 @@ private struct ConfirmDialogsModifier: ViewModifier {
                     pendingTagDeletionMealCount > 0
                         ? "This tag is on \(pendingTagDeletionMealCount) saved meal\(pendingTagDeletionMealCount == 1 ? "" : "s"). Deleting it removes the tag from those meals."
                         : "This tag is not currently assigned to any meal."
-                )
-            }
-            .confirmationDialog(
-                pendingCategoryDeletion.map { "Delete category \"\($0.name)\"?" } ?? "Delete category?",
-                isPresented: $showCategoryDeleteConfirm,
-                titleVisibility: .visible
-            ) {
-                if let category = pendingCategoryDeletion {
-                    Button("Delete category", role: .destructive) {
-                        let toDelete = category
-                        DispatchQueue.main.async {
-                            vm.deleteCategory(toDelete)
-                            pendingCategoryDeletion = nil
-                        }
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(
-                    pendingCategoryDeletionTagCount > 0
-                        ? "\(pendingCategoryDeletionTagCount) tag\(pendingCategoryDeletionTagCount == 1 ? "" : "s") currently in this category will lose this membership. They are NOT deleted — they remain in any other categories they belong to, or become Uncategorized."
-                        : "This category has no tags."
                 )
             }
     }
@@ -423,13 +392,23 @@ private struct CategoryEditSheet: View {
     @Environment(AppState.self) var appState
 
     let category: TagCategory?
+    let tagsInCategoryCount: Int
     let onSave: (TagCategory) -> Void
+    let onDelete: ((TagCategory) -> Void)?
 
     @State private var name: String
+    @State private var showDeleteConfirm = false
 
-    init(category: TagCategory?, onSave: @escaping (TagCategory) -> Void) {
+    init(
+        category: TagCategory?,
+        tagsInCategoryCount: Int = 0,
+        onSave: @escaping (TagCategory) -> Void,
+        onDelete: ((TagCategory) -> Void)? = nil
+    ) {
         self.category = category
+        self.tagsInCategoryCount = tagsInCategoryCount
         self.onSave = onSave
+        self.onDelete = onDelete
         _name = State(initialValue: category?.name ?? "")
     }
 
@@ -441,6 +420,37 @@ private struct CategoryEditSheet: View {
                         .autocorrectionDisabled()
                 }
                 .listRowBackground(Color.chart)
+
+                if let category, let onDelete {
+                    Section {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Delete category", systemImage: "trash")
+                        }
+                    }
+                    .listRowBackground(Color.chart)
+                    .confirmationDialog(
+                        "Delete category \"\(category.name)\"?",
+                        isPresented: $showDeleteConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete category", role: .destructive) {
+                            let toDelete = category
+                            DispatchQueue.main.async {
+                                onDelete(toDelete)
+                                dismiss()
+                            }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(
+                            tagsInCategoryCount > 0
+                                ? "\(tagsInCategoryCount) tag\(tagsInCategoryCount == 1 ? "" : "s") currently in this category will lose this membership. Tags are NOT deleted — they remain in any other categories they belong to, or become Uncategorized."
+                                : "This category has no tags."
+                        )
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .background(appState.trioBackgroundColor(for: colorScheme))
