@@ -25,3 +25,4 @@
 {"kind":"smbDelivered","payload":{"bg":131,"floorActivated":false,"insulinReq":0.22000000000000003,"iob":0.32299999999999995,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-06-30T14:37:39.304Z"}
 {"kind":"smbDelivered","payload":{"bg":122,"floorActivated":false,"insulinReq":0.18,"iob":0.257,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-06-30T15:02:36.435Z"}
 {"kind":"smbDelivered","payload":{"bg":105,"floorActivated":false,"insulinReq":0.13,"iob":0.006999999999999999,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-06-30T15:42:37.163Z"}
+{"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-06-30T17:04:12.575Z"}
