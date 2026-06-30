@@ -255,8 +255,16 @@ private struct ConfirmDialogsModifier: ViewModifier {
                         : "Delete",
                     role: .destructive
                 ) {
-                    vm.deleteTag(tag)
+                    // Dismiss the dialog FIRST so SwiftUI tears down its
+                    // presenting state before the data mutation publishes.
+                    // Then perform the actual delete on the next runloop
+                    // tick — otherwise a state mutation inside the button
+                    // closure can crash SwiftUI's view update cycle.
+                    let toDelete = tag
                     pendingTagDeletion = nil
+                    DispatchQueue.main.async {
+                        vm.deleteTag(toDelete)
+                    }
                 }
                 Button("Cancel", role: .cancel) {
                     pendingTagDeletion = nil
@@ -279,8 +287,11 @@ private struct ConfirmDialogsModifier: ViewModifier {
                 presenting: pendingCategoryDeletion
             ) { category in
                 Button("Delete category", role: .destructive) {
-                    vm.deleteCategory(category)
+                    let toDelete = category
                     pendingCategoryDeletion = nil
+                    DispatchQueue.main.async {
+                        vm.deleteCategory(toDelete)
+                    }
                 }
                 Button("Cancel", role: .cancel) {
                     pendingCategoryDeletion = nil
