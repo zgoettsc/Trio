@@ -30,3 +30,4 @@
 {"kind":"rescueCarbsLogged","payload":{"bgAtLog":71,"carbs":17,"custom":false,"duringMealWindow":false,"fat":3,"presetName":"Granola bar","protein":2},"timestamp":"2026-06-30T17:21:28.585Z"}
 {"kind":"smbDelivered","payload":{"bg":98,"floorActivated":false,"insulinReq":0.63,"iob":-0.5549999999999999,"minutesSinceWindowOpen":null,"units":0.3},"timestamp":"2026-06-30T17:47:35.146Z"}
 {"kind":"smbDelivered","payload":{"bg":114,"floorActivated":false,"insulinReq":0.9,"iob":-0.13999999999999999,"minutesSinceWindowOpen":null,"units":0.45},"timestamp":"2026-06-30T17:52:35.396Z"}
+{"kind":"smbDelivered","payload":{"bg":128,"floorActivated":false,"insulinReq":0.33999999999999997,"iob":0.4720000000000001,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-06-30T17:57:35.954Z"}
