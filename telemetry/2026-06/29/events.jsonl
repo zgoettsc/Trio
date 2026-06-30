@@ -110,3 +110,4 @@
 {"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":0.7},"timestamp":"2026-06-30T01:53:18.686Z"}
 {"kind":"carbEntry","payload":{"carbs":25,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"","protein":0},"timestamp":"2026-06-30T02:05:30.589Z"}
 {"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":1.8},"timestamp":"2026-06-30T02:05:36.822Z"}
+{"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-06-30T03:23:28.762Z"}
