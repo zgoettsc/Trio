@@ -24,204 +24,272 @@ struct TagsAndCategoriesConfigView: View {
     @State private var pendingCategoryDeletion: TagCategory?
 
     var body: some View {
-        Form {
-            Section(
-                header: Text("Categories"),
-                footer: Text("Tags belong to one or more categories. Renaming cascades through every tagged meal. Deleting a category doesn't delete its tags — they just lose that membership.")
-            ) {
-                ForEach(vm.categories) { category in
-                    DisclosureGroup {
-                        let tagsInCategory = vm.tags(in: category)
-                        if tagsInCategory.isEmpty {
-                            Text("No tags yet").font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            ForEach(tagsInCategory) { tag in
-                                Button {
-                                    editingTag = tag
-                                } label: {
-                                    HStack {
-                                        Text(tag.name).foregroundStyle(.primary)
-                                        if tag.categoryIds.count > 1 {
-                                            Text("· in \(tag.categoryIds.count) categories")
-                                                .font(.caption2)
-                                                .foregroundStyle(.tertiary)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "chevron.right").foregroundStyle(.tertiary).font(.caption)
-                                    }
-                                }
-                            }
-                            .onDelete { offsets in
-                                for off in offsets {
-                                    pendingTagDeletion = tagsInCategory[off]
-                                }
-                            }
-                        }
+        formContent
+            .scrollContentBackground(.hidden)
+            .background(appState.trioBackgroundColor(for: colorScheme))
+            .navigationTitle("Tags & Categories")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { EditButton() }
+            }
+            .modifier(SheetsModifier(
+                vm: vm,
+                addingTagInCategory: $addingTagInCategory,
+                editingTag: $editingTag,
+                editingCategory: $editingCategory,
+                showAddCategory: $showAddCategory
+            ))
+            .modifier(ConfirmDialogsModifier(
+                vm: vm,
+                pendingTagDeletion: $pendingTagDeletion,
+                pendingCategoryDeletion: $pendingCategoryDeletion
+            ))
+            .onAppear { vm.reload() }
+    }
 
-                        Button {
-                            addingTagInCategory = category
-                        } label: {
-                            Label("Add tag to \(category.name)", systemImage: "plus")
-                                .font(.caption)
-                        }
+    @ViewBuilder
+    private var formContent: some View {
+        Form {
+            categoriesSection
+            uncategorizedSection
+        }
+    }
+
+    @ViewBuilder
+    private var categoriesSection: some View {
+        Section(
+            header: Text("Categories"),
+            footer: Text("Tags belong to one or more categories. Renaming cascades through every tagged meal. Deleting a category doesn't delete its tags — they just lose that membership.")
+        ) {
+            ForEach(vm.categories) { category in
+                categoryRow(category)
+            }
+            .onDelete { offsets in
+                for off in offsets {
+                    pendingCategoryDeletion = vm.categories[off]
+                }
+            }
+
+            Button {
+                showAddCategory = true
+            } label: {
+                Label("Add Category", systemImage: "plus.circle.fill")
+            }
+        }
+        .listRowBackground(Color.chart)
+    }
+
+    @ViewBuilder
+    private func categoryRow(_ category: TagCategory) -> some View {
+        DisclosureGroup {
+            categoryContent(category)
+        } label: {
+            categoryLabel(category)
+        }
+    }
+
+    @ViewBuilder
+    private func categoryContent(_ category: TagCategory) -> some View {
+        let tagsInCategory = vm.tags(in: category)
+        if tagsInCategory.isEmpty {
+            Text("No tags yet").font(.caption).foregroundStyle(.secondary)
+        } else {
+            ForEach(tagsInCategory) { tag in
+                tagRowButton(tag)
+            }
+            .onDelete { offsets in
+                for off in offsets {
+                    pendingTagDeletion = tagsInCategory[off]
+                }
+            }
+        }
+
+        Button {
+            addingTagInCategory = category
+        } label: {
+            Label("Add tag to \(category.name)", systemImage: "plus")
+                .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func categoryLabel(_ category: TagCategory) -> some View {
+        HStack {
+            if let symbol = category.iconSymbol {
+                Image(systemName: symbol)
+                    .foregroundStyle(categoryColor(category))
+            }
+            Text(category.name).fontWeight(.medium)
+            Spacer()
+            Text("\(vm.tags(in: category).count)").foregroundStyle(.secondary).font(.caption)
+            Button {
+                editingCategory = category
+            } label: {
+                Image(systemName: "pencil")
+                    .foregroundStyle(.blue)
+                    .padding(.leading, 8)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func tagRowButton(_ tag: MealTag) -> some View {
+        Button {
+            editingTag = tag
+        } label: {
+            HStack {
+                Text(tag.name).foregroundStyle(.primary)
+                if tag.categoryIds.count > 1 {
+                    Text("· in \(tag.categoryIds.count) categories")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary).font(.caption)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var uncategorizedSection: some View {
+        let uncategorized = vm.uncategorizedTags
+        if !uncategorized.isEmpty {
+            Section(
+                header: Text("Uncategorized (\(uncategorized.count))"),
+                footer: Text("Tags with no category membership. Tap to add categories or delete.")
+            ) {
+                ForEach(uncategorized) { tag in
+                    Button {
+                        editingTag = tag
                     } label: {
                         HStack {
-                            if let symbol = category.iconSymbol {
-                                Image(systemName: symbol)
-                                    .foregroundStyle(categoryColor(category))
-                            }
-                            Text(category.name).fontWeight(.medium)
+                            Text(tag.name).foregroundStyle(.primary)
                             Spacer()
-                            Text("\(vm.tags(in: category).count)").foregroundStyle(.secondary).font(.caption)
-                            Button {
-                                editingCategory = category
-                            } label: {
-                                Image(systemName: "pencil")
-                                    .foregroundStyle(.blue)
-                                    .padding(.leading, 8)
-                            }
-                            .buttonStyle(.plain)
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary).font(.caption)
                         }
                     }
                 }
                 .onDelete { offsets in
                     for off in offsets {
-                        pendingCategoryDeletion = vm.categories[off]
+                        pendingTagDeletion = uncategorized[off]
                     }
-                }
-
-                Button {
-                    showAddCategory = true
-                } label: {
-                    Label("Add Category", systemImage: "plus.circle.fill")
                 }
             }
             .listRowBackground(Color.chart)
-
-            // Uncategorized tags — those with empty categoryIds.
-            let uncategorized = vm.uncategorizedTags
-            if !uncategorized.isEmpty {
-                Section(
-                    header: Text("Uncategorized (\(uncategorized.count))"),
-                    footer: Text("Tags with no category membership. Tap to add categories or delete.")
-                ) {
-                    ForEach(uncategorized) { tag in
-                        Button {
-                            editingTag = tag
-                        } label: {
-                            HStack {
-                                Text(tag.name).foregroundStyle(.primary)
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.tertiary).font(.caption)
-                            }
-                        }
-                    }
-                    .onDelete { offsets in
-                        for off in offsets {
-                            pendingTagDeletion = uncategorized[off]
-                        }
-                    }
-                }
-                .listRowBackground(Color.chart)
-            }
         }
-        .scrollContentBackground(.hidden)
-        .background(appState.trioBackgroundColor(for: colorScheme))
-        .navigationTitle("Tags & Categories")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { EditButton() }
-        }
-        .sheet(item: $addingTagInCategory) { category in
-            TagEditSheet(
-                tag: nil,
-                presetCategoryId: category.id,
-                allCategories: vm.categories
-            ) { newTag in
-                vm.addTag(newTag)
-            }
-        }
-        .sheet(item: $editingTag) { tag in
-            TagEditSheet(
-                tag: tag,
-                presetCategoryId: nil,
-                allCategories: vm.categories
-            ) { updated in
-                vm.updateTag(updated)
-            }
-        }
-        .sheet(item: $editingCategory) { category in
-            CategoryEditSheet(category: category) { updated in
-                vm.updateCategory(updated)
-            }
-        }
-        .sheet(isPresented: $showAddCategory) {
-            CategoryEditSheet(category: nil) { newCategory in
-                vm.addCategory(newCategory)
-            }
-        }
-        .confirmationDialog(
-            pendingTagDeletion.map { "Delete tag \"\($0.name)\"?" } ?? "",
-            isPresented: Binding(
-                get: { pendingTagDeletion != nil },
-                set: { if !$0 { pendingTagDeletion = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: pendingTagDeletion
-        ) { tag in
-            let usage = vm.mealsUsingTag(tag.id)
-            Button(
-                usage > 0
-                    ? "Delete and remove from \(usage) meal\(usage == 1 ? "" : "s")"
-                    : "Delete",
-                role: .destructive
-            ) {
-                vm.deleteTag(tag)
-                pendingTagDeletion = nil
-            }
-            Button("Cancel", role: .cancel) {
-                pendingTagDeletion = nil
-            }
-        } message: { tag in
-            let usage = vm.mealsUsingTag(tag.id)
-            Text(
-                usage > 0
-                    ? "This tag is on \(usage) saved meal\(usage == 1 ? "" : "s"). Deleting it removes the tag from those meals."
-                    : "This tag is not currently assigned to any meal."
-            )
-        }
-        .confirmationDialog(
-            pendingCategoryDeletion.map { "Delete category \"\($0.name)\"?" } ?? "",
-            isPresented: Binding(
-                get: { pendingCategoryDeletion != nil },
-                set: { if !$0 { pendingCategoryDeletion = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: pendingCategoryDeletion
-        ) { category in
-            let count = vm.tags(in: category).count
-            Button("Delete category", role: .destructive) {
-                vm.deleteCategory(category)
-                pendingCategoryDeletion = nil
-            }
-            Button("Cancel", role: .cancel) {
-                pendingCategoryDeletion = nil
-            }
-            _ = count
-        } message: { category in
-            let count = vm.tags(in: category).count
-            Text(
-                count > 0
-                    ? "\(count) tag\(count == 1 ? "" : "s") currently in this category will lose this membership. They are NOT deleted — they remain in any other categories they belong to, or become Uncategorized."
-                    : "This category has no tags."
-            )
-        }
-        .onAppear { vm.reload() }
     }
 
     private func categoryColor(_ c: TagCategory) -> Color {
         guard let hex = c.colorHex else { return .secondary }
         return Color(hex: hex) ?? .secondary
+    }
+}
+
+/// Bundles the four sheet modifiers so the parent body stays small
+/// enough for the type-checker to handle quickly.
+private struct SheetsModifier: ViewModifier {
+    @ObservedObject var vm: ViewModel
+    @Binding var addingTagInCategory: TagCategory?
+    @Binding var editingTag: MealTag?
+    @Binding var editingCategory: TagCategory?
+    @Binding var showAddCategory: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $addingTagInCategory) { category in
+                TagEditSheet(
+                    tag: nil,
+                    presetCategoryId: category.id,
+                    allCategories: vm.categories
+                ) { newTag in
+                    vm.addTag(newTag)
+                }
+            }
+            .sheet(item: $editingTag) { tag in
+                TagEditSheet(
+                    tag: tag,
+                    presetCategoryId: nil,
+                    allCategories: vm.categories
+                ) { updated in
+                    vm.updateTag(updated)
+                }
+            }
+            .sheet(item: $editingCategory) { category in
+                CategoryEditSheet(category: category) { updated in
+                    vm.updateCategory(updated)
+                }
+            }
+            .sheet(isPresented: $showAddCategory) {
+                CategoryEditSheet(category: nil) { newCategory in
+                    vm.addCategory(newCategory)
+                }
+            }
+    }
+}
+
+/// Bundles the two confirmation-dialog modifiers off the main body.
+private struct ConfirmDialogsModifier: ViewModifier {
+    @ObservedObject var vm: ViewModel
+    @Binding var pendingTagDeletion: MealTag?
+    @Binding var pendingCategoryDeletion: TagCategory?
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                pendingTagDeletion.map { "Delete tag \"\($0.name)\"?" } ?? "",
+                isPresented: Binding(
+                    get: { pendingTagDeletion != nil },
+                    set: { if !$0 { pendingTagDeletion = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingTagDeletion
+            ) { tag in
+                let usage = vm.mealsUsingTag(tag.id)
+                Button(
+                    usage > 0
+                        ? "Delete and remove from \(usage) meal\(usage == 1 ? "" : "s")"
+                        : "Delete",
+                    role: .destructive
+                ) {
+                    vm.deleteTag(tag)
+                    pendingTagDeletion = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingTagDeletion = nil
+                }
+            } message: { tag in
+                let usage = vm.mealsUsingTag(tag.id)
+                Text(
+                    usage > 0
+                        ? "This tag is on \(usage) saved meal\(usage == 1 ? "" : "s"). Deleting it removes the tag from those meals."
+                        : "This tag is not currently assigned to any meal."
+                )
+            }
+            .confirmationDialog(
+                pendingCategoryDeletion.map { "Delete category \"\($0.name)\"?" } ?? "",
+                isPresented: Binding(
+                    get: { pendingCategoryDeletion != nil },
+                    set: { if !$0 { pendingCategoryDeletion = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingCategoryDeletion
+            ) { category in
+                Button("Delete category", role: .destructive) {
+                    vm.deleteCategory(category)
+                    pendingCategoryDeletion = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingCategoryDeletion = nil
+                }
+            } message: { category in
+                let count = vm.tags(in: category).count
+                Text(
+                    count > 0
+                        ? "\(count) tag\(count == 1 ? "" : "s") currently in this category will lose this membership. They are NOT deleted — they remain in any other categories they belong to, or become Uncategorized."
+                        : "This category has no tags."
+                )
+            }
     }
 }
 
