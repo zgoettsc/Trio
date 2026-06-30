@@ -28,3 +28,4 @@
 {"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-06-30T17:04:12.575Z"}
 {"kind":"carbEntry","payload":{"carbs":17,"duringMealWindow":false,"enteredBy":"Trio-RescueCarbs","fat":3,"fpuID":null,"isFPU":false,"note":"Rescue: Granola bar","protein":2},"timestamp":"2026-06-30T17:21:28.585Z"}
 {"kind":"rescueCarbsLogged","payload":{"bgAtLog":71,"carbs":17,"custom":false,"duringMealWindow":false,"fat":3,"presetName":"Granola bar","protein":2},"timestamp":"2026-06-30T17:21:28.585Z"}
+{"kind":"smbDelivered","payload":{"bg":98,"floorActivated":false,"insulinReq":0.63,"iob":-0.5549999999999999,"minutesSinceWindowOpen":null,"units":0.3},"timestamp":"2026-06-30T17:47:35.146Z"}
