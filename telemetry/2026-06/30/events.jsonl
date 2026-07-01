@@ -68,3 +68,4 @@
 {"kind":"carbEntry","payload":{"carbs":12,"duringMealWindow":false,"enteredBy":"Trio","fat":4,"fpuID":"C895B74B-43E0-4524-BE09-5866A5BBF386","isFPU":false,"note":"Rescue (custom)","protein":1},"timestamp":"2026-07-01T00:13:31.463Z"}
 {"kind":"carbEntry","payload":{"carbs":12,"duringMealWindow":false,"enteredBy":"Trio-RescueCarbs","fat":5,"fpuID":null,"isFPU":false,"note":"Rescue (custom)","protein":1},"timestamp":"2026-07-01T00:14:14.136Z"}
 {"kind":"rescueCarbsLogged","payload":{"bgAtLog":73,"carbs":12,"custom":true,"duringMealWindow":false,"fat":5,"presetName":null,"protein":1},"timestamp":"2026-07-01T00:14:14.136Z"}
+{"kind":"smbDelivered","payload":{"bg":79,"floorActivated":false,"insulinReq":1.46,"iob":1.004,"minutesSinceWindowOpen":null,"units":0.7},"timestamp":"2026-07-01T00:42:37.402Z"}
