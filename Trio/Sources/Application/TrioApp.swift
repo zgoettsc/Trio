@@ -519,6 +519,9 @@ extension Notification.Name {
                     s.mealWindowEstimatedCarbs = 0
                     s.mealWindowCarbsConfirmed = false
                     s.mealWindowId = nil
+                    // Any live-carbs suggestion belongs to the meal we're
+                    // cancelling — clear it too or the home banner sticks.
+                    s.pendingLiveCarbsSuggestion = nil
                     settingsManager.settings = s
 
                     if let telemetry = resolver.resolve(AlgorithmTelemetryManager.self) {

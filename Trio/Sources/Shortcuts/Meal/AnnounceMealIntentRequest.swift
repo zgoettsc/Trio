@@ -376,6 +376,7 @@ import Foundation
         s.mealWindowEstimatedCarbs = 0
         s.mealWindowCarbsConfirmed = false
         s.mealWindowId = nil
+        s.pendingLiveCarbsSuggestion = nil
         s.mealCurrentClassification = .simple
         s.mealClassifierActivationBG = nil
         s.mealClassifierPhase1ConfirmedAt = nil

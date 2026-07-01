@@ -865,6 +865,33 @@ extension Home.StateModel {
     /// carb entry confirms the window) and the 6h hard safety cap.
     @MainActor func refreshMealWindowState() {
         let s = settingsManager.settings
+
+        // Pending live-carbs suggestion mirror — sync FIRST, unconditionally.
+        // Previously this sat after the mealWindowActivationDate early
+        // return, which meant the banner never cleared when:
+        //   - meal window closed (behavior exit / cancel / expiry)
+        //   - user tapped Dismiss (clearPending wrote nil to settings, but
+        //     the mirror wasn't re-read because we returned early)
+        //   - user disabled the estimator toggle
+        // Any pending suggestion without a matching active window is stale
+        // by definition — nuke it from settings too so telemetry and the
+        // notification path stop treating it as live.
+        if let p = s.pendingLiveCarbsSuggestion {
+            let stale = s.mealWindowActivationDate == nil
+                || !s.liveCarbsEstimatorEnabled
+                || Date().timeIntervalSince(p.triggeredAt) > 2 * 3600
+            if stale {
+                var s2 = s
+                s2.pendingLiveCarbsSuggestion = nil
+                settingsManager.settings = s2
+                pendingLiveCarbsSuggestion = nil
+            } else {
+                pendingLiveCarbsSuggestion = p
+            }
+        } else {
+            pendingLiveCarbsSuggestion = nil
+        }
+
         guard let activatedAt = s.mealWindowActivationDate else {
             if isMealWindowActive { isMealWindowActive = false }
             mealWindowExpiresAt = .distantPast
@@ -883,21 +910,6 @@ extension Home.StateModel {
         mealWindowEstimatedCarbs = s.mealWindowEstimatedCarbs
         mealWindowCarbsConfirmed = s.mealWindowCarbsConfirmed
         isMealWindowActive = expiresAt > Date()
-        // Pending live-carbs suggestion mirror. Cleared if stale (>2h) so
-        // a forgotten suggestion from an earlier meal doesn't keep the
-        // banner up forever.
-        if let p = s.pendingLiveCarbsSuggestion {
-            if Date().timeIntervalSince(p.triggeredAt) > 2 * 3600 {
-                var s2 = s
-                s2.pendingLiveCarbsSuggestion = nil
-                settingsManager.settings = s2
-                pendingLiveCarbsSuggestion = nil
-            } else {
-                pendingLiveCarbsSuggestion = p
-            }
-        } else {
-            pendingLiveCarbsSuggestion = nil
-        }
     }
 
     /// User-initiated cancel from the Home banner. Mirrors AnnounceMealIntentRequest.cancel()
@@ -942,6 +954,7 @@ extension Home.StateModel {
         s.mealWindowEstimatedCarbs = 0
         s.mealWindowCarbsConfirmed = false
         s.mealWindowId = nil
+        s.pendingLiveCarbsSuggestion = nil
         // Wipe live-classifier state with the window.
         s.mealCurrentClassification = .simple
         s.mealClassifierActivationBG = nil

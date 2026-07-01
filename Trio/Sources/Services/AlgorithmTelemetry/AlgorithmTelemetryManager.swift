@@ -489,6 +489,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             ns.mealWindowEstimatedCarbs = 0
             ns.mealWindowCarbsConfirmed = false
             ns.mealWindowId = nil
+            ns.pendingLiveCarbsSuggestion = nil
             // Wipe live-classifier state on natural expiry too.
             ns.mealCurrentClassification = .simple
             ns.mealClassifierActivationBG = nil
@@ -542,6 +543,7 @@ final class BaseAlgorithmTelemetryManager: AlgorithmTelemetryManager, Injectable
             ns.mealWindowEstimatedCarbs = 0
             ns.mealWindowCarbsConfirmed = false
             ns.mealWindowId = nil
+            ns.pendingLiveCarbsSuggestion = nil
             ns.mealCurrentClassification = .simple
             ns.mealClassifierActivationBG = nil
             ns.mealClassifierPhase1ConfirmedAt = nil
