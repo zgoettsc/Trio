@@ -76,3 +76,6 @@
 {"kind":"smbDelivered","payload":{"bg":124,"floorActivated":false,"insulinReq":0.53,"iob":2.8,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-01T01:32:39.698Z"}
 {"kind":"smbDelivered","payload":{"bg":139,"floorActivated":false,"insulinReq":1.35,"iob":2.502,"minutesSinceWindowOpen":null,"units":0.65},"timestamp":"2026-07-01T01:47:37.311Z"}
 {"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:36:26.976Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
+{"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:36:29.665Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
+{"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:36:31.941Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
+{"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:36:40.034Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
