@@ -124,11 +124,26 @@ struct LiveCarbsSuggestionSheet: View {
 
     @ViewBuilder
     private var actionsSection: some View {
-        Section {
+        Section(
+            footer: Text("Feeds the calibration signal for this meal's saved-meal history. No dosing action taken.")
+        ) {
+            Button {
+                commit(mode: .dismiss)
+            } label: {
+                Label("Got it", systemImage: "checkmark.circle.fill")
+            }
+        }
+        .listRowBackground(Color.chart)
+
+        Section(
+            header: Text("If you're certain more carbs are still absorbing"),
+            footer: Text("These add real carbs to oref's model. Only use if BG is still rising and you're confident the meal was under-logged — NOT during a drop.")
+        ) {
             Button {
                 commit(mode: .addNew)
             } label: {
-                Label("Add \(currentAmountInt) g now", systemImage: "plus.circle.fill")
+                Label("Add \(currentAmountInt) g now", systemImage: "plus.circle")
+                    .foregroundStyle(.secondary)
             }
             .disabled(currentAmount <= 0)
 
@@ -136,14 +151,9 @@ struct LiveCarbsSuggestionSheet: View {
                 commit(mode: .editOriginal)
             } label: {
                 Label("Edit original to \(Int((suggestion.enteredCarbs + currentAmount).rounded())) g", systemImage: "pencil.circle")
+                    .foregroundStyle(.secondary)
             }
             .disabled(currentAmount <= 0)
-
-            Button(role: .destructive) {
-                commit(mode: .dismiss)
-            } label: {
-                Label("Dismiss", systemImage: "xmark.circle")
-            }
         }
         .listRowBackground(Color.chart)
     }
@@ -151,7 +161,7 @@ struct LiveCarbsSuggestionSheet: View {
     @ViewBuilder
     private var disclaimerSection: some View {
         Section {
-            Text("`Add now` writes a fresh carb entry at the current time — oref handles late carbs correctly. `Edit original` rewrites the first entry's grams in place; oref will recalculate absorption since the original timestamp (brief math reshuffle). Use whichever feels right.")
+            Text("This estimate compares BG rise so far against what your ISF/CR expected from the entered carbs. It runs while a meal window is active and can fire late — always sanity-check the current BG trend before adding carbs. `Add now` writes a fresh entry at the current time; `Edit original` rewrites the first entry's grams (oref recalculates absorption from that timestamp).")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

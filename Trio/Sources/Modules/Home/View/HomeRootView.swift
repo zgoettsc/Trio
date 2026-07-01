@@ -860,24 +860,28 @@ extension Home {
             }
         }
 
-        /// Banner shown when the live mid-meal carbs estimator has a pending
-        /// suggestion. Tap to open the actionable sheet (add new / edit
-        /// original / dismiss). Hidden when no suggestion exists.
+        /// Informational banner surfacing that the meal ran bigger than the
+        /// logged carbs implied. Tap opens a sheet with the details; the
+        /// sheet's primary action is "Got it" (log for calibration).
+        /// Correction actions (add / edit carbs) are still available in the
+        /// sheet as secondary options but are no longer the CTA — the
+        /// original red "add carbs now" prompt was actively dangerous when
+        /// it fired late while BG was already falling.
         @ViewBuilder func liveCarbsBanner() -> some View {
             if let suggestion = state.pendingLiveCarbsSuggestion {
                 Button {
                     liveCarbsSheetSuggestion = suggestion
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
+                        Image(systemName: "info.circle.fill")
                             .font(.subheadline)
                             .foregroundStyle(.white)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text("Meal looking bigger than logged")
+                            Text("Meal ran bigger than logged")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                                 .foregroundStyle(.white)
-                            Text("Tap to add ~\(Int(suggestion.suggestedExtra.rounded())) g or edit")
+                            Text("≈ +\(Int(suggestion.suggestedExtra.rounded())) g. Tap for details.")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.9))
                         }
@@ -890,7 +894,7 @@ extension Home {
                     .padding(.vertical, 8)
                     .background {
                         RoundedRectangle(cornerRadius: 15)
-                            .fill(Color.red.opacity(colorScheme == .dark ? 0.7 : 0.85))
+                            .fill(Color.blue.opacity(colorScheme == .dark ? 0.7 : 0.85))
                     }
                     .padding(.horizontal, 10)
                 }

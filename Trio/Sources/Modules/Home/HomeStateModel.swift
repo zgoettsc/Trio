@@ -880,6 +880,7 @@ extension Home.StateModel {
             let stale = s.mealWindowActivationDate == nil
                 || !s.liveCarbsEstimatorEnabled
                 || Date().timeIntervalSince(p.triggeredAt) > 2 * 3600
+                || pendingSuggestionUnsafeGivenCurrentTrajectory()
             if stale {
                 var s2 = s
                 s2.pendingLiveCarbsSuggestion = nil
@@ -910,6 +911,41 @@ extension Home.StateModel {
         mealWindowEstimatedCarbs = s.mealWindowEstimatedCarbs
         mealWindowCarbsConfirmed = s.mealWindowCarbsConfirmed
         isMealWindowActive = expiresAt > Date()
+    }
+
+    /// Live safety recheck for the live-carbs banner.
+    ///
+    /// The APSManager auto-retract only runs inside the estimator's own
+    /// evaluate loop, which is gated behind mealWindowActive. When the
+    /// suggestion fires late (BG already peaked and turning down), by the
+    /// time the estimator loop next runs the guard-firing state has passed
+    /// but the banner keeps promoting a stale "add carbs" prompt into a
+    /// falling BG — actively dangerous.
+    ///
+    /// This runs on every refreshMealWindowState (i.e. every glucose
+    /// update / settings change / view refresh), reads the latest
+    /// OrefDetermination, and returns true if:
+    ///   - short-term delta (minDelta) is not positive → BG has plateaued
+    ///     or turned down
+    ///   - eventualBG ≤ 55 → loop is parked at the minimum-floor sentinel
+    /// In either case the pending suggestion is stale and gets cleared.
+    private func pendingSuggestionUnsafeGivenCurrentTrajectory() -> Bool {
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        var minDelta: Double = 1  // default to "still rising" so a missing
+                                  // determination doesn't spuriously clear
+        var eventualBG: Double = 999
+        ctx.performAndWait {
+            let req = OrefDetermination.fetchRequest()
+            req.sortDescriptors = [NSSortDescriptor(key: "deliverAt", ascending: false)]
+            req.fetchLimit = 1
+            if let latest = (try? ctx.fetch(req))?.first {
+                if let md = latest.minDelta { minDelta = md.doubleValue }
+                if let eb = latest.eventualBG { eventualBG = eb.doubleValue }
+            }
+        }
+        let notRising = minDelta <= 0
+        let loopParked = eventualBG <= 55
+        return notRising || loopParked
     }
 
     /// User-initiated cancel from the Home banner. Mirrors AnnounceMealIntentRequest.cancel()
