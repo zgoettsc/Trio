@@ -79,3 +79,4 @@
 {"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:36:29.665Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
 {"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:36:31.941Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
 {"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:36:40.034Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
+{"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:38:58.089Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
