@@ -61,3 +61,4 @@
 {"kind":"overrideCancelled","payload":{"overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35"},"timestamp":"2026-07-01T20:05:04.730Z"}
 {"kind":"smbDelivered","payload":{"bg":162,"floorActivated":false,"insulinReq":0.32,"iob":0.726,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-01T20:05:04.729Z"}
 {"kind":"smbDelivered","payload":{"bg":172,"floorActivated":false,"insulinReq":1.1400000000000001,"iob":0.7150000000000001,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-07-01T20:07:36.942Z"}
+{"kind":"carbEntry","payload":{"carbs":25,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":"15B4E907-79C0-4352-9F1A-915C144FDB3E","isFPU":false,"note":"","protein":30},"timestamp":"2026-07-01T17:55:17.317Z"}
