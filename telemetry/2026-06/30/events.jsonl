@@ -81,3 +81,4 @@
 {"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:36:40.034Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
 {"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:38:58.089Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
 {"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-07-01T02:53:52.390Z"}
+{"kind":"liveCarbsEstimateDismissed","payload":{"enteredCarbs":30,"suggestedExtra":32.98729411764706},"timestamp":"2026-07-01T02:56:16.230Z","windowId":"FB61CEFD-A1B0-4CFE-880F-1CD01353FB41"}
