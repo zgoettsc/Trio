@@ -70,3 +70,4 @@
 {"kind":"rescueCarbsLogged","payload":{"bgAtLog":73,"carbs":12,"custom":true,"duringMealWindow":false,"fat":5,"presetName":null,"protein":1},"timestamp":"2026-07-01T00:14:14.136Z"}
 {"kind":"smbDelivered","payload":{"bg":79,"floorActivated":false,"insulinReq":1.46,"iob":1.004,"minutesSinceWindowOpen":null,"units":0.7},"timestamp":"2026-07-01T00:42:37.402Z"}
 {"kind":"smbDelivered","payload":{"bg":91,"floorActivated":false,"insulinReq":0.99,"iob":0.8009999999999999,"minutesSinceWindowOpen":null,"units":0.45},"timestamp":"2026-07-01T01:07:37.986Z"}
+{"kind":"smbDelivered","payload":{"bg":98,"floorActivated":false,"insulinReq":1.49,"iob":1.133,"minutesSinceWindowOpen":null,"units":0.7},"timestamp":"2026-07-01T01:12:37.562Z"}
