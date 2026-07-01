@@ -29,3 +29,5 @@
 {"kind":"smbDelivered","payload":{"bg":141,"floorActivated":false,"insulinReq":0.37,"iob":0.596,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-01T10:57:41.660Z"}
 {"kind":"smbDelivered","payload":{"bg":100,"floorActivated":false,"insulinReq":0.32,"iob":-0.16899999999999998,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-01T12:07:36.776Z"}
 {"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Running","overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5","percentage":75,"targetMgdL":160},"timestamp":"2026-07-01T12:27:20.366Z"}
+{"kind":"overrideCancelled","payload":{"overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5"},"timestamp":"2026-07-01T12:55:09.751Z"}
+{"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-07-01T12:55:09.751Z"}
