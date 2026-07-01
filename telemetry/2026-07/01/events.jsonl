@@ -34,3 +34,4 @@
 {"kind":"carbEntry","payload":{"carbs":17,"duringMealWindow":false,"enteredBy":"Trio-RescueCarbs","fat":3,"fpuID":null,"isFPU":false,"note":"Rescue: Granola bar","protein":2},"timestamp":"2026-07-01T13:11:29.692Z"}
 {"kind":"rescueCarbsLogged","payload":{"bgAtLog":72,"carbs":17,"custom":false,"duringMealWindow":false,"fat":3,"presetName":"Granola bar","protein":2},"timestamp":"2026-07-01T13:11:29.692Z"}
 {"kind":"smbDelivered","payload":{"bg":93,"floorActivated":false,"insulinReq":0.42000000000000004,"iob":-0.797,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-01T13:27:41.721Z"}
+{"kind":"smbDelivered","payload":{"bg":100,"floorActivated":false,"insulinReq":0.37,"iob":-0.483,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-01T13:32:36.141Z"}
