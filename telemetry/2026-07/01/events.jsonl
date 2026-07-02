@@ -85,3 +85,4 @@
 {"kind":"mealWindowExpired","payload":{"elapsedMinutes":92.01032136678695,"source":"naturalExpiry","wasCarbsConfirmed":false},"timestamp":"2026-07-02T00:36:05.190Z","windowId":"E84F29F5-A307-4C20-85F6-21A30EA9990D"}
 {"kind":"carbEntry","payload":{"carbs":30,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"","protein":0},"timestamp":"2026-07-02T00:38:06.303Z"}
 {"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":3},"timestamp":"2026-07-02T00:38:16.466Z"}
+{"kind":"smbDelivered","payload":{"bg":132,"floorActivated":false,"insulinReq":0.9199999999999999,"iob":4.022,"minutesSinceWindowOpen":null,"units":0.45},"timestamp":"2026-07-02T01:07:38.238Z"}
