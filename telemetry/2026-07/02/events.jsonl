@@ -79,3 +79,4 @@
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":5},"timestamp":"2026-07-02T22:39:26.665Z","windowId":"7B92956E-3C76-49DA-92EE-D3B7D03D2B02"}
 {"kind":"mealWindowClosedByExitRule","payload":{"bg":140,"carbsConfirmed":true,"eventualBG":112,"minutesSinceLastSMB":104.94841921726862,"minutesSinceOpen":107.44436620076497,"peakBG":240,"reason":"loopIdleAtBaseline","shortAvgDelta":0},"timestamp":"2026-07-03T00:22:41.697Z","windowId":"7B92956E-3C76-49DA-92EE-D3B7D03D2B02"}
 {"kind":"smbDelivered","payload":{"bg":147,"floorActivated":false,"insulinReq":0.27,"iob":2.034,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-03T00:42:39.989Z"}
+{"kind":"smbDelivered","payload":{"bg":134,"floorActivated":false,"insulinReq":0.12,"iob":0.952,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-03T01:07:42.409Z"}
