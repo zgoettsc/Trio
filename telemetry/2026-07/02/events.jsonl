@@ -77,3 +77,4 @@
 {"kind":"carbEntry","payload":{"carbs":75,"duringMealWindow":true,"enteredBy":"Trio","fat":0,"fpuID":"0319E38E-DAC3-4711-810E-975C6B94B081","isFPU":false,"note":"","protein":35},"timestamp":"2026-07-02T21:50:16.209Z","windowId":"7B92956E-3C76-49DA-92EE-D3B7D03D2B02"}
 {"kind":"mealWindowCarbsConfirmed","payload":{"carbs":75,"fat":0,"minutesSinceActivation":4.166691700617473,"protein":35},"timestamp":"2026-07-02T22:39:25.036Z","windowId":"7B92956E-3C76-49DA-92EE-D3B7D03D2B02"}
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":5},"timestamp":"2026-07-02T22:39:26.665Z","windowId":"7B92956E-3C76-49DA-92EE-D3B7D03D2B02"}
+{"kind":"mealWindowClosedByExitRule","payload":{"bg":140,"carbsConfirmed":true,"eventualBG":112,"minutesSinceLastSMB":104.94841921726862,"minutesSinceOpen":107.44436620076497,"peakBG":240,"reason":"loopIdleAtBaseline","shortAvgDelta":0},"timestamp":"2026-07-03T00:22:41.697Z","windowId":"7B92956E-3C76-49DA-92EE-D3B7D03D2B02"}
