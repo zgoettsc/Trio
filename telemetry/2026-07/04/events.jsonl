@@ -94,3 +94,4 @@
 {"kind":"carbEntry","payload":{"carbs":50,"duringMealWindow":true,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"","protein":0},"timestamp":"2026-07-04T22:47:56.950Z","windowId":"17E3E0BF-AAD8-43E8-8EB6-421995C3AE51"}
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":2.9},"timestamp":"2026-07-04T22:48:02.678Z","windowId":"17E3E0BF-AAD8-43E8-8EB6-421995C3AE51"}
 {"kind":"smbDelivered","payload":{"bg":231,"floorActivated":false,"insulinReq":0.24500000000000002,"iob":9.754999999999999,"minutesSinceWindowOpen":56.666985565423964,"units":0.15},"timestamp":"2026-07-04T22:52:45.786Z","windowId":"17E3E0BF-AAD8-43E8-8EB6-421995C3AE51"}
+{"kind":"smbDelivered","payload":{"bg":232,"floorActivated":false,"insulinReq":0.33399999999999996,"iob":9.666,"minutesSinceWindowOpen":61.59307471513748,"units":0.25},"timestamp":"2026-07-04T22:57:41.351Z","windowId":"17E3E0BF-AAD8-43E8-8EB6-421995C3AE51"}
