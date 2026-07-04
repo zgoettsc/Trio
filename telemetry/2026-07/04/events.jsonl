@@ -52,3 +52,4 @@
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":2.95},"timestamp":"2026-07-04T17:05:13.242Z","windowId":"F30D4B1D-C332-446D-A104-E96D687C5911"}
 {"kind":"smbDelivered","payload":{"bg":140,"floorActivated":false,"insulinReq":0.06999999999999999,"iob":3.8519999999999994,"minutesSinceWindowOpen":7.928276999791463,"units":0.05},"timestamp":"2026-07-04T17:12:42.166Z","windowId":"F30D4B1D-C332-446D-A104-E96D687C5911"}
 {"kind":"smbDelivered","payload":{"bg":147,"floorActivated":false,"insulinReq":0.86,"iob":3.7980000000000005,"minutesSinceWindowOpen":12.895916899045309,"units":0.6},"timestamp":"2026-07-04T17:17:40.225Z","windowId":"F30D4B1D-C332-446D-A104-E96D687C5911"}
+{"kind":"smbDelivered","payload":{"bg":155,"floorActivated":false,"insulinReq":0.8800000000000001,"iob":4.2700000000000005,"minutesSinceWindowOpen":18.051599983374278,"units":0.65},"timestamp":"2026-07-04T17:22:49.566Z","windowId":"F30D4B1D-C332-446D-A104-E96D687C5911"}
