@@ -38,3 +38,6 @@
 {"kind":"rescueCarbsLogged","payload":{"bgAtLog":77,"carbs":17,"custom":false,"duringMealWindow":false,"fat":3,"presetName":"Granola bar","protein":2},"timestamp":"2026-07-04T13:43:40.625Z"}
 {"kind":"smbDelivered","payload":{"bg":94,"floorActivated":false,"insulinReq":0.99,"iob":1.718,"minutesSinceWindowOpen":null,"units":0.45},"timestamp":"2026-07-04T14:17:45.389Z"}
 {"kind":"smbDelivered","payload":{"bg":102,"floorActivated":false,"insulinReq":0.63,"iob":2.034,"minutesSinceWindowOpen":null,"units":0.3},"timestamp":"2026-07-04T14:22:41.249Z"}
+{"kind":"carbEntry","payload":{"carbs":45,"duringMealWindow":false,"enteredBy":"Trio","fat":15,"fpuID":"962AADB4-0B96-4AC8-909A-02927D49627B","isFPU":false,"note":"2 almond butter toasts with blueberries, honey, cinnamon ","protein":30},"timestamp":"2026-07-04T12:12:51.474Z"}
+{"kind":"smbDelivered","payload":{"bg":117,"floorActivated":false,"insulinReq":0.38,"iob":1.366,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-04T14:57:41.866Z"}
+{"kind":"smbDelivered","payload":{"bg":124,"floorActivated":false,"insulinReq":0.45,"iob":1.2790000000000001,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-04T15:07:39.593Z"}
