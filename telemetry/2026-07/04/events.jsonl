@@ -1,1 +1,2 @@
 {"kind":"smbDelivered","payload":{"bg":78,"floorActivated":false,"insulinReq":0.45,"iob":-1.249,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-04T06:42:43.583Z"}
+{"kind":"smbDelivered","payload":{"bg":80,"floorActivated":false,"insulinReq":0.27999999999999997,"iob":-0.9040000000000001,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-04T06:47:39.146Z"}
