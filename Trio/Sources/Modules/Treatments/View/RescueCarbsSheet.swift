@@ -33,6 +33,10 @@ struct RescueCarbsSheet: View {
     @State private var isSaving: Bool = false
     @State private var tagIDs: Set<UUID> = []
     @State private var showTagPicker: Bool = false
+    /// Timestamp for the rescue. Defaults to now but the user can back-date
+    /// when logging after the fact (e.g. treated a low then remembered to
+    /// log). Bounded to `...Date()` — no forward dating.
+    @State private var entryDate: Date = Date()
 
     enum Step { case picker, confirm }
 
@@ -127,6 +131,7 @@ struct RescueCarbsSheet: View {
                     carbsText = ""
                     fatText = ""
                     proteinText = ""
+                    entryDate = Date()
                     step = .confirm
                 } label: {
                     Label("Type rescue carbs manually", systemImage: "pencil")
@@ -183,6 +188,19 @@ struct RescueCarbsSheet: View {
             ) {
                 TextField("", text: $proteinText)
                     .keyboardType(.decimalPad)
+            }
+            .listRowBackground(Color.chart)
+
+            Section(
+                header: Text("Time"),
+                footer: Text("Defaults to now. Back-date if you're logging after the fact.")
+            ) {
+                DatePicker(
+                    "When",
+                    selection: $entryDate,
+                    in: ...Date(),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
             }
             .listRowBackground(Color.chart)
 
@@ -247,6 +265,7 @@ struct RescueCarbsSheet: View {
         carbsText = format(preset.carbs)
         fatText = preset.fat.map(format) ?? ""
         proteinText = preset.protein.map(format) ?? ""
+        entryDate = Date()
         step = .confirm
     }
 
@@ -271,11 +290,15 @@ struct RescueCarbsSheet: View {
         guard carbsValue > 0 else { return }
         isSaving = true
 
+        // `now` is the log moment (for telemetry). `entryDate` is when the
+        // rescue was actually eaten — same or back-dated. Both createdAt
+        // and actualDate on the CarbsEntry use entryDate so oref's carbs.json
+        // sees the correct timestamp for absorption math (mirrors AddCarbs).
         let now = Date()
         let entry = CarbsEntry(
             id: UUID().uuidString,
-            createdAt: now,
-            actualDate: now,
+            createdAt: entryDate,
+            actualDate: entryDate,
             carbs: carbsValue,
             fat: parsedFat,
             protein: parsedProtein,
@@ -319,6 +342,12 @@ struct RescueCarbsSheet: View {
         } else {
             payload["duringMealWindow"] = .bool(false)
         }
+        // Distinguish live logs from back-dated ones. `backDatedMinutes` is
+        // 0 when the user logged in real-time, positive when they set an
+        // earlier timestamp on the sheet.
+        let backDatedMinutes = max(0, now.timeIntervalSince(entryDate) / 60)
+        payload["entryDate"] = .string(ISO8601DateFormatter().string(from: entryDate))
+        payload["backDatedMinutes"] = .double(backDatedMinutes)
 
         telemetry?.logEvent(AlgorithmTelemetryEvent(
             kind: .rescueCarbsLogged,
