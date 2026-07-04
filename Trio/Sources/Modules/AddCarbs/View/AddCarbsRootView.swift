@@ -101,22 +101,40 @@ extension AddCarbs {
                     if state.useFPUconversion {
                         proteinAndFat()
                     }
-                    VStack {
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text("Note").foregroundColor(.secondary)
-                            TextFieldWithToolBarString(text: $state.note, placeholder: "", maxLength: 25)
+                            Spacer()
                             if isFocused {
                                 Button { isFocused = false } label: { Image(systemName: "keyboard.chevron.compact.down") }
                                     .controlSize(.mini)
                             }
-                        }.focused($isFocused)
+                        }
+                        TextEditor(text: Binding(
+                            get: { state.note },
+                            set: { newValue in
+                                // Hard cap at 500 chars — schema is unlimited but
+                                // keep the UI from becoming a dumping ground.
+                                state.note = String(newValue.prefix(500))
+                            }
+                        ))
+                        .frame(minHeight: 72, maxHeight: 160)
+                        .focused($isFocused)
+                        .scrollContentBackground(.hidden)
 
-                        HStack {
-                            Spacer()
-                            Text("\(state.note.count) / 25")
-                                .foregroundStyle(.secondary)
+                        if state.note.count > 375 {
+                            // Counter only appears in the last 25% — otherwise it's
+                            // visual noise on typical short notes.
+                            HStack {
+                                Spacer()
+                                Text("\(state.note.count) / 500")
+                                    .font(.caption)
+                                    .foregroundStyle(state.note.count >= 500 ? .red : .secondary)
+                            }
                         }
                     }
+
+                    tagsSection()
                     HStack {
                         Button {
                             state.useFPUconversion.toggle()
@@ -330,6 +348,48 @@ extension AddCarbs {
                 Spacer()
                 TextFieldWithToolBar(text: $state.protein, placeholder: "0", numberFormatter: formatter)
                 Text(state.protein > state.maxProtein ? "⚠️" : "g").foregroundColor(.secondary)
+            }
+        }
+
+        @State private var showTagPickerSheet = false
+
+        @ViewBuilder private func tagsSection() -> some View {
+            let library = TrioApp.resolver.resolve(SettingsManager.self)?.settings.mealTags ?? []
+            let categories = TrioApp.resolver.resolve(SettingsManager.self)?.settings.tagCategories ?? []
+            let picked = library
+                .filter { state.tagIDs.contains($0.id) }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Tags").foregroundColor(.secondary)
+                    Spacer()
+                    Button {
+                        showTagPickerSheet = true
+                    } label: {
+                        Text(picked.isEmpty ? "Add" : "Edit")
+                            .font(.caption)
+                    }
+                }
+                if !picked.isEmpty {
+                    FlowLayoutWrap(spacing: 6) {
+                        ForEach(picked) { tag in
+                            Text(tag.name)
+                                .font(.caption)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(Color.blue.opacity(0.15)))
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showTagPickerSheet) {
+                SavedMealTagPickerSheet(
+                    allTags: library,
+                    allCategories: categories,
+                    selectedIDs: state.tagIDs
+                ) { newSelection in
+                    state.tagIDs = newSelection
+                }
             }
         }
     }

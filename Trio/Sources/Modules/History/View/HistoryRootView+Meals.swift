@@ -53,6 +53,25 @@ extension History.RootView {
                     Spacer()
                 }.padding(.top, 5).foregroundColor(.secondary)
             }
+            let tagIds = Set(meal.tagIDs)
+            if !tagIds.isEmpty {
+                let library = state.settingsManager.settings.mealTags
+                let picked = library
+                    .filter { tagIds.contains($0.id) }
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                if !picked.isEmpty {
+                    FlowLayoutWrap(spacing: 4) {
+                        ForEach(picked) { tag in
+                            Text(tag.name)
+                                .font(.caption2)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.blue.opacity(0.15)))
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+            }
         }
         .contextMenu {
             Button(

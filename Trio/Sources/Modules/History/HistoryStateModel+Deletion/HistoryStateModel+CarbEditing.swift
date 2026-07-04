@@ -18,7 +18,8 @@ extension History.StateModel {
         newFat: Decimal,
         newProtein: Decimal,
         newNote: String,
-        newDate: Date
+        newDate: Date,
+        newTagIDs: [UUID] = []
     ) {
         Task {
             do {
@@ -40,7 +41,8 @@ extension History.StateModel {
                     newCarbs: newCarbs,
                     newFat: newFat,
                     newProtein: newProtein,
-                    newNote: newNote
+                    newNote: newNote,
+                    newTagIDs: newTagIDs
                 )
 
                 await syncWithServices()
@@ -59,7 +61,8 @@ extension History.StateModel {
         newCarbs: Decimal,
         newFat: Decimal,
         newProtein: Decimal,
-        newNote: String
+        newNote: String,
+        newTagIDs: [UUID] = []
     ) async throws {
         let newEntry = CarbsEntry(
             id: UUID().uuidString,
@@ -71,7 +74,8 @@ extension History.StateModel {
             note: newNote,
             enteredBy: CarbsEntry.local,
             isFPU: false,
-            fpuID: newFat > 0 || newProtein > 0 ? UUID().uuidString : nil
+            fpuID: newFat > 0 || newProtein > 0 ? UUID().uuidString : nil,
+            tagIDs: newTagIDs.isEmpty ? nil : newTagIDs
         )
 
         // Handles internally whether to create fake carbs or not based on whether fat > 0 or protein > 0
@@ -179,6 +183,18 @@ extension History.StateModel {
                 debugPrint("\(DebuggingIdentifiers.failed) Failed to load entry: \(error)")
                 return nil
             }
+        }
+    }
+
+    /// Loads only the tagIDs for an entry. Kept separate from loadEntryValues
+    /// so the tuple signature there doesn't ripple through handleFPUEntry
+    /// and its two-case return type.
+    func loadEntryTagIDs(from objectID: NSManagedObjectID) async -> [UUID] {
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        return await context.perform {
+            guard let entry = try? context.existingObject(with: objectID) as? CarbEntryStored
+            else { return [] }
+            return entry.tagIDs
         }
     }
 

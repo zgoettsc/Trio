@@ -31,6 +31,8 @@ struct RescueCarbsSheet: View {
     @State private var fatText: String = ""
     @State private var proteinText: String = ""
     @State private var isSaving: Bool = false
+    @State private var tagIDs: Set<UUID> = []
+    @State private var showTagPicker: Bool = false
 
     enum Step { case picker, confirm }
 
@@ -184,6 +186,43 @@ struct RescueCarbsSheet: View {
             }
             .listRowBackground(Color.chart)
 
+            Section(
+                header: Text("Tags — optional"),
+                footer: Text("Same library as saved meals. Handy for grouping recoveries by what you ate.")
+            ) {
+                let library = resolver.resolve(SettingsManager.self)?.settings.mealTags ?? []
+                let categories = resolver.resolve(SettingsManager.self)?.settings.tagCategories ?? []
+                let picked = library
+                    .filter { tagIDs.contains($0.id) }
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                if !picked.isEmpty {
+                    FlowLayoutWrap(spacing: 6) {
+                        ForEach(picked) { tag in
+                            Text(tag.name)
+                                .font(.caption)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(Color.blue.opacity(0.15)))
+                        }
+                    }
+                }
+                Button {
+                    showTagPicker = true
+                } label: {
+                    Label(picked.isEmpty ? "Add tags" : "Edit tags", systemImage: "tag")
+                }
+                .sheet(isPresented: $showTagPicker) {
+                    SavedMealTagPickerSheet(
+                        allTags: library,
+                        allCategories: categories,
+                        selectedIDs: tagIDs
+                    ) { newSelection in
+                        tagIDs = newSelection
+                    }
+                }
+            }
+            .listRowBackground(Color.chart)
+
             Section {
                 Button {
                     Task { await save() }
@@ -245,7 +284,8 @@ struct RescueCarbsSheet: View {
             isFPU: false,
             fpuID: nil,
             isRescueCarbs: true,
-            rescuePresetName: pickedPreset?.name
+            rescuePresetName: pickedPreset?.name,
+            tagIDs: tagIDs.isEmpty ? nil : Array(tagIDs)
         )
 
         let carbsStorage = resolver.resolve(CarbsStorage.self)

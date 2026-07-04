@@ -27,6 +27,9 @@ struct CarbEntryEditorView: View {
     @State private var editedNote: String
     @State private var isFPU: Bool
     @State private var editedDate: Date
+    @State private var originalCarbs: Decimal = 0
+    @State private var editedTagIDs: Set<UUID> = []
+    @State private var showTagPicker = false
 
     init(state: History.StateModel, carbEntry: CarbEntryStored) {
         self.state = state
@@ -38,6 +41,12 @@ struct CarbEntryEditorView: View {
         _isFPU = State(initialValue: carbEntry.isFPU)
         _entryToEdit = State(initialValue: nil)
         _editedDate = State(initialValue: Date())
+    }
+
+    /// True when the user has bumped carbs on an already-committed entry.
+    /// Historical oref decisions can't be re-run, so this is a soft warn.
+    private var carbsEditedFromOriginal: Bool {
+        editedCarbs != originalCarbs
     }
 
     private var mealFormatter: NumberFormatter {
@@ -110,7 +119,8 @@ struct CarbEntryEditorView: View {
                         newFat: editedFat,
                         newProtein: editedProtein,
                         newNote: editedNote,
-                        newDate: editedDate
+                        newDate: editedDate,
+                        newTagIDs: Array(editedTagIDs)
                     )
                     dismiss()
                 }, label: {
@@ -167,11 +177,41 @@ struct CarbEntryEditorView: View {
                         }
                     }
 
-                    HStack {
-                        Image(systemName: "square.and.pencil")
-                        TextFieldWithToolBarString(text: $editedNote, placeholder: String(localized: "Note..."), maxLength: 25)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "square.and.pencil")
+                            Text("Note").foregroundStyle(.secondary)
+                        }
+                        TextEditor(text: Binding(
+                            get: { editedNote },
+                            set: { editedNote = String($0.prefix(500)) }
+                        ))
+                        .frame(minHeight: 72, maxHeight: 200)
+                        .scrollContentBackground(.hidden)
+                        if editedNote.count > 375 {
+                            HStack {
+                                Spacer()
+                                Text("\(editedNote.count) / 500")
+                                    .font(.caption)
+                                    .foregroundStyle(editedNote.count >= 500 ? .red : .secondary)
+                            }
+                        }
                     }
                 }.listRowBackground(Color.chart)
+
+                tagsSection
+
+                if carbsEditedFromOriginal, !isFPU {
+                    Section {
+                        Label {
+                            Text("Editing carbs won't rerun oref's past decisions — insulin already delivered against the original amount stays as-is. COB updates going forward. Use only to correct the historical log.")
+                                .font(.caption)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                    }.listRowBackground(Color.chart)
+                }
 
                 Section {
                     DatePicker(
@@ -210,6 +250,7 @@ struct CarbEntryEditorView: View {
             if carbEntry.isFPU {
                 if let result = await state.handleFPUEntry(carbEntry.objectID) {
                     editedCarbs = result.entryValues?.carbs ?? 0
+                    originalCarbs = result.entryValues?.carbs ?? 0
                     editedFat = result.entryValues?.fat ?? 0
                     editedProtein = result.entryValues?.protein ?? 0
                     editedNote = result.entryValues?.note ?? ""
@@ -225,6 +266,7 @@ struct CarbEntryEditorView: View {
             } else {
                 if let values = await state.loadEntryValues(from: carbEntry.objectID) {
                     editedCarbs = values.carbs
+                    originalCarbs = values.carbs
                     editedFat = values.fat
                     editedProtein = values.protein
                     editedNote = values.note
@@ -232,6 +274,48 @@ struct CarbEntryEditorView: View {
                     entryToEdit = carbEntry.objectID
                 }
             }
+            if let id = entryToEdit {
+                editedTagIDs = Set(await state.loadEntryTagIDs(from: id))
+            }
         }
+    }
+
+    private var tagsSection: some View {
+        let library = state.settingsManager.settings.mealTags
+        let categories = state.settingsManager.settings.tagCategories
+        let picked = library
+            .filter { editedTagIDs.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return Section(
+            header: Text("Tags — optional"),
+            footer: Text("Same library as saved meals. Handy for grouping the meal for later analysis.")
+        ) {
+            if !picked.isEmpty {
+                FlowLayoutWrap(spacing: 6) {
+                    ForEach(picked) { tag in
+                        Text(tag.name)
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color.blue.opacity(0.15)))
+                    }
+                }
+            }
+            Button {
+                showTagPicker = true
+            } label: {
+                Label(picked.isEmpty ? "Add tags" : "Edit tags", systemImage: "tag")
+            }
+            .sheet(isPresented: $showTagPicker) {
+                SavedMealTagPickerSheet(
+                    allTags: library,
+                    allCategories: categories,
+                    selectedIDs: editedTagIDs
+                ) { newSelection in
+                    editedTagIDs = newSelection
+                }
+            }
+        }
+        .listRowBackground(Color.chart)
     }
 }

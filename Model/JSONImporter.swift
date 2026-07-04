@@ -437,6 +437,7 @@ extension CarbsEntry: Codable {
         // rescue entry" which matches the dosing-pipeline expectation.
         isRescueCarbs = try container.decodeIfPresent(Bool.self, forKey: .isRescueCarbs)
         rescuePresetName = try container.decodeIfPresent(String.self, forKey: .rescuePresetName)
+        tagIDs = try container.decodeIfPresent([UUID].self, forKey: .tagIDs)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -454,6 +455,7 @@ extension CarbsEntry: Codable {
         try container.encodeIfPresent(fpuID, forKey: .fpuID)
         try container.encodeIfPresent(isRescueCarbs, forKey: .isRescueCarbs)
         try container.encodeIfPresent(rescuePresetName, forKey: .rescuePresetName)
+        try container.encodeIfPresent(tagIDs, forKey: .tagIDs)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -474,6 +476,7 @@ extension CarbsEntry: Codable {
         // decode them.
         case isRescueCarbs
         case rescuePresetName
+        case tagIDs
     }
 
     /// Helper function to convert `CarbsStored` to `CarbEntryStored` while importing JSON carb entries
@@ -496,6 +499,9 @@ extension CarbsEntry: Codable {
         carbEntry.isUploadedToNS = true
         carbEntry.isUploadedToHealth = true
         carbEntry.isUploadedToTidepool = true
+        if let tags = tagIDs, !tags.isEmpty {
+            carbEntry.tagIDs = tags
+        }
     }
 }
 

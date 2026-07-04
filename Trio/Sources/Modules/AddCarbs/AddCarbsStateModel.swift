@@ -20,6 +20,9 @@ extension AddCarbs {
         @Published var maxFat: Decimal = 250
         @Published var maxProtein: Decimal = 250
         @Published var note: String = ""
+        /// Optional tags — same MealTag library the SavedMeal picker uses.
+        /// Written onto CarbEntryStored.tagIDsJSON via CarbsStorage.
+        @Published var tagIDs: Set<UUID> = []
 
         let coredataContext = CoreDataStack.shared.persistentContainer.viewContext
 
@@ -47,7 +50,8 @@ extension AddCarbs {
                     protein: protein,
                     note: note,
                     enteredBy: CarbsEntry.manual,
-                    isFPU: false, fpuID: nil
+                    isFPU: false, fpuID: nil,
+                    tagIDs: tagIDs.isEmpty ? nil : Array(tagIDs)
                 )]
             )
 

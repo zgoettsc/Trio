@@ -23,6 +23,11 @@ struct CarbsEntry: JSON, Equatable, Hashable, Identifiable {
     /// Nil when typed as custom. Lets analytics group BG-recovery curves
     /// by what was eaten.
     let rescuePresetName: String?
+    /// Optional user-selected tags for this entry — same library as saved
+    /// meals. Empty / nil when untagged. Persisted onto CarbEntryStored
+    /// via tagIDsJSON so the History edit sheet can retroactively add or
+    /// change them without a re-write of the entry.
+    let tagIDs: [UUID]?
 
     static let local = "Trio"
     static let appleHealth = "applehealth"
@@ -54,7 +59,8 @@ struct CarbsEntry: JSON, Equatable, Hashable, Identifiable {
         isFPU: Bool?,
         fpuID: String?,
         isRescueCarbs: Bool? = nil,
-        rescuePresetName: String? = nil
+        rescuePresetName: String? = nil,
+        tagIDs: [UUID]? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -68,6 +74,7 @@ struct CarbsEntry: JSON, Equatable, Hashable, Identifiable {
         self.fpuID = fpuID
         self.isRescueCarbs = isRescueCarbs
         self.rescuePresetName = rescuePresetName
+        self.tagIDs = tagIDs
     }
 
     static func == (lhs: CarbsEntry, rhs: CarbsEntry) -> Bool {
@@ -93,6 +100,7 @@ extension CarbsEntry {
         case fpuID
         case isRescueCarbs
         case rescuePresetName
+        case tagIDs
     }
 }
 
