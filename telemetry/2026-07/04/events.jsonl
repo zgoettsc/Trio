@@ -59,3 +59,4 @@
 {"kind":"mealWindowClosedByExitRule","payload":{"bg":107,"carbsConfirmed":true,"eventualBG":215,"minutesSinceLastSMB":64.98920666774114,"minutesSinceOpen":92.92996373375257,"peakBG":174,"reason":"loopIdleAtBaseline","shortAvgDelta":0},"timestamp":"2026-07-04T18:37:42.268Z","windowId":"F30D4B1D-C332-446D-A104-E96D687C5911"}
 {"kind":"smbDelivered","payload":{"bg":104,"floorActivated":false,"insulinReq":0.48,"iob":1.8009999999999997,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-04T19:02:43.145Z"}
 {"kind":"smbDelivered","payload":{"bg":106,"floorActivated":false,"insulinReq":0.5900000000000001,"iob":1.8539999999999999,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-04T19:07:43.131Z"}
+{"kind":"smbDelivered","payload":{"bg":108,"floorActivated":false,"insulinReq":0.55,"iob":1.934,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-04T19:12:50.661Z"}
