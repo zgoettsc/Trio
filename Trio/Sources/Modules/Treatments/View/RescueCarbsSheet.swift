@@ -348,6 +348,14 @@ struct RescueCarbsSheet: View {
         let backDatedMinutes = max(0, now.timeIntervalSince(entryDate) / 60)
         payload["entryDate"] = .string(ISO8601DateFormatter().string(from: entryDate))
         payload["backDatedMinutes"] = .double(backDatedMinutes)
+        // Resolve tag UUIDs → names for the rescue payload too so per-tag
+        // recovery-curve analysis works without a UUID lookup pass.
+        if !tagIDs.isEmpty, let library = settingsManager?.settings.mealTags {
+            let names = tagIDs.compactMap { id in library.first(where: { $0.id == id })?.name }
+            if !names.isEmpty {
+                payload["tagNames"] = .from(names)
+            }
+        }
 
         telemetry?.logEvent(AlgorithmTelemetryEvent(
             kind: .rescueCarbsLogged,

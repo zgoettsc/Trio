@@ -91,6 +91,16 @@ final class BaseCarbsStorage: CarbsStorage, Injectable {
                 payload["enteredBy"] = .string(entry.enteredBy ?? "unknown")
                 payload["note"] = entry.note.map { .string($0) } ?? .null
                 payload["duringMealWindow"] = .bool(settings.settings.mealWindowActivationDate != nil)
+                // Resolve tag UUIDs → names from the settings library so
+                // analytics sees a stable string list, not opaque UUIDs.
+                // Nil when the entry carries no tags — keeps rows clean.
+                if let ids = entry.tagIDs, !ids.isEmpty {
+                    let library = settings.settings.mealTags
+                    let names = ids.compactMap { id in library.first(where: { $0.id == id })?.name }
+                    if !names.isEmpty {
+                        payload["tagNames"] = .from(names)
+                    }
+                }
                 algorithmTelemetryManager?.logEvent(AlgorithmTelemetryEvent(
                     kind: .carbEntry,
                     timestamp: entry.actualDate ?? entry.createdAt,
