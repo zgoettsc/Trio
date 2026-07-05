@@ -13,3 +13,4 @@
 {"kind":"smbDelivered","payload":{"bg":117,"floorActivated":false,"insulinReq":0.22000000000000003,"iob":0.336,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-05T07:47:42.398Z"}
 {"kind":"smbDelivered","payload":{"bg":120,"floorActivated":false,"insulinReq":0.72,"iob":0.375,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-07-05T08:02:41.059Z"}
 {"kind":"smbDelivered","payload":{"bg":119,"floorActivated":false,"insulinReq":0.22999999999999998,"iob":0.404,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-05T08:22:43.041Z"}
+{"kind":"smbDelivered","payload":{"bg":101,"floorActivated":false,"insulinReq":0.1,"iob":-0.061,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-05T09:22:45.026Z"}
