@@ -45,3 +45,6 @@
 {"kind":"smbDelivered","payload":{"bg":113,"floorActivated":false,"insulinReq":0.89,"iob":0.201,"minutesSinceWindowOpen":null,"units":0.4},"timestamp":"2026-07-05T16:42:42.273Z"}
 {"kind":"smbDelivered","payload":{"bg":129,"floorActivated":false,"insulinReq":0.55,"iob":0.45600000000000007,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-05T17:07:46.711Z"}
 {"kind":"smbDelivered","payload":{"bg":136,"floorActivated":false,"insulinReq":0.37,"iob":0.752,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-05T17:17:45.700Z"}
+{"kind":"carbEntry","payload":{"carbs":30,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"chips","protein":0},"timestamp":"2026-07-05T16:49:40.150Z"}
+{"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":1.85},"timestamp":"2026-07-05T17:19:58.008Z"}
+{"kind":"carbEntry","payload":{"carbs":40,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":"E117A58A-939A-43F5-A095-E10C40068200","isFPU":false,"note":"chuckpea nood and broc","protein":30},"timestamp":"2026-07-05T17:20:01.083Z"}
