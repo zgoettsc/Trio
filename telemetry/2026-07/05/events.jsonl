@@ -39,3 +39,8 @@
 {"kind":"carbEntry","payload":{"carbs":17,"duringMealWindow":false,"enteredBy":"Trio-RescueCarbs","fat":3,"fpuID":null,"isFPU":false,"note":"Rescue: Granola bar","protein":2},"timestamp":"2026-07-05T15:23:26.530Z"}
 {"kind":"rescueCarbsLogged","payload":{"backDatedMinutes":0.16113056540489196,"bgAtLog":66,"carbs":17,"custom":false,"duringMealWindow":false,"entryDate":"2026-07-05T15:23:26Z","fat":3,"presetName":"Granola bar","protein":2},"timestamp":"2026-07-05T15:23:36.197Z"}
 {"kind":"smbDelivered","payload":{"bg":74,"floorActivated":false,"insulinReq":0.15,"iob":0.9730000000000001,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-05T15:42:41.457Z"}
+{"kind":"smbDelivered","payload":{"bg":84,"floorActivated":false,"insulinReq":0.16,"iob":0.8290000000000001,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-05T15:52:40.909Z"}
+{"kind":"smbDelivered","payload":{"bg":98,"floorActivated":false,"insulinReq":0.51,"iob":0.5479999999999999,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-05T16:07:42.323Z"}
+{"kind":"smbDelivered","payload":{"bg":102,"floorActivated":false,"insulinReq":0.12,"iob":0.184,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-05T16:37:41.740Z"}
+{"kind":"smbDelivered","payload":{"bg":113,"floorActivated":false,"insulinReq":0.89,"iob":0.201,"minutesSinceWindowOpen":null,"units":0.4},"timestamp":"2026-07-05T16:42:42.273Z"}
+{"kind":"smbDelivered","payload":{"bg":129,"floorActivated":false,"insulinReq":0.55,"iob":0.45600000000000007,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-05T17:07:46.711Z"}
