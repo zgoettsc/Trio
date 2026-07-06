@@ -81,3 +81,10 @@
 {"kind":"smbDelivered","payload":{"bg":126,"floorActivated":false,"insulinReq":1.19,"iob":0.5279999999999999,"minutesSinceWindowOpen":null,"units":0.55},"timestamp":"2026-07-06T02:32:42.011Z"}
 {"kind":"smbDelivered","payload":{"bg":131,"floorActivated":false,"insulinReq":0.29,"iob":1.1320000000000001,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-06T02:37:43.754Z"}
 {"kind":"smbDelivered","payload":{"bg":134,"floorActivated":false,"insulinReq":0.31,"iob":1.0370000000000001,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-06T02:42:42.108Z"}
+{"kind":"smbDelivered","payload":{"bg":145,"floorActivated":false,"insulinReq":1.08,"iob":1.241,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-07-06T02:47:41.139Z"}
+{"kind":"smbDelivered","payload":{"bg":152,"floorActivated":false,"insulinReq":1,"iob":1.844,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-07-06T02:52:41.235Z"}
+{"kind":"smbDelivered","payload":{"bg":156,"floorActivated":false,"insulinReq":0.29,"iob":1.784,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-06T03:07:41.229Z"}
+{"kind":"smbDelivered","payload":{"bg":161,"floorActivated":false,"insulinReq":0.45999999999999996,"iob":1.7259999999999998,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-06T03:12:43.740Z"}
+{"kind":"smbDelivered","payload":{"bg":106,"floorActivated":false,"insulinReq":0.13,"iob":0.086,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-06T04:07:52.173Z"}
+{"kind":"smbDelivered","payload":{"bg":106,"floorActivated":false,"insulinReq":0.13,"iob":0.149,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-06T04:12:45.638Z"}
+{"kind":"smbDelivered","payload":{"bg":107,"floorActivated":false,"insulinReq":0.25,"iob":0.21399999999999997,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-06T04:17:42.928Z"}
