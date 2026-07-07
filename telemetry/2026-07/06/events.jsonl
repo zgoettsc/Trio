@@ -92,3 +92,6 @@
 {"kind":"smbDelivered","payload":{"bg":163,"floorActivated":false,"insulinReq":0.5,"iob":1.8940000000000001,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-07T04:32:47.451Z"}
 {"kind":"smbDelivered","payload":{"bg":160,"floorActivated":false,"insulinReq":0.42000000000000004,"iob":1.956,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-07T04:37:49.854Z"}
 {"kind":"smbDelivered","payload":{"bg":156,"floorActivated":false,"insulinReq":0.4,"iob":1.7880000000000003,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-07T04:47:56.161Z"}
+{"kind":"carbEntry","payload":{"carbs":60,"duringMealWindow":false,"enteredBy":"Trio","fat":20,"fpuID":"17E480B2-E8D4-41E4-81F6-8019ED4365CF","isFPU":false,"note":"Pizza","protein":35},"timestamp":"2026-07-06T22:50:36.492Z"}
+{"kind":"carbEntry","payload":{"carbs":40,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"Cupcakes","protein":0},"timestamp":"2026-07-06T23:00:12.916Z"}
+{"kind":"carbEntry","payload":{"carbs":30,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"Cupcakes","protein":0},"timestamp":"2026-07-07T01:22:13.005Z"}
