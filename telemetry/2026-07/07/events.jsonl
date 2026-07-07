@@ -75,3 +75,5 @@
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":3.7},"timestamp":"2026-07-07T22:34:20.165Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
 {"kind":"mealWindowClassifierPhase","payload":{"activationBG":206,"bg":213,"minutesSinceActivation":4.0668180326620735,"phase":"phase1","trigger":"sustainedDelta"},"timestamp":"2026-07-07T22:37:44.320Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
 {"kind":"smbDelivered","payload":{"bg":213,"floorActivated":false,"insulinReq":2.5,"iob":6.563,"minutesSinceWindowOpen":4.059251115719477,"units":0.8},"timestamp":"2026-07-07T22:37:43.866Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
+{"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":1.15},"timestamp":"2026-07-07T22:41:55.819Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
+{"kind":"smbDelivered","payload":{"bg":208,"floorActivated":false,"insulinReq":0.35,"iob":8.197,"minutesSinceWindowOpen":14.071419966220855,"units":0.25},"timestamp":"2026-07-07T22:47:44.596Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
