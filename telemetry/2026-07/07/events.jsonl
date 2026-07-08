@@ -85,3 +85,11 @@
 {"kind":"smbDelivered","payload":{"bg":121,"floorActivated":false,"insulinReq":1.27,"iob":0.433,"minutesSinceWindowOpen":null,"units":0.6},"timestamp":"2026-07-08T01:38:28.880Z"}
 {"kind":"smbDelivered","payload":{"bg":130,"floorActivated":false,"insulinReq":0.71,"iob":1.084,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-07-08T01:43:32.772Z"}
 {"kind":"smbDelivered","payload":{"bg":137,"floorActivated":false,"insulinReq":0.29,"iob":1.488,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-08T01:48:22.991Z"}
+{"kind":"smbDelivered","payload":{"bg":139,"floorActivated":false,"insulinReq":0.48,"iob":0.6940000000000001,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-08T02:13:40.066Z"}
+{"kind":"smbDelivered","payload":{"bg":141,"floorActivated":false,"insulinReq":0.32999999999999996,"iob":0.95,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-08T02:18:21.052Z"}
+{"kind":"smbDelivered","payload":{"bg":148,"floorActivated":false,"insulinReq":0.42000000000000004,"iob":1.063,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-08T02:28:21.344Z"}
+{"kind":"smbDelivered","payload":{"bg":147,"floorActivated":false,"insulinReq":0.27,"iob":1.175,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-08T02:38:21.317Z"}
+{"kind":"smbDelivered","payload":{"bg":133,"floorActivated":false,"insulinReq":0.1,"iob":0.897,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-08T02:58:24.534Z"}
+{"kind":"smbDelivered","payload":{"bg":134,"floorActivated":false,"insulinReq":0.25,"iob":0.804,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-08T03:03:30.252Z"}
+{"kind":"smbDelivered","payload":{"bg":142,"floorActivated":false,"insulinReq":0.8800000000000001,"iob":0.9129999999999999,"minutesSinceWindowOpen":null,"units":0.4},"timestamp":"2026-07-08T03:08:26.155Z"}
+{"kind":"smbDelivered","payload":{"bg":102,"floorActivated":false,"insulinReq":0.22999999999999998,"iob":-0.24,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-08T04:08:22.740Z"}
