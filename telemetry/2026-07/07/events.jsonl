@@ -78,3 +78,10 @@
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":1.15},"timestamp":"2026-07-07T22:41:55.819Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
 {"kind":"smbDelivered","payload":{"bg":208,"floorActivated":false,"insulinReq":0.35,"iob":8.197,"minutesSinceWindowOpen":14.071419966220855,"units":0.25},"timestamp":"2026-07-07T22:47:44.596Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
 {"kind":"smbDelivered","payload":{"bg":210,"floorActivated":false,"insulinReq":0.12,"iob":8.257000000000001,"minutesSinceWindowOpen":19.082063349088035,"units":0.05},"timestamp":"2026-07-07T22:52:45.234Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
+{"kind":"mealWindowClosedByExitRule","payload":{"bg":95,"carbsConfirmed":true,"eventualBG":124,"minutesSinceLastSMB":95.69372165004413,"minutesSinceOpen":114.80851798256238,"peakBG":213,"reason":"loopIdleAtBaseline","shortAvgDelta":0},"timestamp":"2026-07-08T00:28:28.822Z","windowId":"EABB50A5-935E-4458-9ADC-8FF873451B8F"}
+{"kind":"smbDelivered","payload":{"bg":106,"floorActivated":false,"insulinReq":0.1,"iob":0.46299999999999997,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-08T01:13:21.320Z"}
+{"kind":"smbDelivered","payload":{"bg":108,"floorActivated":false,"insulinReq":0.15,"iob":0.384,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-07-08T01:18:20.322Z"}
+{"kind":"smbDelivered","payload":{"bg":108,"floorActivated":false,"insulinReq":0.62,"iob":0.039,"minutesSinceWindowOpen":null,"units":0.3},"timestamp":"2026-07-08T01:33:24.550Z"}
+{"kind":"smbDelivered","payload":{"bg":121,"floorActivated":false,"insulinReq":1.27,"iob":0.433,"minutesSinceWindowOpen":null,"units":0.6},"timestamp":"2026-07-08T01:38:28.880Z"}
+{"kind":"smbDelivered","payload":{"bg":130,"floorActivated":false,"insulinReq":0.71,"iob":1.084,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-07-08T01:43:32.772Z"}
+{"kind":"smbDelivered","payload":{"bg":137,"floorActivated":false,"insulinReq":0.29,"iob":1.488,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-08T01:48:22.991Z"}
