@@ -41,3 +41,6 @@
 {"kind":"smbDelivered","payload":{"bg":155,"floorActivated":false,"insulinReq":0.49000000000000005,"iob":2.5919999999999996,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-12T19:48:22.699Z"}
 {"kind":"smbDelivered","payload":{"bg":176,"floorActivated":false,"insulinReq":0.9400000000000001,"iob":2.473,"minutesSinceWindowOpen":null,"units":0.45},"timestamp":"2026-07-12T19:58:20.486Z"}
 {"kind":"smbDelivered","payload":{"bg":187,"floorActivated":false,"insulinReq":0.49000000000000005,"iob":0.9730000000000001,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-12T21:03:23.346Z"}
+{"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":0.2},"timestamp":"2026-07-12T21:28:54.779Z"}
+{"kind":"smbDelivered","payload":{"bg":213,"floorActivated":false,"insulinReq":1.16,"iob":0.647,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-07-12T21:40:21.999Z"}
+{"kind":"smbDelivered","payload":{"bg":262,"floorActivated":false,"insulinReq":2.27,"iob":1.9080000000000001,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-07-12T22:14:22.331Z"}
