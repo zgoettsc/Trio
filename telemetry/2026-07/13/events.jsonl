@@ -49,3 +49,5 @@
 {"kind":"userBolus","payload":{"duringMealWindow":true,"isSMB":false,"units":4.8},"timestamp":"2026-07-13T22:03:50.964Z","windowId":"E97CA3A8-1B8E-4F9C-9836-964B82ACE312"}
 {"kind":"smbDelivered","payload":{"bg":289,"floorActivated":false,"insulinReq":0.31,"iob":9.478,"minutesSinceWindowOpen":4.809926533699036,"units":0.2},"timestamp":"2026-07-13T22:08:26.093Z","windowId":"E97CA3A8-1B8E-4F9C-9836-964B82ACE312"}
 {"kind":"smbDelivered","payload":{"bg":307,"floorActivated":false,"insulinReq":1.04,"iob":8.262,"minutesSinceWindowOpen":29.96578895052274,"units":0.75},"timestamp":"2026-07-13T22:33:35.445Z","windowId":"E97CA3A8-1B8E-4F9C-9836-964B82ACE312"}
+{"kind":"smbDelivered","payload":{"bg":313,"floorActivated":false,"insulinReq":0.55,"iob":8.777000000000001,"minutesSinceWindowOpen":34.72049678365389,"units":0.4},"timestamp":"2026-07-13T22:38:20.727Z","windowId":"E97CA3A8-1B8E-4F9C-9836-964B82ACE312"}
+{"kind":"carbEntry","payload":{"carbs":70,"duringMealWindow":true,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"Granola and milk x2","protein":0},"timestamp":"2026-07-13T20:40:22.283Z","windowId":"E97CA3A8-1B8E-4F9C-9836-964B82ACE312"}
