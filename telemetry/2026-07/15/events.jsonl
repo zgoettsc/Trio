@@ -65,3 +65,11 @@
 {"kind":"smbDelivered","payload":{"bg":161,"floorActivated":false,"insulinReq":0.65,"iob":1.746,"minutesSinceWindowOpen":161.73322570125262,"units":0.45},"timestamp":"2026-07-16T00:53:27.769Z","windowId":"F26045DE-E9EC-433D-8490-B7EB31E66A73"}
 {"kind":"smbDelivered","payload":{"bg":168,"floorActivated":false,"insulinReq":1.92,"iob":2.028,"minutesSinceWindowOpen":166.65301335056623,"units":1.4},"timestamp":"2026-07-16T00:58:22.956Z","windowId":"F26045DE-E9EC-433D-8490-B7EB31E66A73"}
 {"kind":"mealWindowExpired","payload":{"elapsedMinutes":299.8965066512426,"source":"naturalExpiry","wasCarbsConfirmed":true},"timestamp":"2026-07-16T01:11:43.776Z","windowId":"F26045DE-E9EC-433D-8490-B7EB31E66A73"}
+{"kind":"carbEntry","payload":{"carbs":17,"duringMealWindow":false,"enteredBy":"Trio-RescueCarbs","fat":3,"fpuID":null,"isFPU":false,"note":"Rescue: Granola bar","protein":2},"timestamp":"2026-07-16T03:16:30.103Z"}
+{"kind":"rescueCarbsLogged","payload":{"backDatedMinutes":0.027448483308156333,"bgAtLog":84,"carbs":17,"custom":false,"duringMealWindow":false,"entryDate":"2026-07-16T03:16:30Z","fat":3,"presetName":"Granola bar","protein":2},"timestamp":"2026-07-16T03:16:31.750Z"}
+{"kind":"smbDelivered","payload":{"bg":93,"floorActivated":false,"insulinReq":0.7,"iob":-0.8290000000000001,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-07-16T03:23:24.075Z"}
+{"kind":"smbDelivered","payload":{"bg":101,"floorActivated":false,"insulinReq":0.53,"iob":-0.32,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-16T03:28:22.821Z"}
+{"kind":"smbDelivered","payload":{"bg":106,"floorActivated":false,"insulinReq":0.38,"iob":0.039,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-16T03:33:24.788Z"}
+{"kind":"smbDelivered","payload":{"bg":117,"floorActivated":false,"insulinReq":1.01,"iob":0.34700000000000003,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-07-16T03:38:25.520Z"}
+{"kind":"smbDelivered","payload":{"bg":129,"floorActivated":false,"insulinReq":1.21,"iob":0.9480000000000001,"minutesSinceWindowOpen":null,"units":0.6},"timestamp":"2026-07-16T03:43:28.264Z"}
+{"kind":"smbDelivered","payload":{"bg":138,"floorActivated":false,"insulinReq":0.52,"iob":1.6460000000000001,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-16T03:48:24.410Z"}
