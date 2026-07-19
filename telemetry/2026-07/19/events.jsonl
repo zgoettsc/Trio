@@ -23,3 +23,11 @@
 {"kind":"smbDelivered","payload":{"bg":132,"floorActivated":false,"insulinReq":0.44000000000000006,"iob":-0.8709999999999999,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-19T11:51:59.094Z"}
 {"kind":"smbDelivered","payload":{"bg":121,"floorActivated":false,"insulinReq":0.26,"iob":-1.085,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-19T12:01:59.981Z"}
 {"kind":"smbDelivered","payload":{"bg":120,"floorActivated":false,"insulinReq":0.33999999999999997,"iob":-1.217,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-19T12:06:56.223Z"}
+{"kind":"overrideCancelled","payload":{"overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35"},"timestamp":"2026-07-19T12:11:38.447Z"}
+{"kind":"smbDelivered","payload":{"bg":120,"floorActivated":false,"insulinReq":0.6799999999999999,"iob":-1.295,"minutesSinceWindowOpen":null,"units":0.3},"timestamp":"2026-07-19T12:11:38.447Z"}
+{"kind":"smbDelivered","payload":{"bg":132,"floorActivated":false,"insulinReq":1.48,"iob":-1.295,"minutesSinceWindowOpen":null,"units":0.7},"timestamp":"2026-07-19T12:11:56.145Z"}
+{"kind":"smbDelivered","payload":{"bg":142,"floorActivated":false,"insulinReq":1.4,"iob":-0.418,"minutesSinceWindowOpen":null,"units":0.7},"timestamp":"2026-07-19T12:16:58.352Z"}
+{"kind":"smbDelivered","payload":{"bg":149,"floorActivated":false,"insulinReq":0.73,"iob":0.40099999999999997,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-07-19T12:21:56.065Z"}
+{"kind":"smbDelivered","payload":{"bg":162,"floorActivated":false,"insulinReq":0.77,"iob":0.9179999999999999,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-07-19T12:27:00.332Z"}
+{"kind":"smbDelivered","payload":{"bg":172,"floorActivated":false,"insulinReq":0.41,"iob":1.3780000000000001,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-07-19T12:31:55.603Z"}
+{"kind":"smbDelivered","payload":{"bg":183,"floorActivated":false,"insulinReq":0.76,"iob":1.7369999999999997,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-07-19T12:36:58.860Z"}
