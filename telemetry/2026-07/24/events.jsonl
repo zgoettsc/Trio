@@ -1,0 +1,4 @@
+{"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-07-24T10:24:07.076Z"}
+{"kind":"carbEntry","payload":{"carbs":60,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"","protein":0},"timestamp":"2026-07-24T11:42:56.389Z"}
+{"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":4},"timestamp":"2026-07-24T12:28:13.028Z"}
+{"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":4},"timestamp":"2026-07-24T12:28:25.089Z"}
