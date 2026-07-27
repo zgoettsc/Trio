@@ -56,3 +56,11 @@
 {"kind":"carbEntry","payload":{"carbs":50,"duringMealWindow":false,"enteredBy":"Trio","fat":0,"fpuID":null,"isFPU":false,"note":"","protein":0},"timestamp":"2026-07-27T20:24:40.660Z"}
 {"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":2.8},"timestamp":"2026-07-27T20:24:46.602Z"}
 {"kind":"smbDelivered","payload":{"bg":131,"floorActivated":false,"insulinReq":1.04,"iob":3.8660000000000005,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-07-27T20:28:57.260Z"}
+{"kind":"smbDelivered","payload":{"bg":142,"floorActivated":false,"insulinReq":1.25,"iob":4.302,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-07-27T20:34:00.130Z"}
+{"kind":"smbDelivered","payload":{"bg":155,"floorActivated":false,"insulinReq":0.55,"iob":4.672,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-27T20:39:07.734Z"}
+{"kind":"smbDelivered","payload":{"bg":161,"floorActivated":false,"insulinReq":0.21000000000000002,"iob":4.788,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-27T20:44:01.499Z"}
+{"kind":"smbDelivered","payload":{"bg":185,"floorActivated":false,"insulinReq":0.53,"iob":3.636,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-27T21:24:10.133Z"}
+{"kind":"smbDelivered","payload":{"bg":188,"floorActivated":false,"insulinReq":0.32999999999999996,"iob":3.7060000000000004,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-07-27T21:29:08.419Z"}
+{"kind":"smbDelivered","payload":{"bg":194,"floorActivated":false,"insulinReq":0.22000000000000003,"iob":3.6769999999999996,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-07-27T21:33:59.843Z"}
+{"kind":"smbDelivered","payload":{"bg":203,"floorActivated":false,"insulinReq":0.54,"iob":3.364,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-27T21:43:57.832Z"}
+{"kind":"smbDelivered","payload":{"bg":212,"floorActivated":false,"insulinReq":0.54,"iob":3.4829999999999997,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-07-27T21:48:59.602Z"}
