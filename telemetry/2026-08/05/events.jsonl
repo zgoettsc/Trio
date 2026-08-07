@@ -55,3 +55,11 @@
 {"kind":"smbDelivered","payload":{"bg":138,"floorActivated":false,"insulinReq":0.97,"iob":1.6480000000000001,"minutesSinceWindowOpen":null,"units":0.45},"timestamp":"2026-08-06T00:37:19.664Z"}
 {"kind":"smbDelivered","payload":{"bg":142,"floorActivated":false,"insulinReq":0.74,"iob":1.956,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-08-06T00:42:17.965Z"}
 {"kind":"smbDelivered","payload":{"bg":146,"floorActivated":false,"insulinReq":0.32,"iob":2.216,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-08-06T00:47:18.335Z"}
+{"kind":"smbDelivered","payload":{"bg":140,"floorActivated":false,"insulinReq":0.51,"iob":0.8220000000000001,"minutesSinceWindowOpen":null,"units":0.25},"timestamp":"2026-08-06T01:22:19.515Z"}
+{"kind":"smbDelivered","payload":{"bg":150,"floorActivated":false,"insulinReq":1.16,"iob":1.1099999999999999,"minutesSinceWindowOpen":null,"units":0.55},"timestamp":"2026-08-06T01:27:16.753Z"}
+{"kind":"smbDelivered","payload":{"bg":150,"floorActivated":false,"insulinReq":0.31,"iob":1.053,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-08-06T01:52:20.464Z"}
+{"kind":"smbDelivered","payload":{"bg":144,"floorActivated":false,"insulinReq":0.4,"iob":0.8400000000000001,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-08-06T02:12:16.567Z"}
+{"kind":"smbDelivered","payload":{"bg":145,"floorActivated":false,"insulinReq":0.27,"iob":1.092,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-08-06T02:17:17.193Z"}
+{"kind":"smbDelivered","payload":{"bg":145,"floorActivated":false,"insulinReq":0.1,"iob":1.147,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-08-06T02:27:18.488Z"}
+{"kind":"smbDelivered","payload":{"bg":146,"floorActivated":false,"insulinReq":0.32999999999999996,"iob":1,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-08-06T02:32:17.224Z"}
+{"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Work","overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35","percentage":80,"targetMgdL":120},"timestamp":"2026-08-06T02:52:46.487Z"}
