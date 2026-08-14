@@ -82,3 +82,11 @@
 {"kind":"smbDelivered","payload":{"bg":149,"floorActivated":false,"insulinReq":0.8800000000000001,"iob":0.28700000000000003,"minutesSinceWindowOpen":null,"units":0.4},"timestamp":"2026-08-11T03:12:25.094Z"}
 {"kind":"smbDelivered","payload":{"bg":152,"floorActivated":false,"insulinReq":1.21,"iob":0.098,"minutesSinceWindowOpen":null,"units":0.6},"timestamp":"2026-08-11T03:17:27.588Z"}
 {"kind":"smbDelivered","payload":{"bg":144,"floorActivated":false,"insulinReq":0.44000000000000006,"iob":-0.039,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-08-11T03:22:25.465Z"}
+{"kind":"smbDelivered","payload":{"bg":135,"floorActivated":false,"insulinReq":0.25,"iob":-0.16999999999999998,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-08-11T03:27:23.744Z"}
+{"kind":"smbDelivered","payload":{"bg":144,"floorActivated":false,"insulinReq":0.85,"iob":-0.021,"minutesSinceWindowOpen":null,"units":0.4},"timestamp":"2026-08-11T03:37:26.232Z"}
+{"kind":"smbDelivered","payload":{"bg":149,"floorActivated":false,"insulinReq":0.9400000000000001,"iob":0.507,"minutesSinceWindowOpen":null,"units":0.45},"timestamp":"2026-08-11T03:42:24.432Z"}
+{"kind":"smbDelivered","payload":{"bg":147,"floorActivated":false,"insulinReq":0.19,"iob":1.009,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-08-11T03:52:22.820Z"}
+{"kind":"smbDelivered","payload":{"bg":148,"floorActivated":false,"insulinReq":0.16999999999999998,"iob":1.083,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-08-11T03:57:25.298Z"}
+{"kind":"smbDelivered","payload":{"bg":150,"floorActivated":false,"insulinReq":0.32999999999999996,"iob":1.105,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-08-11T04:02:24.458Z"}
+{"kind":"smbDelivered","payload":{"bg":140,"floorActivated":false,"insulinReq":0.15,"iob":0.884,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-08-11T04:42:27.876Z"}
+{"kind":"smbDelivered","payload":{"bg":132,"floorActivated":false,"insulinReq":0.32999999999999996,"iob":0.6809999999999999,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-08-11T04:57:23.784Z"}
