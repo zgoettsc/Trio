@@ -1,0 +1,6 @@
+{"kind":"overrideCancelled","payload":{"overrideId":"EDC9BE8D-295E-438C-ACD9-C2EE0CCB0E35"},"timestamp":"2026-09-05T06:41:46.859Z"}
+{"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Running","overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5","percentage":75,"targetMgdL":160},"timestamp":"2026-09-05T06:41:46.859Z"}
+{"kind":"overrideStarted","payload":{"durationMinutes":0,"name":"Running","overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5","percentage":75,"targetMgdL":160},"timestamp":"2026-09-05T08:41:20.474Z"}
+{"kind":"overrideCancelled","payload":{"overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5"},"timestamp":"2026-09-05T11:24:28.351Z"}
+{"kind":"smbDelivered","payload":{"bg":229,"floorActivated":false,"insulinReq":2.9,"iob":-0.23600000000000004,"minutesSinceWindowOpen":null,"units":1.1},"timestamp":"2026-09-05T11:24:28.350Z"}
+{"kind":"userBolus","payload":{"duringMealWindow":false,"isSMB":false,"units":1.8},"timestamp":"2026-09-05T11:26:46.438Z"}
