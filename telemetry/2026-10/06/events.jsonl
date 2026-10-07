@@ -62,3 +62,11 @@
 {"kind":"smbDelivered","payload":{"bg":186,"floorActivated":false,"insulinReq":0.8800000000000001,"iob":2.197,"minutesSinceWindowOpen":null,"units":0.4},"timestamp":"2026-10-07T02:48:38.191Z"}
 {"kind":"smbDelivered","payload":{"bg":192,"floorActivated":false,"insulinReq":1.27,"iob":2.482,"minutesSinceWindowOpen":null,"units":0.6},"timestamp":"2026-10-07T02:58:40.068Z"}
 {"kind":"smbDelivered","payload":{"bg":202,"floorActivated":false,"insulinReq":2.2800000000000002,"iob":2.806,"minutesSinceWindowOpen":null,"units":1.1},"timestamp":"2026-10-07T03:03:39.657Z"}
+{"kind":"smbDelivered","payload":{"bg":203,"floorActivated":false,"insulinReq":0.16999999999999998,"iob":2.719,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-10-07T03:29:03.125Z"}
+{"kind":"smbDelivered","payload":{"bg":208,"floorActivated":false,"insulinReq":1.04,"iob":2.5490000000000004,"minutesSinceWindowOpen":null,"units":0.5},"timestamp":"2026-10-07T03:33:54.843Z"}
+{"kind":"smbDelivered","payload":{"bg":219,"floorActivated":false,"insulinReq":1.83,"iob":3.085,"minutesSinceWindowOpen":null,"units":0.9},"timestamp":"2026-10-07T03:38:42.226Z"}
+{"kind":"smbDelivered","payload":{"bg":192,"floorActivated":false,"insulinReq":0.3,"iob":2.348,"minutesSinceWindowOpen":null,"units":0.15},"timestamp":"2026-10-07T04:13:38.704Z"}
+{"kind":"smbDelivered","payload":{"bg":182,"floorActivated":false,"insulinReq":0.16999999999999998,"iob":1.779,"minutesSinceWindowOpen":null,"units":0.05},"timestamp":"2026-10-07T04:28:46.418Z"}
+{"kind":"smbDelivered","payload":{"bg":170,"floorActivated":false,"insulinReq":0.41,"iob":1.564,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-10-07T04:48:41.706Z"}
+{"kind":"smbDelivered","payload":{"bg":168,"floorActivated":false,"insulinReq":0.27999999999999997,"iob":1.52,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-10-07T04:53:41.862Z"}
+{"kind":"smbDelivered","payload":{"bg":169,"floorActivated":false,"insulinReq":0.48,"iob":1.4300000000000002,"minutesSinceWindowOpen":null,"units":0.2},"timestamp":"2026-10-07T04:58:40.298Z"}
