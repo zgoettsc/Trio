@@ -2,8 +2,13 @@
 
 function generate(iob, currenttemp, glucose, profile, autosens = null, meal = null, microbolusAllowed = false, reservoir = null, clock = new Date(), pump_history, preferences, basalProfile, trio_custom_oref_variables) {
 
-    var clock = new Date();
-    
+    // S0.2 determinism: honour the clock the caller passes (ISO-8601 string or epoch ms)
+    // instead of overwriting it with wall-clock time. Falls back to wall-clock time only
+    // when nothing usable was supplied, which keeps live behaviour identical to before
+    // (the app passes "now") while making replay of recorded loops deterministic.
+    var parsedClock = (clock !== undefined && clock !== null) ? new Date(clock) : new Date();
+    clock = isNaN(parsedClock.getTime()) ? new Date() : parsedClock;
+
     var middleware_was_used = "";
     try {
         var middlewareReason = middleware(iob, currenttemp, glucose, profile, autosens, meal, reservoir, clock, pump_history, preferences, basalProfile, trio_custom_oref_variables);

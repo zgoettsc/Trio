@@ -1,0 +1,65 @@
+name: Algorithm tests
+
+# Plan step S0.2/S0.4: runs on every push and PR that touches the dosing algorithm,
+# its JavaScript, the Node harness, or the AlgorithmKit package. Not gated on the
+# repository owner (unlike unit_tests.yml) so it runs on this fork.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Trio/Resources/javascript/**'
+      - 'trio-oref/**'
+      - 'tools/jsharness/**'
+      - 'AlgorithmKit/**'
+      - 'scripts/check-bundle-parity.sh'
+      - '.github/workflows/algorithm_tests.yml'
+  pull_request:
+    paths:
+      - 'Trio/Resources/javascript/**'
+      - 'trio-oref/**'
+      - 'tools/jsharness/**'
+      - 'AlgorithmKit/**'
+      - 'scripts/check-bundle-parity.sh'
+      - '.github/workflows/algorithm_tests.yml'
+
+jobs:
+  js-determinism:
+    name: JS determinism (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the check compares against the baseline commit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Determinism and behaviour-neutrality checks
+        run: node tools/jsharness/check-determinism.js
+
+  algorithmkit:
+    name: AlgorithmKit (Swift, macOS)
+    runs-on: macos-15
+    env:
+      TZ: UTC # fixtures are generated in UTC; JSOrefCore refuses to run under another zone
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Bundle parity (app vs package copies of the JavaScript)
+        run: scripts/check-bundle-parity.sh
+      - name: Toolchain
+        run: swift --version && xcodebuild -version
+      - name: Build
+        run: swift build --package-path AlgorithmKit -v 2>&1 | tail -40
+      - name: Test
+        run: swift test --package-path AlgorithmKit 2>&1 | tail -80
+      - name: trio-replay smoke
+        run: |
+          swift run --package-path AlgorithmKit trio-replay fingerprint | head -c 600; echo
+          node -e '
+            const f = require("./AlgorithmKit/Tests/AlgorithmKitTests/Fixtures/scenarios/rising_smb_capped_at_basal_x_30min.json");
+            const tick = Object.assign({ clock: f.clock, timeZone: f.timeZone }, f.inputs);
+            require("fs").writeFileSync("tick.json", JSON.stringify(tick));
+          '
+          swift run --package-path AlgorithmKit trio-replay tick tick.json | head -c 400; echo

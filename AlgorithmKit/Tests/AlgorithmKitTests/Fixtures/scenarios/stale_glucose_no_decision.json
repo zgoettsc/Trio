@@ -1,0 +1,1714 @@
+{
+  "name": "stale_glucose_no_decision",
+  "note": "determine-basal.js:534-579 — newest reading older than 12 minutes → no new temp.",
+  "clock": "2026-09-15T13:20:00.000Z",
+  "timeZone": "UTC",
+  "inputs": {
+    "glucose": [
+      {
+        "date": 1789477080000,
+        "dateString": "2026-09-15T12:58:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000000"
+      },
+      {
+        "date": 1789476780000,
+        "dateString": "2026-09-15T12:53:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000001"
+      },
+      {
+        "date": 1789476480000,
+        "dateString": "2026-09-15T12:48:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000002"
+      },
+      {
+        "date": 1789476180000,
+        "dateString": "2026-09-15T12:43:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      {
+        "date": 1789475880000,
+        "dateString": "2026-09-15T12:38:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000004"
+      },
+      {
+        "date": 1789475580000,
+        "dateString": "2026-09-15T12:33:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000005"
+      },
+      {
+        "date": 1789475280000,
+        "dateString": "2026-09-15T12:28:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000006"
+      },
+      {
+        "date": 1789474980000,
+        "dateString": "2026-09-15T12:23:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000007"
+      },
+      {
+        "date": 1789474680000,
+        "dateString": "2026-09-15T12:18:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000008"
+      },
+      {
+        "date": 1789474380000,
+        "dateString": "2026-09-15T12:13:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000009"
+      },
+      {
+        "date": 1789474080000,
+        "dateString": "2026-09-15T12:08:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000010"
+      },
+      {
+        "date": 1789473780000,
+        "dateString": "2026-09-15T12:03:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000011"
+      },
+      {
+        "date": 1789473480000,
+        "dateString": "2026-09-15T11:58:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000012"
+      },
+      {
+        "date": 1789473180000,
+        "dateString": "2026-09-15T11:53:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000013"
+      },
+      {
+        "date": 1789472880000,
+        "dateString": "2026-09-15T11:48:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000014"
+      },
+      {
+        "date": 1789472580000,
+        "dateString": "2026-09-15T11:43:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000015"
+      },
+      {
+        "date": 1789472280000,
+        "dateString": "2026-09-15T11:38:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000016"
+      },
+      {
+        "date": 1789471980000,
+        "dateString": "2026-09-15T11:33:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000017"
+      },
+      {
+        "date": 1789471680000,
+        "dateString": "2026-09-15T11:28:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000018"
+      },
+      {
+        "date": 1789471380000,
+        "dateString": "2026-09-15T11:23:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000019"
+      },
+      {
+        "date": 1789471080000,
+        "dateString": "2026-09-15T11:18:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000020"
+      },
+      {
+        "date": 1789470780000,
+        "dateString": "2026-09-15T11:13:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000021"
+      },
+      {
+        "date": 1789470480000,
+        "dateString": "2026-09-15T11:08:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000022"
+      },
+      {
+        "date": 1789470180000,
+        "dateString": "2026-09-15T11:03:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000023"
+      },
+      {
+        "date": 1789469880000,
+        "dateString": "2026-09-15T10:58:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000024"
+      },
+      {
+        "date": 1789469580000,
+        "dateString": "2026-09-15T10:53:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000025"
+      },
+      {
+        "date": 1789469280000,
+        "dateString": "2026-09-15T10:48:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000026"
+      },
+      {
+        "date": 1789468980000,
+        "dateString": "2026-09-15T10:43:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000027"
+      },
+      {
+        "date": 1789468680000,
+        "dateString": "2026-09-15T10:38:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000028"
+      },
+      {
+        "date": 1789468380000,
+        "dateString": "2026-09-15T10:33:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000029"
+      },
+      {
+        "date": 1789468080000,
+        "dateString": "2026-09-15T10:28:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000030"
+      },
+      {
+        "date": 1789467780000,
+        "dateString": "2026-09-15T10:23:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000031"
+      },
+      {
+        "date": 1789467480000,
+        "dateString": "2026-09-15T10:18:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000032"
+      },
+      {
+        "date": 1789467180000,
+        "dateString": "2026-09-15T10:13:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000033"
+      },
+      {
+        "date": 1789466880000,
+        "dateString": "2026-09-15T10:08:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000034"
+      },
+      {
+        "date": 1789466580000,
+        "dateString": "2026-09-15T10:03:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000035"
+      },
+      {
+        "date": 1789466280000,
+        "dateString": "2026-09-15T09:58:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000036"
+      },
+      {
+        "date": 1789465980000,
+        "dateString": "2026-09-15T09:53:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000037"
+      },
+      {
+        "date": 1789465680000,
+        "dateString": "2026-09-15T09:48:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000038"
+      },
+      {
+        "date": 1789465380000,
+        "dateString": "2026-09-15T09:43:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000039"
+      },
+      {
+        "date": 1789465080000,
+        "dateString": "2026-09-15T09:38:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000040"
+      },
+      {
+        "date": 1789464780000,
+        "dateString": "2026-09-15T09:33:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000041"
+      },
+      {
+        "date": 1789464480000,
+        "dateString": "2026-09-15T09:28:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000042"
+      },
+      {
+        "date": 1789464180000,
+        "dateString": "2026-09-15T09:23:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000043"
+      },
+      {
+        "date": 1789463880000,
+        "dateString": "2026-09-15T09:18:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000044"
+      },
+      {
+        "date": 1789463580000,
+        "dateString": "2026-09-15T09:13:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000045"
+      },
+      {
+        "date": 1789463280000,
+        "dateString": "2026-09-15T09:08:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000046"
+      },
+      {
+        "date": 1789462980000,
+        "dateString": "2026-09-15T09:03:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000047"
+      },
+      {
+        "date": 1789462680000,
+        "dateString": "2026-09-15T08:58:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000048"
+      },
+      {
+        "date": 1789462380000,
+        "dateString": "2026-09-15T08:53:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000049"
+      },
+      {
+        "date": 1789462080000,
+        "dateString": "2026-09-15T08:48:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000050"
+      },
+      {
+        "date": 1789461780000,
+        "dateString": "2026-09-15T08:43:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000051"
+      },
+      {
+        "date": 1789461480000,
+        "dateString": "2026-09-15T08:38:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000052"
+      },
+      {
+        "date": 1789461180000,
+        "dateString": "2026-09-15T08:33:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000053"
+      },
+      {
+        "date": 1789460880000,
+        "dateString": "2026-09-15T08:28:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000054"
+      },
+      {
+        "date": 1789460580000,
+        "dateString": "2026-09-15T08:23:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000055"
+      },
+      {
+        "date": 1789460280000,
+        "dateString": "2026-09-15T08:18:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000056"
+      },
+      {
+        "date": 1789459980000,
+        "dateString": "2026-09-15T08:13:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000057"
+      },
+      {
+        "date": 1789459680000,
+        "dateString": "2026-09-15T08:08:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000058"
+      },
+      {
+        "date": 1789459380000,
+        "dateString": "2026-09-15T08:03:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000059"
+      },
+      {
+        "date": 1789459080000,
+        "dateString": "2026-09-15T07:58:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000060"
+      },
+      {
+        "date": 1789458780000,
+        "dateString": "2026-09-15T07:53:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000061"
+      },
+      {
+        "date": 1789458480000,
+        "dateString": "2026-09-15T07:48:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000062"
+      },
+      {
+        "date": 1789458180000,
+        "dateString": "2026-09-15T07:43:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000063"
+      },
+      {
+        "date": 1789457880000,
+        "dateString": "2026-09-15T07:38:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000064"
+      },
+      {
+        "date": 1789457580000,
+        "dateString": "2026-09-15T07:33:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000065"
+      },
+      {
+        "date": 1789457280000,
+        "dateString": "2026-09-15T07:28:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000066"
+      },
+      {
+        "date": 1789456980000,
+        "dateString": "2026-09-15T07:23:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000067"
+      },
+      {
+        "date": 1789456680000,
+        "dateString": "2026-09-15T07:18:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000068"
+      },
+      {
+        "date": 1789456380000,
+        "dateString": "2026-09-15T07:13:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000069"
+      },
+      {
+        "date": 1789456080000,
+        "dateString": "2026-09-15T07:08:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000070"
+      },
+      {
+        "date": 1789455780000,
+        "dateString": "2026-09-15T07:03:00.000Z",
+        "sgv": 110,
+        "direction": "Flat",
+        "type": "sgv",
+        "id": "00000000-0000-4000-8000-000000000071"
+      }
+    ],
+    "pumpHistory": [],
+    "carbs": [],
+    "profile": {
+      "max_iob": 6,
+      "max_daily_safety_multiplier": 3,
+      "current_basal_safety_multiplier": 4,
+      "autosens_max": 1.2,
+      "autosens_min": 0.7,
+      "rewind_resets_autosens": true,
+      "high_temptarget_raises_sensitivity": false,
+      "low_temptarget_lowers_sensitivity": false,
+      "sensitivity_raises_target": false,
+      "resistance_lowers_target": false,
+      "exercise_mode": false,
+      "half_basal_exercise_target": 160,
+      "maxCOB": 120,
+      "maxMealAbsorptionTime": 6,
+      "skip_neutral_temps": false,
+      "unsuspend_if_no_temp": false,
+      "min_5m_carbimpact": 8,
+      "autotune_isf_adjustmentFraction": 1,
+      "remainingCarbsFraction": 1,
+      "remainingCarbsCap": 90,
+      "enableUAM": true,
+      "A52_risk_enable": false,
+      "enableSMB_with_COB": false,
+      "enableSMB_with_temptarget": false,
+      "enableSMB_always": true,
+      "enableSMB_after_carbs": false,
+      "enableSMB_high_bg": false,
+      "enableSMB_high_bg_target": 110,
+      "allowSMB_with_high_temptarget": false,
+      "maxSMBBasalMinutes": 30,
+      "maxUAMSMBBasalMinutes": 30,
+      "SMBInterval": 3,
+      "bolus_increment": 0.1,
+      "maxDelta_bg_threshold": 0.2,
+      "curve": "rapid-acting",
+      "useCustomPeakTime": false,
+      "insulinPeakTime": 75,
+      "carbsReqThreshold": 1,
+      "offline_hotspot": false,
+      "noisyCGMTargetMultiplier": 1.3,
+      "suspend_zeros_iob": true,
+      "enableEnliteBgproxy": false,
+      "calc_glucose_noise": false,
+      "target_bg": false,
+      "smb_delivery_ratio": 0.5,
+      "adjustmentFactor": 0.8,
+      "adjustmentFactorSigmoid": 0.5,
+      "useNewFormula": false,
+      "sigmoid": false,
+      "weightPercentage": 0.35,
+      "tddAdjBasal": false,
+      "threshold_setting": 60,
+      "dia": 6,
+      "model": "722",
+      "current_basal": 1,
+      "basalprofile": [
+        {
+          "start": "00:00:00",
+          "minutes": 0,
+          "rate": 1
+        }
+      ],
+      "max_daily_basal": 1,
+      "max_basal": 4,
+      "out_units": "mg/dL",
+      "min_bg": 100,
+      "max_bg": 100,
+      "bg_targets": {
+        "units": "mg/dL",
+        "user_preferred_units": "mg/dL",
+        "targets": [
+          {
+            "low": 100,
+            "high": 100,
+            "start": "00:00:00",
+            "offset": 0,
+            "max_bg": 100,
+            "min_bg": 100
+          }
+        ]
+      },
+      "sens": 50,
+      "isfProfile": {
+        "units": "mg/dL",
+        "user_preferred_units": "mg/dL",
+        "sensitivities": [
+          {
+            "sensitivity": 50,
+            "offset": 0,
+            "start": "00:00:00",
+            "endOffset": 1440
+          }
+        ]
+      },
+      "carb_ratio": 10,
+      "carb_ratios": {
+        "units": "grams",
+        "schedule": [
+          {
+            "start": "00:00:00",
+            "offset": 0,
+            "ratio": 10
+          }
+        ]
+      }
+    },
+    "basalProfile": [
+      {
+        "start": "00:00:00",
+        "minutes": 0,
+        "rate": 1
+      }
+    ],
+    "autosens": {
+      "ratio": 1
+    },
+    "reservoir": 300,
+    "preferences": {
+      "max_iob": 6,
+      "max_daily_safety_multiplier": 3,
+      "current_basal_safety_multiplier": 4,
+      "autosens_max": 1.2,
+      "autosens_min": 0.7,
+      "smb_delivery_ratio": 0.5,
+      "rewind_resets_autosens": true,
+      "high_temptarget_raises_sensitivity": false,
+      "low_temptarget_lowers_sensitivity": false,
+      "sensitivity_raises_target": false,
+      "resistance_lowers_target": false,
+      "adv_target_adjustments": false,
+      "exercise_mode": false,
+      "half_basal_exercise_target": 160,
+      "maxCOB": 120,
+      "maxMealAbsorptionTime": 6,
+      "wide_bg_target_range": false,
+      "skip_neutral_temps": false,
+      "unsuspend_if_no_temp": false,
+      "min_5m_carbimpact": 8,
+      "autotune_isf_adjustmentFraction": 1,
+      "remainingCarbsFraction": 1,
+      "remainingCarbsCap": 90,
+      "enableUAM": true,
+      "A52_risk_enable": false,
+      "enableSMB_with_COB": false,
+      "enableSMB_with_temptarget": false,
+      "enableSMB_always": true,
+      "enableSMB_after_carbs": false,
+      "allowSMB_with_high_temptarget": false,
+      "maxSMBBasalMinutes": 30,
+      "maxUAMSMBBasalMinutes": 30,
+      "SMBInterval": 3,
+      "bolus_increment": 0.1,
+      "curve": "rapid-acting",
+      "useCustomPeakTime": false,
+      "insulinPeakTime": 75,
+      "carbsReqThreshold": 1,
+      "noisyCGMTargetMultiplier": 1.3,
+      "suspend_zeros_iob": true,
+      "maxDelta_bg_threshold": 0.2,
+      "adjustmentFactor": 0.8,
+      "adjustmentFactorSigmoid": 0.5,
+      "sigmoid": false,
+      "useNewFormula": false,
+      "useWeightedAverage": false,
+      "weightPercentage": 0.35,
+      "tddAdjBasal": false,
+      "enableSMB_high_bg": false,
+      "enableSMB_high_bg_target": 110,
+      "threshold_setting": 60,
+      "updateInterval": 20
+    },
+    "trioCustomOrefVariables": {
+      "average_total_data": 0,
+      "currentTDD": 0,
+      "weightedAverage": 1,
+      "past2hoursAverage": 0,
+      "date": "2026-09-15T13:00:00.000Z",
+      "overridePercentage": 100,
+      "useOverride": false,
+      "duration": 0,
+      "unlimited": true,
+      "overrideTarget": 0,
+      "smbIsOff": false,
+      "advancedSettings": false,
+      "isfAndCr": false,
+      "isf": false,
+      "cr": false,
+      "smbIsScheduledOff": false,
+      "start": 0,
+      "end": 0,
+      "smbMinutes": 30,
+      "uamMinutes": 30,
+      "toughMealActive": false,
+      "toughMealMinutesRemaining": 0,
+      "toughMealStartingBG": 0,
+      "toughMealIOBAtDose": 0,
+      "toughMealFatPlusProtein": 0,
+      "toughMealAutoDetected": false,
+      "mealWindowActive": false,
+      "mealWindowMinutesRemaining": 0,
+      "mealWindowEstimatedCarbs": 0,
+      "mealWindowCarbsConfirmed": false,
+      "mealWindowBoostSMBRatio": true,
+      "mealWindowSMBRatioValue": 0.8,
+      "mealWindowRelaxRisingGuard": true,
+      "mealWindowAdditiveFloor": false,
+      "mealWindowForceUAM": true,
+      "mealWindowPhantomCOB": false,
+      "mealWindowPhantomCOBGrams": 20,
+      "mealWindowSMBMinutesMultiplier": 2,
+      "mealWindowToughMealCapPercent": 75,
+      "mealWindowCOBDecayMultiplier": 1,
+      "mealWindowAutoPhantomCOBLevel": 0
+    },
+    "currentTemp": {
+      "duration": 0,
+      "rate": 0,
+      "temp": "absolute",
+      "timestamp": "2026-09-15T13:00:00.000Z"
+    },
+    "microBolusAllowed": true
+  },
+  "expected": {
+    "iob": [
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:00:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:00:00.000Z"
+        },
+        "lastBolusTime": 0,
+        "lastTemp": {
+          "date": 0
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:05:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:05:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:10:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:10:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:15:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:15:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:20:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:20:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:25:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:25:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:30:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:30:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:35:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:35:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:40:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:40:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:45:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:45:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:50:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:50:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T13:55:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T13:55:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:00:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:00:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:05:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:05:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:10:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:10:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:15:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:15:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:20:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:20:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:25:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:25:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:30:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:30:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:35:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:35:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:40:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:40:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:45:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:45:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:50:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:50:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T14:55:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T14:55:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:00:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:00:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:05:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:05:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:10:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:10:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:15:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:15:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:20:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:20:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:25:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:25:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:30:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:30:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:35:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:35:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:40:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:40:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:45:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:45:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:50:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:50:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T15:55:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T15:55:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:00:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:00:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:05:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:05:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:10:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:10:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:15:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:15:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:20:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:20:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:25:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:25:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:30:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:30:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:35:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:35:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:40:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:40:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:45:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:45:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:50:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:50:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T16:55:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T16:55:00.000Z"
+        }
+      }
+    ],
+    "meal": {
+      "carbs": 0,
+      "nsCarbs": 0,
+      "bwCarbs": 0,
+      "journalCarbs": 0,
+      "mealCOB": 0,
+      "currentDeviation": 0,
+      "maxDeviation": 0,
+      "minDeviation": 0,
+      "slopeFromMaxDeviation": 0,
+      "slopeFromMinDeviation": 0,
+      "allDeviations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "lastCarbTime": 0,
+      "bwFound": false
+    },
+    "determination": {
+      "reason": "If current system time Tue Sep 15 2026 13:20:00 GMT+0000 (Coordinated Universal Time) is correct, then BG data is too old. The last BG data was read 22m ago at Tue Sep 15 2026 12:58:00 GMT+0000 (Coordinated Universal Time). Temp 0 <= current basal 1U/hr; doing nothing. "
+    }
+  },
+  "assertions": [
+    {
+      "field": "reason",
+      "op": "contains",
+      "value": "BG data is too old"
+    }
+  ]
+}

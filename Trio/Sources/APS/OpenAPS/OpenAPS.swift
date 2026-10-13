@@ -497,6 +497,7 @@ final class OpenAPS {
             meal: meal,
             microBolusAllowed: true,
             reservoir: reservoir,
+            clock: clock,
             pumpHistory: pumpHistoryJSON,
             preferences: preferences,
             basalProfile: basalProfile,
@@ -914,6 +915,7 @@ final class OpenAPS {
         meal: JSON,
         microBolusAllowed: Bool,
         reservoir: JSON,
+        clock: Date,
         pumpHistory: JSON,
         preferences: JSON,
         basalProfile: JSON,
@@ -942,7 +944,10 @@ final class OpenAPS {
                     meal,
                     microBolusAllowed,
                     reservoir,
-                    Date(),
+                    // S0.2 determinism: the loop clock (captured once in APSManager.determineBasal)
+                    // is what the JS now honours; previously the wrapper overwrote it with
+                    // wall-clock time, which made recorded loops impossible to replay exactly.
+                    clock,
                     pumpHistory,
                     preferences,
                     basalProfile,
