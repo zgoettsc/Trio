@@ -816,82 +816,6 @@
         "bolusiob": 0,
         "netbasalinsulin": 0,
         "bolusinsulin": 0,
-        "time": "2026-09-15T13:00:00.000Z",
-        "iobWithZeroTemp": {
-          "iob": 0,
-          "activity": 0,
-          "basaliob": 0,
-          "bolusiob": 0,
-          "netbasalinsulin": 0,
-          "bolusinsulin": 0,
-          "time": "2026-09-15T13:00:00.000Z"
-        },
-        "lastBolusTime": 0,
-        "lastTemp": {
-          "date": 0
-        }
-      },
-      {
-        "iob": 0,
-        "activity": 0,
-        "basaliob": 0,
-        "bolusiob": 0,
-        "netbasalinsulin": 0,
-        "bolusinsulin": 0,
-        "time": "2026-09-15T13:05:00.000Z",
-        "iobWithZeroTemp": {
-          "iob": 0,
-          "activity": 0,
-          "basaliob": 0,
-          "bolusiob": 0,
-          "netbasalinsulin": 0,
-          "bolusinsulin": 0,
-          "time": "2026-09-15T13:05:00.000Z"
-        }
-      },
-      {
-        "iob": 0,
-        "activity": 0,
-        "basaliob": 0,
-        "bolusiob": 0,
-        "netbasalinsulin": 0,
-        "bolusinsulin": 0,
-        "time": "2026-09-15T13:10:00.000Z",
-        "iobWithZeroTemp": {
-          "iob": 0,
-          "activity": 0,
-          "basaliob": 0,
-          "bolusiob": 0,
-          "netbasalinsulin": 0,
-          "bolusinsulin": 0,
-          "time": "2026-09-15T13:10:00.000Z"
-        }
-      },
-      {
-        "iob": 0,
-        "activity": 0,
-        "basaliob": 0,
-        "bolusiob": 0,
-        "netbasalinsulin": 0,
-        "bolusinsulin": 0,
-        "time": "2026-09-15T13:15:00.000Z",
-        "iobWithZeroTemp": {
-          "iob": 0,
-          "activity": 0,
-          "basaliob": 0,
-          "bolusiob": 0,
-          "netbasalinsulin": 0,
-          "bolusinsulin": 0,
-          "time": "2026-09-15T13:15:00.000Z"
-        }
-      },
-      {
-        "iob": 0,
-        "activity": 0,
-        "basaliob": 0,
-        "bolusiob": 0,
-        "netbasalinsulin": 0,
-        "bolusinsulin": 0,
         "time": "2026-09-15T13:20:00.000Z",
         "iobWithZeroTemp": {
           "iob": 0,
@@ -901,6 +825,10 @@
           "netbasalinsulin": 0,
           "bolusinsulin": 0,
           "time": "2026-09-15T13:20:00.000Z"
+        },
+        "lastBolusTime": 0,
+        "lastTemp": {
+          "date": 0
         }
       },
       {
@@ -1676,6 +1604,78 @@
           "bolusinsulin": 0,
           "time": "2026-09-15T16:55:00.000Z"
         }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T17:00:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T17:00:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T17:05:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T17:05:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T17:10:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T17:10:00.000Z"
+        }
+      },
+      {
+        "iob": 0,
+        "activity": 0,
+        "basaliob": 0,
+        "bolusiob": 0,
+        "netbasalinsulin": 0,
+        "bolusinsulin": 0,
+        "time": "2026-09-15T17:15:00.000Z",
+        "iobWithZeroTemp": {
+          "iob": 0,
+          "activity": 0,
+          "basaliob": 0,
+          "bolusiob": 0,
+          "netbasalinsulin": 0,
+          "bolusinsulin": 0,
+          "time": "2026-09-15T17:15:00.000Z"
+        }
       }
     ],
     "meal": {
@@ -1690,10 +1690,6 @@
       "slopeFromMaxDeviation": 0,
       "slopeFromMinDeviation": 0,
       "allDeviations": [
-        0,
-        0,
-        0,
-        0,
         0,
         0
       ],

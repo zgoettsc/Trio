@@ -180,10 +180,17 @@ public final class JSOrefCore: DosingCore {
     /// JavaScriptCore resolves local time from the process time zone; switching it per call is
     /// not reliable, so the core refuses to run under a different zone than requested.
     static func requireProcessTimeZone(_ timeZone: TimeZone) throws {
-        let current = TimeZone.current.identifier
-        guard current == timeZone.identifier else {
-            throw DosingCoreError.timeZoneMismatch(requested: timeZone.identifier, process: current)
+        let current = TimeZone.current
+        guard canonicalZoneName(current) == canonicalZoneName(timeZone) else {
+            throw DosingCoreError.timeZoneMismatch(requested: timeZone.identifier, process: current.identifier)
         }
+    }
+
+    /// "UTC", "GMT", "Etc/UTC" and "Etc/GMT" are the same zone (Foundation reports `TZ=UTC` as "GMT").
+    static func canonicalZoneName(_ zone: TimeZone) -> String {
+        let id = zone.identifier
+        if ["UTC", "GMT", "Etc/UTC", "Etc/GMT", "Etc/Universal", "Universal", "Zulu"].contains(id) { return "UTC" }
+        return id
     }
 
     static func jsonString(_ s: String) -> String {

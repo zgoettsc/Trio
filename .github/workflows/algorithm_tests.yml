@@ -51,9 +51,15 @@ jobs:
       - name: Toolchain
         run: swift --version && xcodebuild -version
       - name: Build
-        run: swift build --package-path AlgorithmKit -v 2>&1 | tail -40
+        run: |
+          set -o pipefail
+          swift build --package-path AlgorithmKit -v 2>&1 | tail -40
       - name: Test
-        run: swift test --package-path AlgorithmKit 2>&1 | tail -80
+        run: |
+          set -o pipefail
+          swift test --package-path AlgorithmKit 2>&1 | tee test.log | tail -80
+          # Defence in depth: a masked failure must never read as green.
+          if grep -q "with [1-9][0-9]* failures" test.log; then echo "::error::test failures present in log"; exit 1; fi
       - name: trio-replay smoke
         run: |
           swift run --package-path AlgorithmKit trio-replay fingerprint | head -c 600; echo

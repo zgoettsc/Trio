@@ -86,10 +86,14 @@ for (const sc of scenarios) {
     inputs.meal = meal;
     res = { inputs, result: runner.determineBasal(inputs, T0), iob: inputs.iob, meal };
   } else if (sc.loop.clockOffsetMin) {
+    // Glucose/pump data generated at T0, but the loop runs later: iob and meal must be
+    // recomputed at the shifted clock, exactly as the app (and JSOrefCore.run) do.
     const base = runLoop({ clockMs: T0, runner, ...sc.loop });
     const clock = synth.iso(clockMs);
-    const inputs = { ...base.inputs, clock };
-    res = { inputs, result: runner.determineBasal(inputs, clockMs), iob: inputs.iob, meal: inputs.meal };
+    const iob = runner.iob({ pumpHistory: base.inputs.pumpHistory, profile: base.inputs.profile, clock, autosens: base.inputs.autosens }, clockMs).value;
+    const meal = runner.meal({ pumpHistory: base.inputs.pumpHistory, profile: base.inputs.profile, clock, glucose: base.inputs.glucose, basalProfile: base.inputs.basalProfile, carbs: base.inputs.carbs || [] }, clockMs).value;
+    const inputs = { ...base.inputs, clock, iob, meal };
+    res = { inputs, result: runner.determineBasal(inputs, clockMs), iob, meal };
   } else {
     res = runLoop({ clockMs, runner, ...sc.loop });
   }
