@@ -1,10 +1,18 @@
+import AlgorithmCore
 import Combine
 import CoreData
 import Foundation
 import JavaScriptCore
+import JSOrefCore
 
 final class OpenAPS {
     private let jsWorker = JavaScriptWorker()
+
+    /// S0.2: the dosing core (`iob → meal → determine-basal`) as a pure function from the
+    /// AlgorithmKit package, evaluating byte-identical scripts to the in-app bundle
+    /// (`scripts/check-bundle-parity.sh`). `nil` only if the package resources failed to
+    /// load, in which case the original in-app JavaScript path below is used unchanged.
+    private let core: DosingCore?
     private let processQueue = DispatchQueue(label: "OpenAPS.processQueue", qos: .utility)
 
     private let storage: FileStorage
@@ -21,9 +29,25 @@ final class OpenAPS {
     private(set) var lastRawMealWindowAppliedSnippet: String?
     private(set) var lastRawMealWindowFloorSnippet: String?
 
-    init(storage: FileStorage, tddStorage: TDDStorage) {
+    init(storage: FileStorage, tddStorage: TDDStorage, core: DosingCore? = nil) {
         self.storage = storage
         self.tddStorage = tddStorage
+        if let core {
+            self.core = core
+        } else {
+            do {
+                self.core = try JSOrefCore(
+                    gitSHA: BuildDetails.shared.trioCommitSHA,
+                    logSink: { batch, lines in
+                        // Keep the oref console output in the app log, as JavaScriptWorker does.
+                        lines.forEach { debug(.openAPS, "\(batch).js: \($0)") }
+                    }
+                )
+            } catch {
+                warning(.openAPS, "AlgorithmKit core unavailable (\(error)); using in-app JavaScript path")
+                self.core = nil
+            }
+        }
     }
 
     static let dateFormatter: ISO8601DateFormatter = {
@@ -456,29 +480,6 @@ final class OpenAPS {
             try hasSufficientTddForDynamic
         )
 
-        // Meal calculation
-        let meal = try await self.meal(
-            pumphistory: pumpHistoryJSON,
-            profile: profile,
-            basalProfile: basalProfile,
-            clock: clock,
-            carbs: carbsAsJSON,
-            glucose: glucoseAsJSON
-        )
-
-        // IOB calculation
-        let iob = try await self.iob(
-            pumphistory: pumpHistoryJSON,
-            profile: profile,
-            clock: clock,
-            autosens: autosens.isEmpty ? .null : autosens
-        )
-
-        // TODO: refactor this to core data
-        if !simulation {
-            storage.save(iob, as: Monitor.iob)
-        }
-
         var preferences = await preferencesAsync
 
         if !hasSufficientTdd, preferences.useNewFormula || (preferences.useNewFormula && preferences.sigmoid) {
@@ -487,22 +488,78 @@ final class OpenAPS {
             preferences.sigmoid = false
         }
 
-        // Determine basal
-        let orefDetermination = try await determineBasal(
-            glucose: glucoseAsJSON,
-            currentTemp: tempBasal,
-            iob: iob,
-            profile: profile,
-            autosens: autosens.isEmpty ? .null : autosens,
-            meal: meal,
-            microBolusAllowed: true,
-            reservoir: reservoir,
-            clock: clock,
-            pumpHistory: pumpHistoryJSON,
-            preferences: preferences,
-            basalProfile: basalProfile,
-            trioCustomOrefVariables: trioCustomOrefVariables
-        )
+        let autosensJSON: RawJSON = autosens.isEmpty ? .null : autosens
+        let orefDetermination: RawJSON
+
+        if let core {
+            // S0.2: run the core as a pure function of the assembled inputs and the loop clock.
+            // Same documents, same order, same scripts as the in-app path below.
+            let inputs = LoopInputs(
+                glucose: RawJSONDocument(glucoseAsJSON),
+                pumpHistory: RawJSONDocument(pumpHistoryJSON),
+                carbs: RawJSONDocument(carbsAsJSON),
+                profile: RawJSONDocument(profile),
+                basalProfile: RawJSONDocument(basalProfile),
+                autosens: RawJSONDocument(autosensJSON),
+                reservoir: RawJSONDocument(reservoir),
+                preferences: RawJSONDocument(preferences.rawJSON),
+                trioCustomOrefVariables: RawJSONDocument(trioCustomOrefVariables),
+                currentTemp: RawJSONDocument(tempBasal),
+                microBolusAllowed: true
+            )
+            let output: CoreOutput
+            do {
+                output = try core.run(inputs, clock: clock, timeZone: TimeZone.current)
+            } catch {
+                debug(.openAPS, "\(DebuggingIdentifiers.failed) dosing core failed: \(error)")
+                throw APSError.apsError(message: "Dosing core failed: \(error)")
+            }
+            // TODO: refactor this to core data
+            if !simulation {
+                storage.save(output.iob.text, as: Monitor.iob)
+            }
+            orefDetermination = output.determination.text
+        } else {
+            // Meal calculation
+            let meal = try await self.meal(
+                pumphistory: pumpHistoryJSON,
+                profile: profile,
+                basalProfile: basalProfile,
+                clock: clock,
+                carbs: carbsAsJSON,
+                glucose: glucoseAsJSON
+            )
+
+            // IOB calculation
+            let iob = try await self.iob(
+                pumphistory: pumpHistoryJSON,
+                profile: profile,
+                clock: clock,
+                autosens: autosensJSON
+            )
+
+            // TODO: refactor this to core data
+            if !simulation {
+                storage.save(iob, as: Monitor.iob)
+            }
+
+            // Determine basal
+            orefDetermination = try await determineBasal(
+                glucose: glucoseAsJSON,
+                currentTemp: tempBasal,
+                iob: iob,
+                profile: profile,
+                autosens: autosensJSON,
+                meal: meal,
+                microBolusAllowed: true,
+                reservoir: reservoir,
+                clock: clock,
+                pumpHistory: pumpHistoryJSON,
+                preferences: preferences,
+                basalProfile: basalProfile,
+                trioCustomOrefVariables: trioCustomOrefVariables
+            )
+        }
 
         debug(.openAPS, "\(simulation ? "[SIMULATION]" : "") OREF DETERMINATION: \(orefDetermination)")
 
