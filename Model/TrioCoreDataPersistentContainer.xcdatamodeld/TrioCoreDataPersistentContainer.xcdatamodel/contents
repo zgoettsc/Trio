@@ -82,6 +82,10 @@
         <attribute name="isUploadedToNS" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
         <attribute name="isUploadedToTidepool" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
         <attribute name="smoothedGlucose" optional="YES" attributeType="Decimal"/>
+        <attribute name="noise" optional="YES" attributeType="Integer 16" usesScalarValueType="NO"/>
+        <attribute name="device" optional="YES" attributeType="String"/>
+        <attribute name="isCalibration" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="sessionStart" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <fetchIndex name="byDate">
             <fetchIndexElement property="date" type="Binary" order="ascending"/>
         </fetchIndex>
@@ -151,6 +155,10 @@
         <attribute name="threshold" optional="YES" attributeType="Decimal" defaultValueString="0.0"/>
         <attribute name="timestamp" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="timestampEnacted" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="minGuardBG" optional="YES" attributeType="Decimal"/>
+        <attribute name="minPredBG" optional="YES" attributeType="Decimal"/>
+        <attribute name="proposalSMB" optional="YES" attributeType="Decimal"/>
+        <attribute name="proposalRate" optional="YES" attributeType="Decimal"/>
         <relationship name="forecasts" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Forecast" inverseName="orefDetermination" inverseEntity="Forecast"/>
         <fetchIndex name="byDate">
             <fetchIndexElement property="deliverAt" type="Binary" order="descending"/>

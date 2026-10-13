@@ -15,6 +15,11 @@ public extension GlucoseStored {
     @NSManaged var isUploadedToNS: Bool
     @NSManaged var isUploadedToTidepool: Bool
     @NSManaged var smoothedGlucose: NSDecimalNumber?
+    /// S0.3a — CGM quality fields (nil when the source does not supply them, e.g. plugin CGMs).
+    @NSManaged var noise: NSNumber?
+    @NSManaged var device: String?
+    @NSManaged var isCalibration: Bool
+    @NSManaged var sessionStart: Date?
 }
 
 extension GlucoseStored: Identifiable {}

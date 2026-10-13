@@ -37,6 +37,12 @@ public extension OrefDetermination {
     @NSManaged var threshold: NSDecimalNumber?
     @NSManaged var timestamp: Date?
     @NSManaged var timestampEnacted: Date?
+    /// S0.3a — guard values from the determination and, once a pipeline exists (S0.6), the
+    /// core's own proposal before any stage adjusted it. Nil until written.
+    @NSManaged var minGuardBG: NSDecimalNumber?
+    @NSManaged var minPredBG: NSDecimalNumber?
+    @NSManaged var proposalSMB: NSDecimalNumber?
+    @NSManaged var proposalRate: NSDecimalNumber?
     @NSManaged var forecasts: Set<Forecast>?
 }
 

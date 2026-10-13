@@ -109,6 +109,9 @@ final class OpenAPS {
             newOrefDetermination.smbToDeliver = determination.units.map { NSDecimalNumber(decimal: $0) }
             newOrefDetermination.carbsRequired = Int16(Int(determination.carbsReq ?? 0))
             newOrefDetermination.isUploadedToNS = false
+            // S0.3a: guard values the replay harness scores; proposal* stay nil until S0.6.
+            newOrefDetermination.minGuardBG = self.decimalToNSDecimalNumber(determination.minGuardBG)
+            newOrefDetermination.minPredBG = self.decimalToNSDecimalNumber(determination.minPredBG)
 
             if let predictions = determination.predictions {
                 ["iob": predictions.iob, "zt": predictions.zt, "cob": predictions.cob, "uam": predictions.uam]
