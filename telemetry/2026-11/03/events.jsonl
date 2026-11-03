@@ -1,0 +1,4 @@
+{"kind":"overrideCancelled","payload":{"overrideId":"C87BC11C-74C3-4935-95C2-C1793E1FBCF5"},"timestamp":"2026-11-03T12:21:36.566Z"}
+{"kind":"smbDelivered","payload":{"bg":153,"floorActivated":false,"insulinReq":0.24,"iob":-0.05700000000000001,"minutesSinceWindowOpen":null,"units":0.1},"timestamp":"2026-11-03T12:21:36.563Z"}
+{"kind":"smbDelivered","payload":{"bg":164,"floorActivated":false,"insulinReq":1.46,"iob":0.083,"minutesSinceWindowOpen":null,"units":0.7},"timestamp":"2026-11-03T12:26:37.076Z"}
+{"kind":"smbDelivered","payload":{"bg":168,"floorActivated":false,"insulinReq":0.79,"iob":0.9730000000000001,"minutesSinceWindowOpen":null,"units":0.35},"timestamp":"2026-11-03T12:31:35.983Z"}
