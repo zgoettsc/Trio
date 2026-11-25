@@ -300,9 +300,9 @@ weeks, which is what "critical" should feel like.
 
 **Owner's choices for night mode.** Night: both set hours and Focus, if
 possible. Critical low: below 65. A persistent high wakes him only if above
-250 for 3 to 4 hours. On the record the low threshold as stated would fire
-more often than "critical" should; a "still falling or not recovering"
-condition is to be settled with him.
+250 for 3 to 4 hours. Agreed refinement: critical low at night = below 65 and (still falling, or
+not recovering after 10 to 15 minutes, or insulin already cut and still
+dropping). A brief dip that turns around by itself stays silent.
 
 ## 16. Pod change before bed when expiry falls at night — idea
 
@@ -321,7 +321,36 @@ a change before bed, with several reminders.
   tonight". Reminders stop once a pod change is detected.
 - At pod start, show when the pod will expire and whether that is at night.
 - Time to expiry on the watch face when under a day.
-- What the Omnipod driver allows for expiry reminder timing and silencing
-  pod beeps is to be checked in the driver code.
 
 Display and reminders only; optional like every reminder.
+
+**What the Omnipod driver allows (OmnipodKit at the commit this fork pins).**
+- Pod timeline in the code: 72 h nominal life; then a 7-hour expiration
+  advisory window (72 to 79 h); then a 1-hour end-of-service-imminent
+  window (79 to 80 h); at 80 h the pod's service time ends and "a fault is
+  triggered if this time is reached before pod deactivation". The pod stops
+  delivering at that point.
+- The driver has a **Silence Pod** setting with an optional **end time**.
+  When on: "All Pod alerts use no beeps and confirmation reminder beeps are
+  suppressed. The Pod will only beep for fatal Pod faults and when playing
+  test beeps." So the expiry advisory and the imminent warning can be
+  silenced; the 80-hour stop is a fault and will still sound.
+- The driver's own warning: with silence on, if the phone is out of range
+  of the pod there is no in-app notification and no beep.
+- The expiration reminder time is configurable in the driver (a default
+  offset in hours before expiry, or a chosen date).
+
+**So there are two cases, and the app should tell them apart:**
+1. *Only the 72-hour expiry falls at night, the 80-hour stop is after he
+   wakes.* Changing before bed is optional. Offer: "change this evening" or
+   "silence the pod until 7 am and change in the morning". Silencing uses
+   the driver's existing end-time feature; night mode keeps the phone and
+   watch quiet too.
+2. *The 80-hour stop falls at night.* Insulin would stop and the pod will
+   alarm regardless. The pod must be changed before bed; this is the firm
+   reminder, and "I'll take the risk tonight" is not offered.
+
+Silencing sends a command to the pod (alert configuration, not dosing): it
+needs the owner's tap each time, and the phone-out-of-range warning should
+be shown with it.
+
