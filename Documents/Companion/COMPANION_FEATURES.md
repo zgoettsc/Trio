@@ -268,3 +268,32 @@ on a rebound. Those are label problems, and one tap supplies the label.
 what he already knows. Every reminder-type feature is optional. Prompts are
 for things the app can see and he cannot, or for a one-tap action he would
 otherwise have to dig for.
+
+## 15. Protect sleep: night mode — agreed (direction)
+
+**Owner.** No interruptions to sleep unless absolutely critical. Overnight
+the app manages without user input. Night is set hours or taken from the
+phone's Focus setting.
+
+**Finding.** On the record, "glucose below 70" would wake him about every
+third night and is not a usable night threshold. A severe-low definition
+(well below 60, or low and not recovering) is roughly once every one to two
+weeks, which is what "critical" should feel like.
+
+**Design.**
+- Night = set hours, or a Focus/sleep mode being on, as the user chooses.
+- During night, levels 1 and 2 of the low alert, rise prompts, check-ins,
+  reminders and summaries are silent and collected into a morning summary.
+- The app acts without him only in the safe direction: suspend, end a
+  raised override, step "cautious overnight" back to normal. Nothing that
+  increases delivery beyond normal operation is started for him.
+- Only critical alerts sound: severe low or a fast fall toward it with
+  insulin already cut; a low that is not recovering; pump or pod failure,
+  occlusion, or the loop not running; optionally a persistent very high
+  glucose.
+- A critical alert must break through Focus and reach the watch with strong
+  vibration. Platform details (time-sensitive and critical alert
+  permissions, what an app can read about Focus, the watch's own sleep
+  mode) to be verified before building.
+- Fewer night alerts is mostly the algorithm's job: the quieter the night
+  dosing, the less there is to alert on.
