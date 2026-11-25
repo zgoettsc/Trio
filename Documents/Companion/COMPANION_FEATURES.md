@@ -235,3 +235,36 @@ Absorption and insulin were out of step in both directions.
 **Why it matters.** The gain from a prompt is in the cases where the loop
 is held back or should hold back: after a low, under a reducing override,
 on a rebound. Those are label problems, and one tap supplies the label.
+
+## 14. Smaller improvements found while reading this fork — agreed for the list
+
+1. **High and low alerts repeat on every reading.** In
+   `UserNotificationsManager.sendGlucoseNotification` the "already alerted"
+   check uses a token made from the single latest reading, so each new
+   reading while high or low is a new alert with sound unless snoozed.
+   Fix: alert per episode (once on crossing; again only after a set time or
+   if it worsens by a set amount). Display-only; the leveled low alert
+   needs the same episode logic.
+2. **Settings-change journal.** Log every change to therapy settings,
+   limits, autosens bounds and overrides with a timestamp, in the app and
+   in telemetry.
+3. **"Still on?" reminders, tied to glucose.** An override with no end, or
+   a raised limit, is always visible on the watch face. When glucose is
+   stable and in the normal range, ask whether to take the override off. A
+   time-based check-in is the fallback.
+4. **"Ate a while ago" entry.** After "Ate", offer just now / 30 min ago /
+   an hour ago / longer, so late entries land at the right time.
+5. **Unexplained-high check: optional, off by default.** Prompt to check
+   ketones and the pod or site when glucose stays high after correction
+   insulin has had time to act. The owner considers this babysitting.
+6. **Bedtime summary.** Glucose, trend, insulin and carbs on board, any
+   meal still expected, and whether "cautious overnight" looks warranted.
+7. **Telemetry for the new features.** Alerts fired and level, prompts and
+   answers, rescues, meal size and speed, override reasons.
+8. **Build on what the fork already has:** the AI insights module, therapy
+   profiles, SmartSense, Garmin context snapshots and rescue presets.
+
+**Principle (owner).** The app should not remind an experienced user of
+what he already knows. Every reminder-type feature is optional. Prompts are
+for things the app can see and he cannot, or for a one-tap action he would
+otherwise have to dig for.
