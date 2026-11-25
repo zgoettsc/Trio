@@ -297,3 +297,31 @@ weeks, which is what "critical" should feel like.
   mode) to be verified before building.
 - Fewer night alerts is mostly the algorithm's job: the quieter the night
   dosing, the less there is to alert on.
+
+**Owner's choices for night mode.** Night: both set hours and Focus, if
+possible. Critical low: below 65. A persistent high wakes him only if above
+250 for 3 to 4 hours. On the record the low threshold as stated would fire
+more often than "critical" should; a "still falling or not recovering"
+condition is to be settled with him.
+
+## 16. Pod change before bed when expiry falls at night — idea
+
+**Owner.** Pod expiry alarms are disruptive: escalating beeps, then a
+constant tone until the pod is deactivated, sometimes in the middle of the
+night. The app should see that expiry will fall in night hours and prompt
+a change before bed, with several reminders.
+
+**Design.**
+- From the pod start time the app knows the expiry and the hard stop after
+  the grace period. Each afternoon it checks whether either falls inside
+  tonight's night window.
+- If so: a heads-up in the afternoon, then reminders through the evening
+  that escalate toward bedtime, each with one-tap answers: "changing now",
+  "remind me in 30 min / 1 hour / after dinner", "I'll take the risk
+  tonight". Reminders stop once a pod change is detected.
+- At pod start, show when the pod will expire and whether that is at night.
+- Time to expiry on the watch face when under a day.
+- What the Omnipod driver allows for expiry reminder timing and silencing
+  pod beeps is to be checked in the driver code.
+
+Display and reminders only; optional like every reminder.
