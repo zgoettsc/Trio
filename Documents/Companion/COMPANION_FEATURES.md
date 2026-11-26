@@ -354,3 +354,35 @@ Silencing sends a command to the pod (alert configuration, not dosing): it
 needs the owner's tap each time, and the phone-out-of-range warning should
 be shown with it.
 
+
+## 17. Telemetry upload: reliable, and finishes when the user leaves the page — to do
+
+**Symptom (2026-11-26).** The telemetry screen showed GitHub "HTTP 403: you
+have exceeded a secondary rate limit". Owner's request: when he taps "Push
+Now", the upload must complete even if he leaves that page.
+
+**Cause, from the code** (`AlgorithmTelemetryManager.pushNow`,
+`AlgorithmTelemetryGitHubClient.pushFiles`):
+- Every push sends **every local telemetry file**, changed or not, and
+  makes one "create blob" request per file, back to back. GitHub limits
+  bursts of content-creating requests; as the number of files grows, a
+  single push trips the limit.
+- Pushes are triggered often (app foreground, meal-window events,
+  summaries), with only a 30-second debounce for most triggers.
+- A 403 is recorded as an error and nothing retries; GitHub's "retry
+  after" hint is not used.
+- "Push Now" runs in a task started by the screen, with no background-time
+  request, so leaving the app mid-push can cut it short.
+
+**Fix (not started; Trio work is paused).**
+1. Send only files that changed: compare each file's git blob hash with the
+   branch's current tree, and skip matches.
+2. Put file contents directly in the single "create tree" request instead
+   of one blob request per file (three requests per push instead of
+   dozens).
+3. On 403/429, wait as GitHub asks and retry a bounded number of times.
+4. Run a push under an iOS background task owned by the telemetry manager,
+   not the screen, so it finishes after the user leaves the page or the
+   app; show progress and the result on return.
+5. Show "last error" with its time, and clear it on the next success (it
+   already clears; the time is missing).
