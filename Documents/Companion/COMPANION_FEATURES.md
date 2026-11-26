@@ -386,3 +386,18 @@ Now", the upload must complete even if he leaves that page.
    app; show progress and the result on return.
 5. Show "last error" with its time, and clear it on the next success (it
    already clears; the time is missing).
+
+## 18. Warning when a manual bolus will exceed max IOB — agreed
+
+**Background.** Max IOB limits what the loop adds automatically and caps
+the calculator's recommended bolus (recommendation is at most max IOB minus
+insulin on board, `BolusCalculationManager`). A typed amount is limited
+only by max bolus, so manual boluses can take insulin on board past the
+cap.
+
+**Owner's decision (2026-11-26).** Keep that behaviour. Add a warning when
+the amount about to be delivered would put insulin on board over the cap:
+"This will take insulin on board to X U, above your limit of Y U."
+He can continue; it is a heads-up, not a block. Applies wherever a bolus
+is confirmed (phone, and the watch if bolusing from it is ever added).
+A warning only: no change to what may be delivered.
